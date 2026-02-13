@@ -1,0 +1,12 @@
+{
+  "name": "aba-reach",
+  "version": "1.5.0",
+  "description": "ABA REACH - Real-time Engagement and Action Channel Hub",
+  "main": "worker.js",
+  "scripts": {
+    "start": "node worker.js"
+  },
+  "dependencies": {
+    "ws": "^8.16.0"
+  }
+}
