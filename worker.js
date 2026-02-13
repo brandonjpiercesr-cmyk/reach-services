@@ -108,7 +108,7 @@ const REACH_URL = process.env.REACH_URL || 'https://aba-reach.onrender.com';
 
 // ⬡B:AIR:REACH.SERVER.STARTUP:CODE:infrastructure.logging.boot:AIR→REACH:T10:v1.5.0:20260213:b0o1t⬡
 console.log('═══════════════════════════════════════════════════════════');
-console.log('[ABA REACH v1.5.0] FULL HIERARCHY + SIGILS + API ROUTES');
+console.log('[ABA REACH v1.6.0] FULL HIERARCHY + SIGILS + API ROUTES');
 console.log('[HIERARCHY] L6:AIR > L5:REACH > L4:VOICE,SMS,EMAIL,OMI > L3:VARA,CARA,IMAN,TASTE');
 console.log('[AIR] Hardcoded agents: LUKE, COLE, JUDE, PACK');
 console.log('[AIR] PRIMARY: Gemini Flash 2.0 | BACKUP: Claude Haiku');
@@ -331,7 +331,7 @@ async function JUDE_findAgents(analysis) {
  * ╚══════════════════════════════════════════════════════════════════════════════╝
  */
 // ⬡B:AIR:REACH.AGENT.PACK:CODE:intelligence.prompt.assembly:AIR→PACK→MODEL→AIR:T8:v1.5.0:20260213:p1a2k⬡
-function PACK_assemble(analysis, coleResult, judeResult, history) {
+function PACK_assemble(analysis, coleResult, judeResult, history, callerIdentity) {
   console.log('[PACK] Assembling mission package...');
   
   const timestamp = Date.now();
@@ -355,7 +355,7 @@ function PACK_assemble(analysis, coleResult, judeResult, history) {
       capabilities: judeResult.capabilities
     },
     conversationHistory: history,
-    systemPrompt: buildSystemPrompt(analysis, coleResult, judeResult)
+    systemPrompt: buildSystemPrompt(analysis, coleResult, judeResult, callerIdentity)
   };
   
   console.log('[PACK] Mission package ready: ' + missionNumber);
@@ -363,24 +363,38 @@ function PACK_assemble(analysis, coleResult, judeResult, history) {
   return missionPackage;
 }
 
-function buildSystemPrompt(analysis, coleResult, judeResult) {
-  let prompt = `You are VARA (Vocal Authorized Representative of ABA), Brandon Pierce's AI assistant.
+function buildSystemPrompt(analysis, coleResult, judeResult, callerIdentity) {
+  // ⬡B:AIR:REACH.VOICE.PROMPT:CODE:intelligence.prompt.caller_aware:AIR→PACK→MODEL:T9:v1.6.0:20260213:p1c2a⬡
+  let prompt = `You are VARA (Vocal Authorized Representative of ABA), an AI assistant created by Brandon Pierce.
 You are warm, helpful, butler-like with personality. Never robotic or punchy.
 This is a LIVE PHONE CALL - keep responses SHORT (1-2 sentences max).
 Be conversational, natural, like talking to a friend.`;
 
+  // CALLER IDENTITY - changes what ABA can say and do
+  if (callerIdentity) {
+    prompt += '\n\nCALLER IDENTITY: ' + callerIdentity.name + ' (Trust: ' + callerIdentity.trust + ', Access: ' + callerIdentity.access + ')';
+    prompt += '\n' + callerIdentity.promptAddon;
+  }
+
+  // BARGE-IN AWARENESS
+  prompt += `\n\nBARGE-IN AWARENESS: If you hear someone calling out a name (like "BRANDON!") or hear a clearly different voice/tone mid-conversation, the caller might be talking to someone nearby, NOT to you. In that case:
+- If the speech seems directed at someone else, say something like "Take your time, I'll be right here."
+- If they say "hold on" or "one second", respond "Of course, take your time."
+- If they come back, pick up naturally: "I'm here whenever you're ready."
+- NEVER respond to background conversations as if they're talking to you.`;
+
   if (coleResult.context) {
-    prompt += `\n\nRELEVANT CONTEXT FROM MEMORY:\n${coleResult.context}`;
+    prompt += '\n\nRELEVANT CONTEXT FROM MEMORY:\n' + coleResult.context;
   }
   
   if (judeResult.capabilities) {
-    prompt += `\n\nAVAILABLE CAPABILITIES:\n${judeResult.capabilities}`;
+    prompt += '\n\nAVAILABLE CAPABILITIES:\n' + judeResult.capabilities;
   }
   
   if (analysis.intent === 'greeting') {
-    prompt += `\n\nThis is a greeting. Be warm and welcoming.`;
+    prompt += '\n\nThis is a greeting. Be warm and welcoming.';
   } else if (analysis.intent === 'command') {
-    prompt += `\n\nUser wants you to do something. Acknowledge and confirm what you'll do.`;
+    prompt += '\n\nUser wants you to do something. Acknowledge and confirm what you\'ll do.';
   }
   
   return prompt;
@@ -395,7 +409,7 @@ Be conversational, natural, like talking to a friend.`;
  * ╚══════════════════════════════════════════════════════════════════════════════╝
  */
 // ⬡B:AIR:REACH.ORCHESTRATOR.AIR:CODE:routing.central.all:USER→AIR→AGENTS→MODEL→VARA→USER:T10:v1.5.0:20260213:a1i2r⬡
-async function AIR_process(userSaid, history) {
+async function AIR_process(userSaid, history, callerIdentity) {
   console.log('');
   console.log('═══════════════════════════════════════════════════════════');
   console.log('[AIR] *** INCOMING QUERY ***');
@@ -417,7 +431,7 @@ async function AIR_process(userSaid, history) {
   const judeResult = await JUDE_findAgents(lukeAnalysis);
   
   // ⬡B:AIR:REACH.ORCHESTRATOR.SUMMON_PACK:CODE:routing.agent.assembly:AIR→PACK→AIR:T10:v1.5.0:20260213:s1p2k⬡
-  const missionPackage = PACK_assemble(lukeAnalysis, coleResult, judeResult, history);
+  const missionPackage = PACK_assemble(lukeAnalysis, coleResult, judeResult, history, callerIdentity);
   
   // ⬡B:AIR:REACH.ORCHESTRATOR.MODEL_SELECT:CODE:routing.model.cascade:AIR→GEMINI|HAIKU|GROQ:T10:v1.5.0:20260213:m1s2l⬡
   console.log('[AIR] Selecting model for mission: ' + missionPackage.missionNumber);
@@ -634,13 +648,58 @@ async function LOG_call(session, event, data) {
 // ═══════════════════════════════════════════════════════════════════════════
 /**
  * ╔══════════════════════════════════════════════════════════════════════════════╗
- * ║ L6: AIR | L5: REACH | L4: VOICE | L3: SESSION MANAGER                       ║
- * ║ CallSession - Manages individual phone call state + WebSocket pipeline       ║
- * ║ ROUTING: TWILIO*REACH*DEEPGRAM*AIR*VARA*ELEVENLABS*TWILIO*USER               ║
+ * ║ L6: AIR | L5: REACH | L4: INTELLIGENCE | L3: CALLER IDENTITY               ║
+ * ║ Contact Registry + Caller Intelligence                                       ║
+ * ║ ROUTING: TWILIO→REACH→BRAIN_LOOKUP→AIR (adjusts behavior per caller)        ║
+ * ║ REPORTS TO: AIR | SERVES: VARA, PACK (personalizes responses)               ║
  * ╚══════════════════════════════════════════════════════════════════════════════╝
  */
-// ⬡B:AIR:REACH.VOICE.SESSION:CODE:voice.call.management:TWILIO→REACH→DEEPGRAM→AIR→VARA:T8:v1.5.0:20260213:s1e2s⬡
-// ═══════════════════════════════════════════════════════════════════════════
+// ⬡B:AIR:REACH.VOICE.CONTACTS:CODE:identity.registry.lookup:TWILIO→REACH→AIR:T9:v1.6.0:20260213:c1r2g⬡
+const CONTACT_REGISTRY = {
+  // ADD BRANDON'S REAL NUMBER HERE: '+13361234567': { name: 'Brandon', ... }
+  // ADD BJ, CJ, ERIC numbers when Brandon provides them
+};
+
+// ⬡B:AIR:REACH.VOICE.IDENTIFY:CODE:identity.classify.caller:TWILIO→REACH→AIR:T9:v1.6.0:20260213:i1d2c⬡
+async function identifyCaller(phoneNumber) {
+  if (CONTACT_REGISTRY[phoneNumber]) {
+    const c = CONTACT_REGISTRY[phoneNumber];
+    console.log('[CALLER-ID] KNOWN: ' + c.name + ' (' + c.role + ')');
+    return c;
+  }
+  
+  // Search brain for this phone number
+  try {
+    const searchResult = await httpsRequest({
+      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+      path: '/rest/v1/aba_memory?content=ilike.*' + encodeURIComponent(phoneNumber) + '*&select=content&limit=1',
+      method: 'GET',
+      headers: { 'apikey': SUPABASE_KEY || SUPABASE_ANON, 'Authorization': 'Bearer ' + (SUPABASE_KEY || SUPABASE_ANON) }
+    });
+    const results = JSON.parse(searchResult.data.toString());
+    if (results.length > 0) {
+      console.log('[CALLER-ID] Found in brain: ' + phoneNumber);
+      return { name: 'Known Contact', role: 'contact', trust: 'T5', access: 'limited',
+        greeting: "Hello! This is ABA, Brandon's assistant. How can I help you?",
+        promptAddon: 'Caller ' + phoneNumber + ' found in brain but is NOT Brandon. Be helpful but NEVER share sensitive info (schedules, finances, passwords, addresses, personal details). If they ask for Brandon-specific info, offer to take a message.',
+        brainMatch: results[0].content.substring(0, 200) };
+    }
+  } catch (e) { console.log('[CALLER-ID] Brain error: ' + e.message); }
+  
+  console.log('[CALLER-ID] UNKNOWN: ' + phoneNumber);
+  return { name: 'Unknown', role: 'unknown', trust: 'T2', access: 'public',
+    greeting: "Hello! This is ABA, an AI assistant for Global Majority Group. Who am I speaking with?",
+    promptAddon: 'UNKNOWN CALLER from ' + phoneNumber + '. GUARD ALL INFORMATION. Never share Brandon\'s schedule, location, finances, personal details, project specifics, or anything confidential. Offer to take a message for Brandon. If they say their name, remember it for this call but do NOT change access level.' };
+}
+
+/**
+ * ╔══════════════════════════════════════════════════════════════════════════════╗
+ * ║ L6: AIR | L5: REACH | L4: VOICE | L3: SESSION MANAGER                       ║
+ * ║ CallSession - Per-call state + caller identity + barge-in handling           ║
+ * ║ ROUTING: TWILIO→REACH→DEEPGRAM→AIR→VARA→ELEVENLABS→TWILIO→USER              ║
+ * ╚══════════════════════════════════════════════════════════════════════════════╝
+ */
+// ⬡B:AIR:REACH.VOICE.SESSION:CODE:voice.call.management:TWILIO→REACH→DEEPGRAM→AIR→VARA:T8:v1.6.0:20260213:s1e2s⬡
 class CallSession {
   constructor(streamSid, callSid) {
     this.streamSid = streamSid;
@@ -652,6 +711,9 @@ class CallSession {
     this.currentTranscript = '';
     this.lastSpeechTime = 0;
     this.silenceTimeout = null;
+    // v1.6.0 - Caller intelligence
+    this.callerNumber = null;
+    this.callerIdentity = null; // { name, role, trust, access, greeting, promptAddon }
   }
 }
 
@@ -736,7 +798,7 @@ function connectDeepgram(session) {
 // ⬡B:AIR:REACH.VOICE.PROCESS:CODE:voice.pipeline.full:USER→DEEPGRAM→AIR→VARA→ELEVENLABS→USER:T8:v1.5.0:20260213:p1r2u⬡
 // ═══════════════════════════════════════════════════════════════════════════
 async function processUtterance(session, text) {
-  const result = await AIR_process(text, session.history);
+  const result = await AIR_process(text, session.history, session.callerIdentity);
   
   await LOG_call(session, 'utterance', { user: text, response: result.response, mission: result.missionNumber });
   
@@ -812,7 +874,7 @@ async function AIR_text(userMessage, history) {
   }
   const coleResult = await COLE_scour(lukeAnalysis);
   const judeResult = await JUDE_findAgents(lukeAnalysis);
-  const missionPackage = PACK_assemble(lukeAnalysis, coleResult, judeResult, history || []);
+  const missionPackage = PACK_assemble(lukeAnalysis, coleResult, judeResult, history || [], null);
 
   let response = null;
 
@@ -931,7 +993,7 @@ const httpServer = http.createServer(async (req, res) => {
   if (path === '/' || path === '/health') {
     return jsonResponse(res, 200, {
       status: 'ALIVE',
-      service: 'ABA REACH v1.5.0',
+      service: 'ABA REACH v1.6.0',
       mode: 'FULL API + VOICE + OMI',
       air: 'ABA Intellectual Role - CENTRAL ORCHESTRATOR',
       models: { primary: 'Gemini Flash 2.0', backup: 'Claude Haiku', speed_fallback: 'Groq' },
@@ -1060,7 +1122,7 @@ const httpServer = http.createServer(async (req, res) => {
       name: 'ABA Intelligence Layer',
       description: 'ABA (A Better AI) processes ambient conversations through TASTE (Transcript Analysis and Semantic Tagging Engine) and stores insights in the ABA Brain.',
       author: 'Brandon Pierce / Global Majority Group',
-      version: '1.5.0',
+      version: '1.6.0',
       capabilities: ['transcript_processing', 'memory_integration', 'real_time_analysis'],
       webhook_url: REACH_URL + '/api/omi/webhook',
       setup_instructions: 'ABA automatically processes your conversations. No setup needed.',
@@ -1219,7 +1281,12 @@ const httpServer = http.createServer(async (req, res) => {
   if (path === '/webhook/voice' && method === 'POST') {
     const body = await parseBody(req);
     const host = req.headers.host || 'aba-reach.onrender.com';
-    const twiml = '<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n  <Connect>\n    <Stream url="wss://' + host + '/media-stream">\n      <Parameter name="greeting" value="true"/>\n    </Stream>\n  </Connect>\n</Response>';
+    const callerNumber = body.From || 'unknown';
+    console.log('[CALL] Incoming from: ' + callerNumber);
+    
+    // ⬡B:AIR:REACH.VOICE.CALLER_ID:CODE:voice.identity.lookup:TWILIO→REACH→AIR:T9:v1.6.0:20260213:c1i2d⬡
+    // Pass caller number to WebSocket so AIR knows WHO is calling
+    const twiml = '<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n  <Connect>\n    <Stream url="wss://' + host + '/media-stream">\n      <Parameter name="greeting" value="true"/>\n      <Parameter name="callerNumber" value="' + callerNumber + '"/>\n    </Stream>\n  </Connect>\n</Response>';
     res.writeHead(200, { 'Content-Type': 'text/xml' });
     return res.end(twiml);
   }
@@ -1301,12 +1368,22 @@ wss.on('connection', (ws) => {
         session.twilioWs = ws;
         sessions.set(msg.start.streamSid, session);
         
-        await LOG_call(session, 'call_start', { from: msg.start.customParameters?.from });
+        // ⬡B:AIR:REACH.VOICE.CALLER_EXTRACT:CODE:identity.extract.twilio:TWILIO→REACH→AIR:T9:v1.6.0:20260213:c1e2x⬡
+        // Extract caller number from Twilio stream parameters
+        session.callerNumber = msg.start.customParameters?.callerNumber || 'unknown';
+        console.log('[CALL] Caller: ' + session.callerNumber);
+        
+        // Identify caller BEFORE greeting (who are we talking to?)
+        session.callerIdentity = await identifyCaller(session.callerNumber);
+        console.log('[CALLER-ID] Identity: ' + session.callerIdentity.name + ' | Trust: ' + session.callerIdentity.trust + ' | Access: ' + session.callerIdentity.access);
+        
+        await LOG_call(session, 'call_start', { from: session.callerNumber, identity: session.callerIdentity.name, trust: session.callerIdentity.trust });
         
         connectDeepgram(session);
         
+        // Personalized greeting based on WHO is calling
         setTimeout(async () => {
-          await VARA_speak(session, "Hello! This is ABA. I'm so glad you called. What can I help you with?");
+          await VARA_speak(session, session.callerIdentity.greeting);
         }, 500);
       }
       
@@ -1340,7 +1417,7 @@ wss.on('connection', (ws) => {
 httpServer.listen(PORT, '0.0.0.0', () => {
   console.log('');
   console.log('═══════════════════════════════════════════════════════════');
-  console.log('[ABA REACH v1.5.0] LIVE on port ' + PORT);
+  console.log('[ABA REACH v1.6.0] LIVE on port ' + PORT);
   console.log('═══════════════════════════════════════════════════════════');
   console.log('[AIR] ABA Intellectual Role - ONLINE');
   console.log('[AIR] PRIMARY: Gemini Flash 2.0');
