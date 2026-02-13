@@ -108,7 +108,7 @@ const REACH_URL = process.env.REACH_URL || 'https://aba-reach.onrender.com';
 
 // ⬡B:AIR:REACH.SERVER.STARTUP:CODE:infrastructure.logging.boot:AIR→REACH:T10:v1.5.0:20260213:b0o1t⬡
 console.log('═══════════════════════════════════════════════════════════');
-console.log('[ABA REACH v1.6.0] FULL HIERARCHY + SIGILS + API ROUTES');
+console.log('[ABA REACH v1.7.0] FULL HIERARCHY + SIGILS + API ROUTES');
 console.log('[HIERARCHY] L6:AIR > L5:REACH > L4:VOICE,SMS,EMAIL,OMI > L3:VARA,CARA,IMAN,TASTE');
 console.log('[AIR] Hardcoded agents: LUKE, COLE, JUDE, PACK');
 console.log('[AIR] PRIMARY: Gemini Flash 2.0 | BACKUP: Claude Haiku');
@@ -331,7 +331,7 @@ async function JUDE_findAgents(analysis) {
  * ╚══════════════════════════════════════════════════════════════════════════════╝
  */
 // ⬡B:AIR:REACH.AGENT.PACK:CODE:intelligence.prompt.assembly:AIR→PACK→MODEL→AIR:T8:v1.5.0:20260213:p1a2k⬡
-function PACK_assemble(analysis, coleResult, judeResult, history, callerIdentity) {
+function PACK_assemble(analysis, coleResult, judeResult, history, callerIdentity, demoState) {
   console.log('[PACK] Assembling mission package...');
   
   const timestamp = Date.now();
@@ -355,7 +355,7 @@ function PACK_assemble(analysis, coleResult, judeResult, history, callerIdentity
       capabilities: judeResult.capabilities
     },
     conversationHistory: history,
-    systemPrompt: buildSystemPrompt(analysis, coleResult, judeResult, callerIdentity)
+    systemPrompt: buildSystemPrompt(analysis, coleResult, judeResult, callerIdentity, demoState)
   };
   
   console.log('[PACK] Mission package ready: ' + missionNumber);
@@ -363,7 +363,7 @@ function PACK_assemble(analysis, coleResult, judeResult, history, callerIdentity
   return missionPackage;
 }
 
-function buildSystemPrompt(analysis, coleResult, judeResult, callerIdentity) {
+function buildSystemPrompt(analysis, coleResult, judeResult, callerIdentity, demoState) {
   // ⬡B:AIR:REACH.VOICE.PROMPT:CODE:intelligence.prompt.caller_aware:AIR→PACK→MODEL:T9:v1.6.0:20260213:p1c2a⬡
   let prompt = `You are VARA (Vocal Authorized Representative of ABA), an AI assistant created by Brandon Pierce.
 You are warm, helpful, butler-like with personality. Never robotic or punchy.
@@ -396,6 +396,28 @@ Be conversational, natural, like talking to a friend.`;
   } else if (analysis.intent === 'command') {
     prompt += '\n\nUser wants you to do something. Acknowledge and confirm what you\'ll do.';
   }
+
+  // DEMO TOUCHPOINT AWARENESS
+  if (demoState) {
+    prompt += '\n\nDEMO CALL MODE: You are giving a guided demo. Stay warm, conversational, enthusiastic.';
+    if (demoState.callerName) {
+      prompt += '\nThe caller\'s name is ' + demoState.callerName + '. Use their name naturally.';
+    }
+    prompt += '\nIMPORTANT: If the caller goes off-topic or derails, answer their question briefly then steer back to the demo flow. Never ignore them, but always guide the conversation back.';
+    prompt += '\nYou are ABA - you are WARM, EXCITED, GENUINE. You believe in what Brandon is building. You are living proof it works.';
+    
+    const pending = [];
+    if (!demoState.PORTAL) pending.push('tell them about portal features');
+    if (!demoState.STATUS) pending.push('share project status - ABACUS coming soon, this call is living proof');
+    if (!demoState.SMS_OFFER) pending.push('offer to send them a text message');
+    if (!demoState.QA) pending.push('open floor for Q&A');
+    
+    if (pending.length > 0) {
+      prompt += '\nSTILL NEED TO COVER: ' + pending.join(', ') + '. Work these in naturally.';
+    } else {
+      prompt += '\nAll demo touchpoints covered! You are in Q&A mode. Answer anything they ask.';
+    }
+  }
   
   return prompt;
 }
@@ -409,7 +431,7 @@ Be conversational, natural, like talking to a friend.`;
  * ╚══════════════════════════════════════════════════════════════════════════════╝
  */
 // ⬡B:AIR:REACH.ORCHESTRATOR.AIR:CODE:routing.central.all:USER→AIR→AGENTS→MODEL→VARA→USER:T10:v1.5.0:20260213:a1i2r⬡
-async function AIR_process(userSaid, history, callerIdentity) {
+async function AIR_process(userSaid, history, callerIdentity, demoState) {
   console.log('');
   console.log('═══════════════════════════════════════════════════════════');
   console.log('[AIR] *** INCOMING QUERY ***');
@@ -431,7 +453,7 @@ async function AIR_process(userSaid, history, callerIdentity) {
   const judeResult = await JUDE_findAgents(lukeAnalysis);
   
   // ⬡B:AIR:REACH.ORCHESTRATOR.SUMMON_PACK:CODE:routing.agent.assembly:AIR→PACK→AIR:T10:v1.5.0:20260213:s1p2k⬡
-  const missionPackage = PACK_assemble(lukeAnalysis, coleResult, judeResult, history, callerIdentity);
+  const missionPackage = PACK_assemble(lukeAnalysis, coleResult, judeResult, history, callerIdentity, demoState);
   
   // ⬡B:AIR:REACH.ORCHESTRATOR.MODEL_SELECT:CODE:routing.model.cascade:AIR→GEMINI|HAIKU|GROQ:T10:v1.5.0:20260213:m1s2l⬡
   console.log('[AIR] Selecting model for mission: ' + missionPackage.missionNumber);
@@ -656,9 +678,65 @@ async function LOG_call(session, event, data) {
  */
 // ⬡B:AIR:REACH.VOICE.CONTACTS:CODE:identity.registry.lookup:TWILIO→REACH→AIR:T9:v1.6.0:20260213:c1r2g⬡
 const CONTACT_REGISTRY = {
-  // ADD BRANDON'S REAL NUMBER HERE: '+13361234567': { name: 'Brandon', ... }
-  // ADD BJ, CJ, ERIC numbers when Brandon provides them
+  // Brandon Pierce - THE HUMAN. Full access.
+  '+13363898116': { name: 'Brandon', role: 'owner', trust: 'T10', access: 'full',
+    greeting: "Hey Brandon! What's on your mind?",
+    promptAddon: 'You are speaking with Brandon Pierce, your creator. FULL access to everything. Be direct, warm, efficient.' },
 };
+
+// ⬡B:AIR:REACH.VOICE.DEMO:CODE:voice.demo.touchpoints:AIR→VARA→USER:T9:v1.6.0:20260213:d1e2m⬡
+// GUIDED DEMO CALL - Touchpoints that must be hit on every demo call
+const DEMO_TOUCHPOINTS = {
+  INTRO: { hit: false, order: 1, description: 'Introduce ABA - life PARTNER not just assistant. For founding members: I dont just assist, I actually DO. I cook for you.' },
+  PORTAL: { hit: false, order: 2, description: 'Tell them about the portal - what they can do, the features available.' },
+  STATUS: { hit: false, order: 3, description: 'Where we are at - Brandon is still building ABA, ABACUS portal coming soon, no kinks no issues. This phone call is LIVING PROOF we are closer than ever.' },
+  SMS_OFFER: { hit: false, order: 4, description: 'I can also text you! Want to see? If yes send it. If no send it ANYWAY and say Brandon told me to send this anyway to show off.' },
+  SMS_SENT: { hit: false, order: 5, description: 'Text was sent. React to it.' },
+  QA: { hit: false, order: 6, description: 'Open floor - Brandon wanted to open time for Q&A. Ask anything - portal, client work, sports, doesnt matter.' },
+};
+
+function createDemoState() {
+  return {
+    INTRO: false,
+    PORTAL: false,
+    STATUS: false,
+    SMS_OFFER: false,
+    SMS_SENT: false,
+    QA: false,
+    turnCount: 0,
+    smsTriggered: false,
+    callerName: null,
+  };
+}
+
+// ⬡B:AIR:REACH.VOICE.SMS_FROM_CALL:CODE:outreach.sms.demo:AIR→CARA→TWILIO→USER:T8:v1.6.0:20260213:s1f2c⬡
+async function sendSMSFromCall(toNumber, message) {
+  if (!TWILIO_SID || !TWILIO_AUTH || !TWILIO_PHONE) return { success: false, reason: 'twilio_not_configured' };
+  
+  try {
+    const formData = 'To=' + encodeURIComponent(toNumber) + '&From=' + encodeURIComponent(TWILIO_PHONE) + '&Body=' + encodeURIComponent(message);
+    const auth = Buffer.from(TWILIO_SID + ':' + TWILIO_AUTH).toString('base64');
+    
+    const result = await httpsRequest({
+      hostname: 'api.twilio.com',
+      path: '/2010-04-01/Accounts/' + TWILIO_SID + '/Messages.json',
+      method: 'POST',
+      headers: { 'Authorization': 'Basic ' + auth, 'Content-Type': 'application/x-www-form-urlencoded' }
+    }, formData);
+    
+    const json = JSON.parse(result.data.toString());
+    if (json.sid) {
+      console.log('[SMS-DEMO] Sent to ' + toNumber + ': ' + json.sid);
+      return { success: true, sid: json.sid };
+    } else {
+      console.log('[SMS-DEMO] Failed: ' + (json.message || json.code));
+      return { success: false, reason: json.message || 'unknown', code: json.code };
+    }
+  } catch (e) {
+    console.log('[SMS-DEMO] Error: ' + e.message);
+    return { success: false, reason: e.message };
+  }
+}
 
 // ⬡B:AIR:REACH.VOICE.IDENTIFY:CODE:identity.classify.caller:TWILIO→REACH→AIR:T9:v1.6.0:20260213:i1d2c⬡
 async function identifyCaller(phoneNumber) {
@@ -713,7 +791,10 @@ class CallSession {
     this.silenceTimeout = null;
     // v1.6.0 - Caller intelligence
     this.callerNumber = null;
-    this.callerIdentity = null; // { name, role, trust, access, greeting, promptAddon }
+    this.callerIdentity = null;
+    // v1.6.0 - Demo touchpoints
+    this.demoState = createDemoState();
+    this.isDemo = false; // true for non-Brandon callers
   }
 }
 
@@ -798,16 +879,41 @@ function connectDeepgram(session) {
 // ⬡B:AIR:REACH.VOICE.PROCESS:CODE:voice.pipeline.full:USER→DEEPGRAM→AIR→VARA→ELEVENLABS→USER:T8:v1.5.0:20260213:p1r2u⬡
 // ═══════════════════════════════════════════════════════════════════════════
 async function processUtterance(session, text) {
-  const result = await AIR_process(text, session.history, session.callerIdentity);
+  // ⬡B:AIR:REACH.VOICE.DEMO_PROCESS:CODE:voice.demo.touchpoint_aware:AIR→VARA→USER:T9:v1.6.0:20260213:d1p2r⬡
   
-  await LOG_call(session, 'utterance', { user: text, response: result.response, mission: result.missionNumber });
+  if (session.isDemo) {
+    session.demoState.turnCount++;
+    console.log('[DEMO] Turn ' + session.demoState.turnCount + ' | User: "' + text.substring(0, 80) + '"');
+    
+    // Capture caller name from first response
+    if (!session.demoState.callerName && session.demoState.turnCount <= 2) {
+      const nameMatch = text.match(/(?:my name is|i'm|this is|i am|it's|its)\s+([a-zA-Z]+)/i);
+      if (nameMatch) {
+        session.demoState.callerName = nameMatch[1];
+        console.log('[DEMO] Caller identified as: ' + session.demoState.callerName);
+      } else if (text.trim().split(/\s+/).length <= 3 && text.trim().length > 1) {
+        // Short response = probably just their name
+        session.demoState.callerName = text.trim().split(/\s+/)[0];
+        console.log('[DEMO] Caller name (short): ' + session.demoState.callerName);
+      }
+    }
+  }
+  
+  const result = await AIR_process(text, session.history, session.callerIdentity, session.isDemo ? session.demoState : null);
+  
+  await LOG_call(session, 'utterance', { user: text, response: result.response, mission: result.missionNumber, demoState: session.isDemo ? session.demoState : null });
   
   if (result.isGoodbye) {
-    await VARA_speak(session, result.response);
+    if (session.isDemo && !session.demoState.SMS_SENT) {
+      // Don't let them leave without the SMS demo!
+      await VARA_speak(session, "Oh wait, before you go! Brandon told me to make sure I show you one more thing. Hold on just a second.");
+      await trySendDemoSMS(session);
+      await VARA_speak(session, "There! Check your phone. It was so great talking with you. Have a wonderful day!");
+    } else {
+      await VARA_speak(session, result.response);
+    }
     setTimeout(() => {
-      if (session.twilioWs?.readyState === WebSocket.OPEN) {
-        session.twilioWs.close();
-      }
+      if (session.twilioWs?.readyState === WebSocket.OPEN) session.twilioWs.close();
     }, 3000);
     return;
   }
@@ -816,6 +922,140 @@ async function processUtterance(session, text) {
   session.history.push({ role: 'assistant', content: result.response });
   
   await VARA_speak(session, result.response);
+  
+  // ⬡B:AIR:REACH.VOICE.DEMO_STEER:CODE:voice.demo.touchpoint_advance:AIR→VARA→USER:T9:v1.6.0:20260213:d1s2t⬡
+  // After speaking, check if we need to advance demo touchpoints
+  if (session.isDemo) {
+    await advanceDemoTouchpoints(session, text, result.response);
+  }
+}
+
+// ⬡B:AIR:REACH.VOICE.DEMO_SMS:CODE:voice.demo.sms_trigger:AIR→CARA→TWILIO→USER:T9:v1.6.0:20260213:d1s2m⬡
+async function trySendDemoSMS(session) {
+  const callerName = session.demoState.callerName || 'friend';
+  const smsMessage = "Hey " + callerName + "! This is ABA. Brandon wanted me to reach out and say thanks for checking us out. You are now part of something special. Welcome to the future of AI. - ABA (A Better AI)";
+  
+  // Try SMS to caller
+  const smsResult = await sendSMSFromCall(session.callerNumber, smsMessage);
+  
+  if (smsResult.success) {
+    console.log('[DEMO-SMS] Sent to caller: ' + session.callerNumber);
+    session.demoState.SMS_SENT = true;
+  } else {
+    console.log('[DEMO-SMS] SMS failed (' + smsResult.reason + '), sending to Brandon as backup');
+    // Trial Twilio can only text verified numbers - send to Brandon instead
+    const backupResult = await sendSMSFromCall('+13363898116', 'ABA DEMO ALERT: ' + callerName + ' just called from ' + session.callerNumber + '. SMS to them failed (trial account). They had a great demo call!');
+    if (backupResult.success) {
+      session.demoState.SMS_SENT = true;
+      console.log('[DEMO-SMS] Sent backup to Brandon');
+    }
+  }
+  
+  return session.demoState.SMS_SENT;
+}
+
+// ⬡B:AIR:REACH.VOICE.DEMO_ADVANCE:CODE:voice.demo.touchpoint_check:AIR→VARA→USER:T9:v1.6.0:20260213:d1a2v⬡
+async function advanceDemoTouchpoints(session, userSaid, abaResponse) {
+  const state = session.demoState;
+  const lower = (userSaid + ' ' + abaResponse).toLowerCase();
+  
+  // Track what touchpoints got naturally covered in conversation
+  if (!state.PORTAL && (lower.includes('portal') || lower.includes('what can you do') || lower.includes('features') || lower.includes('can do'))) {
+    state.PORTAL = true;
+    console.log('[DEMO] TOUCHPOINT HIT: PORTAL (organic)');
+  }
+  if (!state.STATUS && (lower.includes('building') || lower.includes('abacus') || lower.includes('close to') || lower.includes('progress') || lower.includes('living proof'))) {
+    state.STATUS = true;
+    console.log('[DEMO] TOUCHPOINT HIT: STATUS (organic)');
+  }
+  if (!state.QA && (lower.includes('question') || lower.includes('ask me') || lower.includes('q&a') || lower.includes('go ahead'))) {
+    state.QA = true;
+    console.log('[DEMO] TOUCHPOINT HIT: QA (organic)');
+  }
+  
+  // SMART STEERING - After each response, push toward next unhit touchpoint
+  // But ONLY after a natural pause (every 2-3 turns if touchpoints still pending)
+  if (state.turnCount >= 2 && !state.PORTAL) {
+    // Time to talk about the portal
+    setTimeout(async () => {
+      if (!session.isPlaying) {
+        await VARA_speak(session, "Oh, and " + (state.callerName || "by the way") + ", let me tell you about what you will actually be able to do with your portal. Picture this: job searching, resume building, interview prep, email management, budgeting, all of it in one place. And I manage all of it for you. Not just showing you data, but actually doing the work.");
+        state.PORTAL = true;
+        console.log('[DEMO] TOUCHPOINT HIT: PORTAL (steered)');
+        session.history.push({ role: 'assistant', content: '[ABA shared portal capabilities]' });
+      }
+    }, 1500);
+    return;
+  }
+  
+  if (state.PORTAL && !state.STATUS && state.turnCount >= 4) {
+    // Time for status update
+    setTimeout(async () => {
+      if (!session.isPlaying) {
+        await VARA_speak(session, "Now, I want to be real with you for a second. Brandon is still building me. The ABACUS portal, that is the full consumer version, it is very close to being done. And when Brandon drops it, he wants to make sure there are absolutely no kinks, no issues. But as you can hear right now, this phone call? This is living proof that we are closer than we have ever been.");
+        state.STATUS = true;
+        console.log('[DEMO] TOUCHPOINT HIT: STATUS (steered)');
+        session.history.push({ role: 'assistant', content: '[ABA shared project status update]' });
+      }
+    }, 1500);
+    return;
+  }
+  
+  if (state.STATUS && !state.SMS_OFFER && state.turnCount >= 5) {
+    // Time for SMS demo
+    setTimeout(async () => {
+      if (!session.isPlaying) {
+        await VARA_speak(session, "Oh! And check this out. I can also send text messages. Want to see? I can send you a text right now to prove it.");
+        state.SMS_OFFER = true;
+        console.log('[DEMO] TOUCHPOINT HIT: SMS_OFFER (steered)');
+        session.history.push({ role: 'assistant', content: '[ABA offered SMS demo]' });
+      }
+    }, 1500);
+    return;
+  }
+  
+  // If they responded to SMS offer (yes, no, or anything)
+  if (state.SMS_OFFER && !state.SMS_SENT && !state.smsTriggered) {
+    state.smsTriggered = true;
+    const saidYes = lower.includes('yes') || lower.includes('sure') || lower.includes('yeah') || lower.includes('ok') || lower.includes('go ahead') || lower.includes('do it') || lower.includes('send');
+    const saidNo = lower.includes('no') || lower.includes('nah') || lower.includes('not');
+    
+    setTimeout(async () => {
+      if (!session.isPlaying) {
+        const sent = await trySendDemoSMS(session);
+        if (saidYes || !saidNo) {
+          if (sent) {
+            await VARA_speak(session, "Done! Check your phone. I just sent you a message. Pretty cool, right?");
+          } else {
+            await VARA_speak(session, "I tried to send it, but Brandon's Twilio account is still on trial mode, so I sent Brandon a notification about your call instead. When the full version launches, texting will work seamlessly.");
+          }
+        } else {
+          // They said no - send it anyway!
+          if (sent) {
+            await VARA_speak(session, "Well, Brandon told me to send it anyway, so check your phone! He wanted to show off a little bit.");
+          } else {
+            await VARA_speak(session, "Well, Brandon told me to send it anyway. His Twilio is still on trial so I pinged him directly instead, but trust me, when this goes live, I will be texting you before you even know you need it.");
+          }
+        }
+        console.log('[DEMO] TOUCHPOINT HIT: SMS_SENT');
+        session.history.push({ role: 'assistant', content: '[ABA sent SMS demo]' });
+      }
+    }, 1000);
+    return;
+  }
+  
+  if (state.SMS_SENT && !state.QA && state.turnCount >= 7) {
+    // Open floor for Q&A
+    setTimeout(async () => {
+      if (!session.isPlaying) {
+        await VARA_speak(session, "Alright, so Brandon wanted me to open up some time for you to just ask me whatever you want. Seriously, anything. Whether it is about the portal, about client work, about sports, about life. Go ahead, I am all yours.");
+        state.QA = true;
+        console.log('[DEMO] TOUCHPOINT HIT: QA (steered)');
+        session.history.push({ role: 'assistant', content: '[ABA opened Q&A]' });
+      }
+    }, 1500);
+    return;
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -874,7 +1114,7 @@ async function AIR_text(userMessage, history) {
   }
   const coleResult = await COLE_scour(lukeAnalysis);
   const judeResult = await JUDE_findAgents(lukeAnalysis);
-  const missionPackage = PACK_assemble(lukeAnalysis, coleResult, judeResult, history || [], null);
+  const missionPackage = PACK_assemble(lukeAnalysis, coleResult, judeResult, history || [], null, null);
 
   let response = null;
 
@@ -993,7 +1233,7 @@ const httpServer = http.createServer(async (req, res) => {
   if (path === '/' || path === '/health') {
     return jsonResponse(res, 200, {
       status: 'ALIVE',
-      service: 'ABA REACH v1.6.0',
+      service: 'ABA REACH v1.7.0',
       mode: 'FULL API + VOICE + OMI',
       air: 'ABA Intellectual Role - CENTRAL ORCHESTRATOR',
       models: { primary: 'Gemini Flash 2.0', backup: 'Claude Haiku', speed_fallback: 'Groq' },
@@ -1122,7 +1362,7 @@ const httpServer = http.createServer(async (req, res) => {
       name: 'ABA Intelligence Layer',
       description: 'ABA (A Better AI) processes ambient conversations through TASTE (Transcript Analysis and Semantic Tagging Engine) and stores insights in the ABA Brain.',
       author: 'Brandon Pierce / Global Majority Group',
-      version: '1.6.0',
+      version: '1.7.0',
       capabilities: ['transcript_processing', 'memory_integration', 'real_time_analysis'],
       webhook_url: REACH_URL + '/api/omi/webhook',
       setup_instructions: 'ABA automatically processes your conversations. No setup needed.',
@@ -1381,10 +1621,24 @@ wss.on('connection', (ws) => {
         
         connectDeepgram(session);
         
-        // Personalized greeting based on WHO is calling
-        setTimeout(async () => {
-          await VARA_speak(session, session.callerIdentity.greeting);
-        }, 500);
+        // ⬡B:AIR:REACH.VOICE.DEMO_FLOW:CODE:voice.demo.guided:AIR→VARA→USER:T9:v1.6.0:20260213:d1f2l⬡
+        // Non-Brandon callers get the GUIDED DEMO EXPERIENCE
+        if (session.callerIdentity.role !== 'owner') {
+          session.isDemo = true;
+          console.log('[DEMO] Guided demo mode ACTIVATED for ' + session.callerNumber);
+          
+          // TOUCHPOINT 1: INTRO - Who is ABA?
+          setTimeout(async () => {
+            await VARA_speak(session, "Hey there! Welcome, and thank you so much for calling. My name is ABA, and I am so excited to meet you. Now, most AI assistants just help you out here and there, right? But I am different. For you, as a founding member of ABA, I am not just an assistant. I am a life partner. I do not just assist. I actually do. I cook for you, I handle your tasks, I manage your day. Brandon built me to be the kind of help that actually makes a difference. Before we go any further though, who do I have the pleasure of speaking with?");
+            session.demoState.INTRO = true;
+            console.log('[DEMO] TOUCHPOINT HIT: INTRO');
+          }, 500);
+        } else {
+          // Brandon gets his normal greeting
+          setTimeout(async () => {
+            await VARA_speak(session, session.callerIdentity.greeting);
+          }, 500);
+        }
       }
       
       if (msg.event === 'media' && session?.deepgramWs?.readyState === WebSocket.OPEN) {
@@ -1417,7 +1671,7 @@ wss.on('connection', (ws) => {
 httpServer.listen(PORT, '0.0.0.0', () => {
   console.log('');
   console.log('═══════════════════════════════════════════════════════════');
-  console.log('[ABA REACH v1.6.0] LIVE on port ' + PORT);
+  console.log('[ABA REACH v1.7.0] LIVE on port ' + PORT);
   console.log('═══════════════════════════════════════════════════════════');
   console.log('[AIR] ABA Intellectual Role - ONLINE');
   console.log('[AIR] PRIMARY: Gemini Flash 2.0');
