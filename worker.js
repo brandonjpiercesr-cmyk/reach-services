@@ -11,7 +11,7 @@
  * ╚══════════════════════════════════════════════════════════════════════════════╝
  *
  * FILE: worker.js
- * VERSION: v1.9.1-REACH-DELTA (OMI auth + heartbeat + logger)
+ * VERSION: v1.10.0-REACH-DIAL (OMI auth + heartbeat + logger)
  * ABCD: BOTH
  * CREATED: Feb 13, 2026
  * UPDATED: Feb 13, 2026
@@ -3215,11 +3215,167 @@ Phone: (336) 389-8116</p>
   }
 
   // ═══════════════════════════════════════════════════════════════════════
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // ⬡B:DIAL:REACH.API.CALL_DIAL:CODE:voice.phone.outbound:USER→AIR→DIAL→TWILIO:T8:v1.0.0:20260214:d1a2l⬡
+  // DIAL (Direct Intelligence Auditory Link) - Phone Call Mode
+  // Agent #64 - Initiates outbound calls with real-time transcription
+  // ═══════════════════════════════════════════════════════════════════════
+  
+  // /api/call/dial - Initiate outbound call
+  if (path === '/api/call/dial' && method === 'POST') {
+    const body = await parseBody(req);
+    const { to, purpose, userId, record } = body;
+    
+    console.log('[DIAL] Initiating call to:', to, '| Purpose:', purpose);
+    
+    // Validate phone number
+    if (!to || to.replace(/\D/g, '').length < 10) {
+      return jsonResponse(res, 400, { error: 'Invalid phone number' });
+    }
+    
+    // Generate trace ID
+    const traceId = `DIAL-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    
+    try {
+      // Twilio call initiation
+      const twilioAuth = Buffer.from(`${TWILIO_SID}:${TWILIO_AUTH}`).toString('base64');
+      const twimlUrl = encodeURIComponent(`${REACH_URL}/api/call/twiml?trace=${traceId}&record=${record !== false}`);
+      const statusCallback = encodeURIComponent(`${REACH_URL}/api/call/status?trace=${traceId}`);
+      
+      const callData = new URLSearchParams({
+        To: to.startsWith('+') ? to : `+1${to.replace(/\D/g, '')}`,
+        From: TWILIO_PHONE,
+        Url: `${REACH_URL}/api/call/twiml?trace=${traceId}&record=${record !== false}`,
+        StatusCallback: `${REACH_URL}/api/call/status?trace=${traceId}`,
+        StatusCallbackEvent: 'initiated ringing answered completed',
+        StatusCallbackMethod: 'POST'
+      });
+      
+      const twilioRes = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Calls.json`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Basic ${twilioAuth}`,
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body: callData.toString()
+      });
+      
+      const callResult = await twilioRes.json();
+      
+      if (callResult.sid) {
+        // Store call session in brain
+        await fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
+          method: 'POST',
+          headers: {
+            'apikey': SUPABASE_KEY || SUPABASE_ANON,
+            'Authorization': `Bearer ${SUPABASE_KEY || SUPABASE_ANON}`,
+            'Content-Type': 'application/json',
+            'Prefer': 'return=minimal'
+          },
+          body: JSON.stringify({
+            content: `DIAL CALL INITIATED: ${to} | Purpose: ${purpose || 'General'} | SID: ${callResult.sid}`,
+            memory_type: 'call_session',
+            categories: ['dial', 'phone_call', 'active'],
+            importance: 7,
+            is_system: true,
+            user_id: userId || 'system',
+            source: `dial_${traceId}`,
+            tags: ['dial', 'call', 'active'],
+            air_processed: true
+          })
+        });
+        
+        return jsonResponse(res, 200, {
+          success: true,
+          callSid: callResult.sid,
+          traceId,
+          status: 'initiated',
+          message: 'Call initiated. ABA is taking meeting minutes.',
+          routing: `USER*AIR*DIAL*TWILIO*${callResult.sid}`
+        });
+      } else {
+        return jsonResponse(res, 500, { success: false, error: callResult.message || 'Twilio error' });
+      }
+    } catch (e) {
+      console.error('[DIAL] Call initiation failed:', e.message);
+      return jsonResponse(res, 500, { success: false, error: e.message });
+    }
+  }
+  
+  // /api/call/twiml - TwiML response for call setup with Media Stream
+  if (path === '/api/call/twiml' && method === 'GET') {
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const traceId = url.searchParams.get('trace') || 'unknown';
+    const record = url.searchParams.get('record') !== 'false';
+    
+    const disclaimer = record 
+      ? 'ABA is taking meeting minutes for this call. No audio recording is being made. Proceed if you consent to AI assisted note taking.'
+      : 'Connecting your call now.';
+    
+    const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say voice="Polly.Joanna">${disclaimer}</Say>
+  <Pause length="1"/>
+  <Start>
+    <Stream url="wss://${req.headers.host}/api/call/stream?trace=${traceId}" track="both_tracks"/>
+  </Start>
+  <Pause length="3600"/>
+</Response>`;
+    
+    res.writeHead(200, { 'Content-Type': 'text/xml' });
+    res.end(twiml);
+    return;
+  }
+  
+  // /api/call/status - Twilio status webhook
+  if (path === '/api/call/status' && method === 'POST') {
+    const body = await parseBody(req);
+    console.log('[DIAL] Call status:', body.CallStatus, '| SID:', body.CallSid);
+    
+    // Store status update in brain
+    if (body.CallStatus === 'completed') {
+      await fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
+        method: 'POST',
+        headers: {
+          'apikey': SUPABASE_KEY || SUPABASE_ANON,
+          'Authorization': `Bearer ${SUPABASE_KEY || SUPABASE_ANON}`,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=minimal'
+        },
+        body: JSON.stringify({
+          content: `DIAL CALL COMPLETED: SID: ${body.CallSid} | Duration: ${body.CallDuration || 0}s`,
+          memory_type: 'call_session',
+          categories: ['dial', 'phone_call', 'completed'],
+          importance: 7,
+          is_system: true,
+          source: `dial_complete_${body.CallSid}`,
+          tags: ['dial', 'call', 'completed'],
+          air_processed: true
+        })
+      });
+    }
+    
+    return jsonResponse(res, 200, { received: true });
+  }
+  
+  // /api/call/record - Toggle manual recording
+  if (path === '/api/call/record' && method === 'POST') {
+    const body = await parseBody(req);
+    const { callSid, enable } = body;
+    console.log('[DIAL] Manual record', enable ? 'STARTED' : 'STOPPED', '| Call:', callSid);
+    return jsonResponse(res, 200, { 
+      success: true, 
+      recording: enable,
+      timestamp: new Date().toISOString()
+    });
+  }
+
   // ⬡B:AIR:REACH.API.NOTFOUND:CODE:infrastructure.error.404:USER→REACH→ERROR:T10:v1.5.0:20260213:n1f2d⬡ CATCH-ALL
   // ═══════════════════════════════════════════════════════════════════════
   jsonResponse(res, 404, { 
     error: 'Route not found: ' + method + ' ' + path,
-    available: ['/api/router', '/api/models/claude', '/api/voice/deepgram-token', '/api/voice/tts', '/api/omi/manifest', '/api/omi/webhook', '/api/sms/send', '/api/brain/search', '/api/brain/store', '/api/scrape-job', '/api/idealist/parse', '/api/idealist/verify'],
+    available: ['/api/call/dial', '/api/call/twiml', '/api/call/status', '/api/call/record', '/api/router', '/api/models/claude', '/api/voice/deepgram-token', '/api/voice/tts', '/api/omi/manifest', '/api/omi/webhook', '/api/sms/send', '/api/brain/search', '/api/brain/store', '/api/scrape-job', '/api/idealist/parse', '/api/idealist/verify'],
     hint: 'We are all ABA'
   });
 });
@@ -3346,6 +3502,7 @@ httpServer.listen(PORT, '0.0.0.0', () => {
   console.log('[JUDE] Job-description Unified Discovery Engine - READY');
   console.log('[PACK] Packaging And Constructing Kits - READY');
   console.log('[VARA] Vocal Authorized Representative of ABA - READY');
+  console.log('[DIAL] Direct Intelligence Auditory Link - READY');
   console.log('[DEEPGRAM] Real-time STT with VAD - READY');
   console.log('[ELEVENLABS] Streaming TTS - READY');
   console.log('═══════════════════════════════════════════════════════════');
@@ -3354,6 +3511,155 @@ httpServer.listen(PORT, '0.0.0.0', () => {
 });
 
 // ⬡B:AIR:REACH.SERVER.EOF:CODE:infrastructure.end.file:REACH:T10:v1.5.0:20260213:e1o2f⬡ END OF REACH v1.5.0
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ⬡B:DIAL:REACH.CALL.STREAM:CODE:voice.phone.transcription:TWILIO→REACH→DEEPGRAM→AIR:T8:v1.0.0:20260214:d1w2s⬡
+// DIAL WebSocket Handler - Phone Call Transcription Stream
+// Receives Twilio Media Streams and routes to Deepgram for real-time transcription
+// ═══════════════════════════════════════════════════════════════════════════
+const dialWss = new WebSocketServer({ server: httpServer, path: '/api/call/stream' });
+
+dialWss.on('connection', (ws, req) => {
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const traceId = url.searchParams.get('trace') || `STREAM-${Date.now()}`;
+  
+  console.log('[DIAL STREAM] WebSocket connected | Trace:', traceId);
+  
+  let streamSid = null;
+  let callSid = null;
+  let transcriptBuffer = [];
+  let deepgramWs = null;
+  
+  // Connect to Deepgram for real-time transcription
+  const connectDeepgram = () => {
+    const dgUrl = 'wss://api.deepgram.com/v1/listen?' + new URLSearchParams({
+      model: 'nova-2',
+      language: 'en-US',
+      encoding: 'mulaw',
+      sample_rate: '8000',
+      channels: '1',
+      punctuate: 'true',
+      diarize: 'true',
+      smart_format: 'true',
+      interim_results: 'true'
+    }).toString();
+    
+    deepgramWs = new WebSocket(dgUrl, {
+      headers: { 'Authorization': 'Token ' + DEEPGRAM_KEY }
+    });
+    
+    deepgramWs.on('open', () => {
+      console.log('[DIAL STREAM] Deepgram connected | Trace:', traceId);
+    });
+    
+    deepgramWs.on('message', async (data) => {
+      try {
+        const result = JSON.parse(data.toString());
+        const transcript = result.channel?.alternatives?.[0];
+        
+        if (transcript?.transcript && result.is_final) {
+          const text = transcript.transcript.trim();
+          if (!text) return;
+          
+          const speaker = transcript.words?.[0]?.speaker || 0;
+          console.log('[DIAL STREAM] [SPEAKER_' + speaker + ']:', text);
+          
+          // Store transcript chunk in brain
+          await fetch(SUPABASE_URL + '/rest/v1/aba_memory', {
+            method: 'POST',
+            headers: {
+              'apikey': SUPABASE_KEY || SUPABASE_ANON,
+              'Authorization': 'Bearer ' + (SUPABASE_KEY || SUPABASE_ANON),
+              'Content-Type': 'application/json',
+              'Prefer': 'return=minimal'
+            },
+            body: JSON.stringify({
+              content: 'PHONE CALL (' + traceId + '): [SPEAKER_' + speaker + '] ' + text,
+              memory_type: 'phone_transcript',
+              categories: ['dial', 'phone_call', 'transcript'],
+              importance: 6,
+              is_system: true,
+              source: 'dial_stream_' + traceId,
+              tags: ['dial', 'phone', 'transcript', 'speaker_' + speaker],
+              air_processed: true
+            })
+          });
+          
+          transcriptBuffer.push({ speaker: 'SPEAKER_' + speaker, text, timestamp: new Date().toISOString() });
+        }
+      } catch (e) {
+        console.error('[DIAL STREAM] Deepgram message error:', e.message);
+      }
+    });
+    
+    deepgramWs.on('error', (e) => console.error('[DIAL STREAM] Deepgram error:', e.message));
+    deepgramWs.on('close', () => console.log('[DIAL STREAM] Deepgram closed | Trace:', traceId));
+  };
+  
+  ws.on('message', (data) => {
+    try {
+      const msg = JSON.parse(data.toString());
+      
+      if (msg.event === 'connected') {
+        console.log('[DIAL STREAM] Twilio connected | Trace:', traceId);
+      }
+      
+      if (msg.event === 'start') {
+        streamSid = msg.streamSid;
+        callSid = msg.start?.callSid;
+        console.log('[DIAL STREAM] Stream started | SID:', streamSid, '| Call:', callSid);
+        connectDeepgram();
+      }
+      
+      if (msg.event === 'media' && deepgramWs?.readyState === WebSocket.OPEN) {
+        const audio = Buffer.from(msg.media.payload, 'base64');
+        deepgramWs.send(audio);
+      }
+      
+      if (msg.event === 'stop') {
+        console.log('[DIAL STREAM] Stream stopped | Trace:', traceId);
+        if (deepgramWs) deepgramWs.close();
+        
+        // Store complete call transcript
+        if (transcriptBuffer.length > 0) {
+          const fullTranscript = transcriptBuffer.map(c => '[' + c.speaker + '] ' + c.text).join('\n');
+          fetch(SUPABASE_URL + '/rest/v1/aba_memory', {
+            method: 'POST',
+            headers: {
+              'apikey': SUPABASE_KEY || SUPABASE_ANON,
+              'Authorization': 'Bearer ' + (SUPABASE_KEY || SUPABASE_ANON),
+              'Content-Type': 'application/json',
+              'Prefer': 'return=minimal'
+            },
+            body: JSON.stringify({
+              content: 'PHONE CALL COMPLETE (' + traceId + '):\n\n' + fullTranscript + '\n\n---\nChunks: ' + transcriptBuffer.length,
+              memory_type: 'phone_call_complete',
+              categories: ['dial', 'phone_call', 'completed'],
+              importance: 8,
+              is_system: true,
+              source: 'dial_complete_' + traceId,
+              tags: ['dial', 'phone', 'complete', 'meeting_minutes'],
+              air_processed: true
+            })
+          });
+          console.log('[DIAL STREAM] Full transcript stored | Chunks:', transcriptBuffer.length);
+        }
+      }
+    } catch (e) {
+      console.error('[DIAL STREAM] Message error:', e.message);
+    }
+  });
+  
+  ws.on('close', () => {
+    console.log('[DIAL STREAM] WebSocket closed | Trace:', traceId);
+    if (deepgramWs) deepgramWs.close();
+  });
+  
+  ws.on('error', (e) => console.error('[DIAL STREAM] WebSocket error:', e.message));
+});
+
+console.log('[DIAL] Direct Intelligence Auditory Link - READY');
 
 // ████████████████████████████████████████████████████████████████████████████
 // ██ HEARTBEAT - DO NOT REMOVE (Render free tier sleeps without this)        ██
