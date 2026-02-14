@@ -67,7 +67,7 @@ const TWILIO_PHONE = process.env.TWILIO_PHONE_NUMBER;
 
 // ⬡B:AIR:REACH.CONFIG.ELEVENLABS:CONFIG:voice.tts.personality:AIR→REACH→VARA:T8:v1.5.0:20260213:e1l2v⬡
 const ELEVENLABS_KEY = process.env.ELEVENLABS_API_KEY;
-const ELEVENLABS_VOICE = process.env.ELEVENLABS_VOICE_ID || 'hAQCIV0cazWEuGzMG5bV';
+const ELEVENLABS_VOICE = process.env.ELEVENLABS_VOICE_ID || 'LD658Mupr7vNwTTJSPsk'; // VARA voice from Brandon config
 const ELEVENLABS_MODEL = 'eleven_flash_v2_5';
 
 // ⬡B:AIR:REACH.CONFIG.DEEPGRAM:CONFIG:voice.stt.transcription:AIR→REACH→TASTE:T8:v1.5.0:20260213:d1g2m⬡
@@ -628,11 +628,12 @@ async function JUDE_decideEscalation(lukeAnalysis, coleContext) {
   
   // Decide action based on urgency
   let action = 'log_only';
-  // THROTTLED: Only call on TRUE emergencies (urgency 6)
-  // Lower urgencies use SMS or email to avoid blowing up Brandon's phone
-  if (urgency >= 6) action = 'call_emergency';
-  else if (urgency >= 5) action = 'sms_then_call'; // Changed from call_immediate
-  else if (urgency >= 4) action = 'sms_only'; // Changed from sms_then_call
+  // CALLS DISABLED - Brandon was getting spammed
+  // ALL escalations go to SMS or email only until we fix the triggers
+  // To re-enable calls, change 'sms_only' back to 'call_emergency' for urgency 6
+  if (urgency >= 6) action = 'sms_only'; // DISABLED: was call_emergency
+  else if (urgency >= 5) action = 'sms_only'; // was sms_then_call
+  else if (urgency >= 4) action = 'sms_only';
   else if (urgency >= 3) action = 'sms_only';
   else if (urgency >= 2) action = 'email_only';
   else action = 'log_only';
@@ -928,7 +929,8 @@ async function TRIGGER_emailReceived(email) {
 // Trigger: OMI heard something (called by TASTE when OMI captures conversation)
 async function TRIGGER_omiHeard(transcript) {
   // Only trigger if TASTE detects urgency
-  const urgentKeywords = ['emergency', 'urgent', 'help', 'call brandon', 'need to call', 'deadline', 'investor', 'money'];
+  // STRICT urgent keywords - must be CLEAR emergency, not just mentioned
+  const urgentKeywords = ['emergency please', 'help me', 'call 911', 'urgent emergency', 'need help now', 'this is urgent'];
   const hasUrgent = urgentKeywords.some(k => transcript.text?.toLowerCase().includes(k));
   
   if (!hasUrgent) return { triggered: false, reason: 'No urgent keywords detected' };
@@ -3701,7 +3703,26 @@ Phone: (336) 389-8116</p>
       } catch(le) { console.log('[LOG] Failed:', le.message); }
 
 
-      const transcript = body.transcript || body.text || body.segments?.map(s => s.text).join(' ') || JSON.stringify(body);
+      // Extract actual transcript text - don't store raw JSON
+      let transcript = '';
+      if (body.transcript) {
+        transcript = typeof body.transcript === 'string' ? body.transcript : JSON.stringify(body.transcript);
+      } else if (body.text) {
+        transcript = body.text;
+      } else if (body.segments && Array.isArray(body.segments)) {
+        transcript = body.segments.map(s => s.text || '').join(' ');
+      } else if (body.transcript_segments && Array.isArray(body.transcript_segments)) {
+        transcript = body.transcript_segments.map(s => s.text || '').join(' ');
+      } else {
+        // This is likely session metadata, not a transcript - skip
+        console.log('[OMI] Received non-transcript data, skipping:', Object.keys(body).join(', '));
+        return jsonResponse(res, 200, { status: 'skipped', reason: 'no transcript text found' });
+      }
+      
+      // Don't process empty transcripts
+      if (!transcript || transcript.length < 5) {
+        return jsonResponse(res, 200, { status: 'skipped', reason: 'empty transcript' });
+      }
       const timestamp = body.timestamp || new Date().toISOString();
 
       // Store in brain via TASTE
