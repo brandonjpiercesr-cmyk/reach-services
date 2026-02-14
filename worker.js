@@ -108,7 +108,7 @@ const REACH_URL = process.env.REACH_URL || 'https://aba-reach.onrender.com';
 
 // ⬡B:AIR:REACH.SERVER.STARTUP:CODE:infrastructure.logging.boot:AIR→REACH:T10:v1.5.0:20260213:b0o1t⬡
 console.log('═══════════════════════════════════════════════════════════');
-console.log('[ABA REACH v1.6.0] FULL HIERARCHY + SIGILS + API ROUTES');
+console.log('[ABA REACH v1.8.0] FULL HIERARCHY + SIGILS + API ROUTES');
 console.log('[HIERARCHY] L6:AIR > L5:REACH > L4:VOICE,SMS,EMAIL,OMI > L3:VARA,CARA,IMAN,TASTE');
 console.log('[AIR] Hardcoded agents: LUKE, COLE, JUDE, PACK');
 console.log('[AIR] PRIMARY: Gemini Flash 2.0 | BACKUP: Claude Haiku');
@@ -1614,7 +1614,7 @@ const httpServer = http.createServer(async (req, res) => {
   if (path === '/' || path === '/health') {
     return jsonResponse(res, 200, {
       status: 'ALIVE',
-      service: 'ABA REACH v1.6.0',
+      service: 'ABA REACH v1.8.0',
       mode: 'FULL API + VOICE + OMI',
       air: 'ABA Intellectual Role - CENTRAL ORCHESTRATOR',
       models: { primary: 'Gemini Flash 2.0', backup: 'Claude Haiku', speed_fallback: 'Groq' },
@@ -1743,7 +1743,7 @@ const httpServer = http.createServer(async (req, res) => {
       name: 'ABA Intelligence Layer',
       description: 'ABA (A Better AI) processes ambient conversations through TASTE (Transcript Analysis and Semantic Tagging Engine) and stores insights in the ABA Brain.',
       author: 'Brandon Pierce / Global Majority Group',
-      version: '1.6.0',
+      version: '1.8.0',
       capabilities: ['transcript_processing', 'memory_integration', 'real_time_analysis'],
       webhook_url: REACH_URL + '/api/omi/webhook',
       setup_instructions: 'ABA automatically processes your conversations. No setup needed.',
@@ -2068,7 +2068,7 @@ wss.on('connection', (ws) => {
 httpServer.listen(PORT, '0.0.0.0', () => {
   console.log('');
   console.log('═══════════════════════════════════════════════════════════');
-  console.log('[ABA REACH v1.6.0] LIVE on port ' + PORT);
+  console.log('[ABA REACH v1.8.0] LIVE on port ' + PORT);
   console.log('═══════════════════════════════════════════════════════════');
   console.log('[AIR] ABA Intellectual Role - ONLINE');
   console.log('[AIR] PRIMARY: Gemini Flash 2.0');
