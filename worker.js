@@ -3822,6 +3822,128 @@ Phone: (336) 389-8116</p>
   // Returns the manifest JSON so OMI recognizes ABA as an app
   // ═══════════════════════════════════════════════════════════════════════
   
+  
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // ⬡B:AIR:REACH.VOICE.ELEVENLABS_TOOL:CODE:voice.air.bridge:ELEVENLABS→AIR→AGENTS:T10:v2.0.0:20260214:e1l2t⬡
+  // AIR VOICE TOOL - ElevenLabs calls this to get AIR's response
+  // This is the BRIDGE between ElevenLabs voice and ABA's brain
+  // ═══════════════════════════════════════════════════════════════════════════════
+  if (path === '/api/air/voice-tool' && method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      const userMessage = body.user_message || body.text || body.input || '';
+      const conversationId = body.conversation_id || 'voice-' + Date.now();
+      const callerNumber = body.caller_number || body.phone || 'unknown';
+      
+      console.log('[AIR VOICE TOOL] Received from ElevenLabs:', userMessage);
+      console.log('[AIR VOICE TOOL] Conversation:', conversationId);
+      
+      // Broadcast to Command Center - call is active
+      broadcastToCommandCenter({
+        type: 'voice_activity',
+        source: 'elevenlabs',
+        conversation_id: conversationId,
+        caller: callerNumber,
+        user_said: userMessage,
+        timestamp: new Date().toISOString()
+      });
+      
+      // Route through AIR - the central brain
+      const airResponse = await AIR_process({
+        type: 'voice_conversation',
+        source: 'elevenlabs_tool',
+        content: userMessage,
+        metadata: {
+          conversation_id: conversationId,
+          caller_number: callerNumber,
+          channel: 'phone'
+        }
+      });
+      
+      // Extract the response text
+      const responseText = airResponse?.response || airResponse?.message || 
+        "I understand. Let me help you with that.";
+      
+      console.log('[AIR VOICE TOOL] AIR Response:', responseText);
+      
+      // Broadcast response to Command Center
+      broadcastToCommandCenter({
+        type: 'voice_response',
+        source: 'air',
+        conversation_id: conversationId,
+        aba_said: responseText,
+        timestamp: new Date().toISOString()
+      });
+      
+      // Store in brain
+      storeToBrain({
+        content: 'VOICE CALL [' + conversationId + ']: User said "' + userMessage + '" | ABA responded "' + responseText + '"',
+        memory_type: 'voice_transcript',
+        categories: ['voice', 'elevenlabs', 'conversation'],
+        importance: 5,
+        tags: ['voice', 'elevenlabs', 'transcript']
+      }).catch(e => console.log('[BRAIN] Store error:', e.message));
+      
+      // Return response for ElevenLabs to speak
+      return jsonResponse(res, 200, {
+        response: responseText,
+        conversation_id: conversationId
+      });
+      
+    } catch (e) {
+      console.error('[AIR VOICE TOOL] Error:', e.message);
+      return jsonResponse(res, 200, {
+        response: "I apologize, I had a brief moment of confusion. Could you repeat that?"
+      });
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // ⬡B:AIR:REACH.VOICE.ELEVENLABS_POSTCALL:CODE:voice.postcall.webhook:ELEVENLABS→AIR→CC:T10:v2.0.0:20260214:p1c2w⬡
+  // POST-CALL WEBHOOK - ElevenLabs calls this when call ends
+  // ═══════════════════════════════════════════════════════════════════════════════
+  if (path === '/api/air/call-ended' && method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      const conversationId = body.conversation_id || 'unknown';
+      const transcript = body.transcript || [];
+      const duration = body.duration_seconds || 0;
+      const callerNumber = body.caller_number || 'unknown';
+      
+      console.log('[POST-CALL] Call ended:', conversationId);
+      console.log('[POST-CALL] Duration:', duration, 'seconds');
+      
+      // Broadcast to Command Center
+      broadcastToCommandCenter({
+        type: 'call_ended',
+        conversation_id: conversationId,
+        caller: callerNumber,
+        duration_seconds: duration,
+        transcript_length: Array.isArray(transcript) ? transcript.length : 0,
+        timestamp: new Date().toISOString()
+      });
+      
+      // Store full transcript in brain
+      const transcriptText = Array.isArray(transcript) 
+        ? transcript.map(t => (t.role || 'unknown') + ': ' + (t.text || '')).join('\n')
+        : JSON.stringify(transcript);
+      
+      storeToBrain({
+        content: 'CALL TRANSCRIPT [' + conversationId + '] Duration: ' + duration + 's\n' + transcriptText,
+        memory_type: 'phone_transcript',
+        categories: ['voice', 'transcript', 'elevenlabs'],
+        importance: 7,
+        tags: ['voice', 'transcript', 'call_complete']
+      }).catch(e => console.log('[BRAIN] Store error:', e.message));
+      
+      return jsonResponse(res, 200, { received: true, conversation_id: conversationId });
+      
+    } catch (e) {
+      console.error('[POST-CALL] Error:', e.message);
+      return jsonResponse(res, 200, { received: true, error: e.message });
+    }
+  }
+
   // ████████████████████████████████████████████████████████████████████████████
   // ██ /api/omi/auth — OMI HEALTH CHECK (DO NOT REMOVE - BREAKS OMI)          ██
   // ████████████████████████████████████████████████████████████████████████████
