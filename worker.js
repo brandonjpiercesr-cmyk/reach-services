@@ -742,6 +742,75 @@ async function sendSMSFromCall(toNumber, message) {
   }
 }
 
+
+// ⬡B:AIR:REACH.EMAIL.GRANT:CODE:email.nylas.grant_lookup:REACH→BRAIN→NYLAS:T9:v1.8.0:20260214:g1r2a⬡
+// Cached grant ID - pulled from brain on first use
+let _cachedGrantId = null;
+
+async function getEmailGrantId() {
+  if (_cachedGrantId) return _cachedGrantId;
+  
+  try {
+    const result = await httpsRequest({
+      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+      path: '/rest/v1/aba_memory?tags=cs.{nylas,grant}&order=created_at.desc&limit=1&select=content',
+      method: 'GET',
+      headers: {
+        'apikey': SUPABASE_KEY || SUPABASE_ANON,
+        'Authorization': 'Bearer ' + (SUPABASE_KEY || SUPABASE_ANON)
+      }
+    });
+    const data = JSON.parse(result.data.toString());
+    if (data.length > 0) {
+      const match = data[0].content.match(/NYLAS GRANT: ([a-f0-9-]+)/);
+      if (match) {
+        _cachedGrantId = match[1];
+        console.log('[IMAN] Grant ID loaded: ' + _cachedGrantId);
+        return _cachedGrantId;
+      }
+    }
+  } catch (e) {
+    console.log('[IMAN] Grant lookup error: ' + e.message);
+  }
+  return null;
+}
+
+// ⬡B:AIR:REACH.EMAIL.SEND_INTERNAL:CODE:email.send.from_code:AIR→IMAN→NYLAS→RECIPIENT:T9:v1.8.0:20260214:s1i2n⬡
+async function sendEmailFromABA(to, subject, htmlBody) {
+  const grantId = await getEmailGrantId();
+  if (!grantId || !NYLAS_API_KEY) {
+    console.log('[IMAN] Cannot send email - no grant or key');
+    return { success: false, reason: 'no_grant' };
+  }
+  
+  try {
+    const result = await httpsRequest({
+      hostname: 'api.us.nylas.com',
+      path: '/v3/grants/' + grantId + '/messages/send',
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + NYLAS_API_KEY,
+        'Content-Type': 'application/json'
+      }
+    }, JSON.stringify({
+      subject: subject,
+      body: htmlBody,
+      to: Array.isArray(to) ? to.map(e => ({ email: e })) : [{ email: to }]
+    }));
+    
+    const json = JSON.parse(result.data.toString());
+    if (json.data?.id) {
+      console.log('[IMAN] Email sent: ' + subject + ' -> ' + to);
+      return { success: true, message_id: json.data.id };
+    }
+    console.log('[IMAN] Email failed: ' + JSON.stringify(json.error || json));
+    return { success: false, reason: json.error?.message || 'unknown' };
+  } catch (e) {
+    console.log('[IMAN] Email error: ' + e.message);
+    return { success: false, reason: e.message };
+  }
+}
+
 // ⬡B:AIR:REACH.VOICE.IDENTIFY:CODE:identity.classify.caller:TWILIO→REACH→AIR:T9:v1.6.0:20260213:i1d2c⬡
 async function identifyCaller(phoneNumber) {
   if (CONTACT_REGISTRY[phoneNumber]) {
@@ -900,15 +969,42 @@ async function postCallAutomation(session) {
     console.log('[POST-CALL] Lead store error: ' + e.message);
   }
   
-  // 2. Send follow-up SMS to caller (30 second delay)
+  // 2. Send follow-up SMS + EMAIL to caller (30 second delay)
   setTimeout(async () => {
-    const followUpMsg = `Hey ${callerName}! This is ABA. It was so great talking with you. Brandon wanted me to follow up and say thanks for checking us out. You are part of something special. When ABACUS drops, you will be first to know. Talk soon! - ABA`;
+    const followUpMsg = 'Hey ' + callerName + '! This is ABA. It was so great talking with you. Brandon wanted me to follow up and say thanks for checking us out. You are part of something special. When ABACUS drops, you will be first to know. Talk soon! - ABA';
     
+    // Try SMS
     const smsResult = await sendSMSFromCall(callerNumber, followUpMsg);
     if (smsResult.success) {
       console.log('[POST-CALL] Follow-up SMS sent to ' + callerNumber);
     } else {
       console.log('[POST-CALL] Follow-up SMS failed: ' + smsResult.reason);
+    }
+    
+    // Also try email if we have one from brain
+    try {
+      const emailSearch = await httpsRequest({
+        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+        path: '/rest/v1/aba_memory?content=ilike.*' + encodeURIComponent(callerNumber.replace('+','')) + '*email*&select=content&limit=1',
+        method: 'GET',
+        headers: { 'apikey': SUPABASE_KEY || SUPABASE_ANON, 'Authorization': 'Bearer ' + (SUPABASE_KEY || SUPABASE_ANON) }
+      });
+      const emailResults = JSON.parse(emailSearch.data.toString());
+      // Extract email if found
+      if (emailResults.length > 0) {
+        const emailMatch = emailResults[0].content.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+        if (emailMatch) {
+          const callerEmail = emailMatch[0];
+          const emailHtml = '<div style="font-family:system-ui;max-width:600px;margin:0 auto"><h2 style="color:#333">Hey ' + callerName + '!</h2><p>It was so great talking with you on the phone. Brandon wanted me to follow up and say thanks for checking us out.</p><p>You are part of something special. ABA is being built to be more than just an AI assistant - a true life partner that actually does the work for you.</p><p>When ABACUS drops, you will be the first to know.</p><p>Talk soon!</p><p style="color:#666"><strong>ABA</strong> (A Better AI)<br>Global Majority Group<br><em>claudette@globalmajoritygroup.com</em></p></div>';
+          
+          const emailResult = await sendEmailFromABA(callerEmail, 'Great talking with you! - ABA', emailHtml);
+          if (emailResult.success) {
+            console.log('[POST-CALL] Follow-up email sent to ' + callerEmail);
+          }
+        }
+      }
+    } catch (e) {
+      console.log('[POST-CALL] Email lookup error: ' + e.message);
     }
   }, 30000);
   
@@ -918,9 +1014,15 @@ async function postCallAutomation(session) {
     .map(h => (h.content || '').substring(0, 60))
     .join(' | ');
   
-  const brandonNotify = `ABA CALL REPORT: ${callerName} just called from ${callerNumber}. ${turnCount} turns. They asked about: ${topicsDiscussed.substring(0, 200)}`;
+  const brandonNotify = 'ABA CALL REPORT: ' + callerName + ' just called from ' + callerNumber + '. ' + turnCount + ' turns. They asked about: ' + topicsDiscussed.substring(0, 200);
   
+  // SMS to Brandon
   const notifyResult = await sendSMSFromCall('+13363898116', brandonNotify);
+  
+  // ALSO email Brandon
+  const brandonEmailHtml = '<div style="font-family:system-ui;max-width:600px;margin:0 auto"><h2>ABA Call Report</h2><p><strong>Caller:</strong> ' + callerName + '</p><p><strong>Phone:</strong> ' + callerNumber + '</p><p><strong>Duration:</strong> ' + turnCount + ' turns</p><p><strong>Topics:</strong> ' + topicsDiscussed.substring(0, 300) + '</p><p style="color:#888;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v1.8.0</p></div>';
+  const brandonEmail = await sendEmailFromABA('brandonjpiercesr@gmail.com', 'ABA Call Report: ' + callerName + ' called', brandonEmailHtml);
+  if (brandonEmail.success) console.log('[POST-CALL] Brandon email report sent');
   if (notifyResult.success) {
     console.log('[POST-CALL] Brandon notified via SMS');
   } else {
@@ -1859,6 +1961,165 @@ const httpServer = http.createServer(async (req, res) => {
       return jsonResponse(res, 500, { error: e.message });
     }
   }
+
+  
+  // ═══════════════════════════════════════════════════════════════════════
+  // ⬡B:AIR:REACH.API.NYLAS_CALLBACK:CODE:email.oauth.callback:NYLAS→REACH→BRAIN:T9:v1.8.0:20260214:n1c2b⬡
+  // Nylas OAuth callback - exchanges code for grant_id, stores in brain
+  // ═══════════════════════════════════════════════════════════════════════
+  if (path === '/api/nylas/callback' && method === 'GET') {
+    try {
+      const urlObj = new URL('http://localhost' + req.url);
+      const code = urlObj.searchParams.get('code');
+      const state = urlObj.searchParams.get('state');
+      
+      if (!code) {
+        res.writeHead(400, { 'Content-Type': 'text/html' });
+        return res.end('<h1>Error: No authorization code received</h1>');
+      }
+      
+      // Exchange code for grant
+      const tokenResult = await httpsRequest({
+        hostname: 'api.us.nylas.com',
+        path: '/v3/connect/token',
+        method: 'POST',
+        headers: {
+          'Authorization': 'Bearer ' + NYLAS_API_KEY,
+          'Content-Type': 'application/json'
+        }
+      }, JSON.stringify({
+        code: code,
+        redirect_uri: 'https://aba-reach.onrender.com/api/nylas/callback'
+      }));
+      
+      const tokenData = JSON.parse(tokenResult.data.toString());
+      
+      if (tokenData.grant_id) {
+        console.log('[NYLAS] Grant obtained: ' + tokenData.grant_id + ' for ' + (tokenData.email || 'unknown'));
+        
+        // Store grant_id in brain
+        if (SUPABASE_KEY) {
+          await httpsRequest({
+            hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+            path: '/rest/v1/aba_memory',
+            method: 'POST',
+            headers: {
+              'apikey': SUPABASE_KEY,
+              'Authorization': 'Bearer ' + SUPABASE_KEY,
+              'Content-Type': 'application/json',
+              'Prefer': 'return=minimal'
+            }
+          }, JSON.stringify({
+            content: 'NYLAS GRANT: ' + tokenData.grant_id + ' | Email: ' + (tokenData.email || 'unknown') + ' | Provider: ' + (tokenData.provider || 'google') + ' | Connected: ' + new Date().toISOString(),
+            memory_type: 'system',
+            categories: ['nylas', 'grant', 'email'],
+            importance: 10,
+            is_system: true,
+            source: 'nylas_grant_' + tokenData.grant_id,
+            tags: ['nylas', 'grant', 'email', 'iman', (tokenData.email || '').replace('@','_at_')]
+          }));
+        }
+        
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        return res.end('<html><body style="font-family:system-ui;text-align:center;padding:60px;background:#0a0a0a;color:#fff"><h1 style="color:#00ff88">ABA Email Connected!</h1><p style="font-size:20px">Grant ID: ' + tokenData.grant_id + '</p><p>Email: ' + (tokenData.email || '') + '</p><p style="color:#888">IMAN (Intelligent Mail Agent Nexus) is now active. You can close this window.</p></body></html>');
+      } else {
+        console.log('[NYLAS] Token exchange failed: ' + JSON.stringify(tokenData));
+        res.writeHead(400, { 'Content-Type': 'text/html' });
+        return res.end('<h1>Error: ' + (tokenData.error?.message || 'Token exchange failed') + '</h1>');
+      }
+    } catch (e) {
+      console.log('[NYLAS] Callback error: ' + e.message);
+      res.writeHead(500, { 'Content-Type': 'text/html' });
+      return res.end('<h1>Error: ' + e.message + '</h1>');
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // ⬡B:AIR:REACH.API.EMAIL_SEND:CODE:email.send.nylas:AIR→IMAN→NYLAS→RECIPIENT:T9:v1.8.0:20260214:e1s2n⬡
+  // Send email through Nylas (from claudette@globalmajoritygroup.com)
+  // ═══════════════════════════════════════════════════════════════════════
+  if (path === '/api/email/send' && method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      const { to, subject, body: emailBody, reply_to_message_id } = body;
+      
+      if (!to || !subject || !emailBody) {
+        return jsonResponse(res, 400, { error: 'to, subject, and body required' });
+      }
+      
+      // Get grant_id from brain
+      const grantId = await getEmailGrantId();
+      if (!grantId) {
+        return jsonResponse(res, 503, { error: 'No email account connected. Visit /api/nylas/connect to authorize.' });
+      }
+      
+      const emailPayload = {
+        subject: subject,
+        body: emailBody,
+        to: Array.isArray(to) ? to.map(e => ({ email: e })) : [{ email: to }],
+      };
+      if (reply_to_message_id) emailPayload.reply_to_message_id = reply_to_message_id;
+      
+      const result = await httpsRequest({
+        hostname: 'api.us.nylas.com',
+        path: '/v3/grants/' + grantId + '/messages/send',
+        method: 'POST',
+        headers: {
+          'Authorization': 'Bearer ' + NYLAS_API_KEY,
+          'Content-Type': 'application/json'
+        }
+      }, JSON.stringify(emailPayload));
+      
+      const json = JSON.parse(result.data.toString());
+      
+      if (json.data?.id) {
+        console.log('[IMAN] Email sent to ' + (Array.isArray(to) ? to.join(', ') : to) + ' | Subject: ' + subject);
+        return jsonResponse(res, 200, { success: true, message_id: json.data.id, subject: subject });
+      } else {
+        console.log('[IMAN] Email send failed: ' + JSON.stringify(json));
+        return jsonResponse(res, result.status, { error: json.error?.message || 'Send failed', details: json });
+      }
+    } catch (e) {
+      return jsonResponse(res, 500, { error: e.message });
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // ⬡B:AIR:REACH.API.NYLAS_CONNECT:CODE:email.oauth.start:USER→REACH→NYLAS:T9:v1.8.0:20260214:n1c2s⬡  
+  // Start Nylas OAuth (redirects to Google login)
+  // ═══════════════════════════════════════════════════════════════════════
+  if (path === '/api/nylas/connect' && method === 'GET') {
+    try {
+      const urlObj = new URL('http://localhost' + req.url);
+      const email = urlObj.searchParams.get('email') || 'claudette@globalmajoritygroup.com';
+      
+      const authResult = await httpsRequest({
+        hostname: 'api.us.nylas.com',
+        path: '/v3/connect/auth',
+        method: 'POST',
+        headers: {
+          'Authorization': 'Bearer ' + NYLAS_API_KEY,
+          'Content-Type': 'application/json'
+        }
+      }, JSON.stringify({
+        redirect_uri: 'https://aba-reach.onrender.com/api/nylas/callback',
+        provider: 'google',
+        login_hint: email,
+        state: 'aba-connect-' + email.split('@')[0]
+      }));
+      
+      const authData = JSON.parse(authResult.data.toString());
+      if (authData.data?.url) {
+        res.writeHead(302, { 'Location': authData.data.url });
+        return res.end();
+      } else {
+        return jsonResponse(res, 500, { error: 'Failed to generate auth URL', details: authData });
+      }
+    } catch (e) {
+      return jsonResponse(res, 500, { error: e.message });
+    }
+  }
+
 
   // ═══════════════════════════════════════════════════════════════════════
   // ⬡B:AIR:REACH.API.BRAIN_STORE:CODE:brain.persist.memory:USER→REACH→BRAIN:T8:v1.5.0:20260213:b1s2t⬡ /api/brain/store
