@@ -3255,6 +3255,196 @@ async function AIR_text(userMessage, history) {
 // ⬡B:AIR:REACH.API.SERVER:CODE:infrastructure.http.routing:USER→REACH→AGENTS:T10:v1.5.0:20260213:h1s2v⬡
 // FULL API ROUTING - serves 1A Shell, CCWA, OMI, SMS, Email
 // ═══════════════════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:AIR:REACH.IMAN.AUTOSEND:CODE:email.autonomous.send:
+// IMAN→AIR→NYLAS→RECIPIENT:T10:v1.0.0:20260214:i1m2a⬡
+//
+// IMAN AUTO-SEND EMAIL SYSTEM
+// - Drafts email → 30 second countdown in Command Center → Auto-sends
+// - Brandon-only for now (until he says team, then anyone)
+// - Cooldown/countdown visible in Command Center
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const EMAIL_SEND_DELAY_SECONDS = 30; // 30 second countdown before auto-send
+const EMAIL_RECIPIENTS_ALLOWED = ['brandon']; // Only Brandon for now
+const pendingEmails = new Map(); // draftId -> timeout
+
+async function IMAN_autoDraftAndSend(context) {
+  const { to, regarding, tone, points, urgency } = context;
+  
+  // Check if recipient is allowed
+  const toEmail = to.toLowerCase();
+  const isBrandon = toEmail.includes('brandon') || toEmail.includes('bpierce') || toEmail === 'brandonpiercesr@gmail.com';
+  
+  if (!isBrandon && !EMAIL_RECIPIENTS_ALLOWED.includes('team') && !EMAIL_RECIPIENTS_ALLOWED.includes('anyone')) {
+    console.log('[IMAN] Recipient not in allowed list, skipping auto-send');
+    broadcastToCommandCenter({
+      type: 'email_blocked',
+      reason: 'Only Brandon emails allowed for now',
+      to,
+      timestamp: new Date().toISOString()
+    });
+    return { success: false, reason: 'Recipient not allowed' };
+  }
+  
+  console.log('[IMAN] Auto-drafting email to:', to);
+  
+  // Draft the email
+  const draft = await IMAN_draftEmail({ to, regarding, tone, points });
+  
+  if (!draft) {
+    return { success: false, reason: 'Draft failed' };
+  }
+  
+  // Start countdown in Command Center
+  const countdownId = 'email_' + Date.now();
+  
+  broadcastToCommandCenter({
+    type: 'email_countdown_start',
+    id: countdownId,
+    draft: {
+      to: draft.to,
+      subject: draft.subject,
+      preview: draft.body.substring(0, 100) + '...'
+    },
+    seconds: EMAIL_SEND_DELAY_SECONDS,
+    timestamp: new Date().toISOString(),
+    message: 'Email will auto-send in ' + EMAIL_SEND_DELAY_SECONDS + ' seconds. Cancel from Command Center.'
+  });
+  
+  // Set timeout for auto-send
+  const timeout = setTimeout(async () => {
+    pendingEmails.delete(countdownId);
+    
+    // Actually send the email
+    const sendResult = await IMAN_sendEmail(draft);
+    
+    broadcastToCommandCenter({
+      type: 'email_sent',
+      id: countdownId,
+      to: draft.to,
+      subject: draft.subject,
+      success: sendResult.success,
+      timestamp: new Date().toISOString()
+    });
+    
+  }, EMAIL_SEND_DELAY_SECONDS * 1000);
+  
+  pendingEmails.set(countdownId, { timeout, draft });
+  
+  return { 
+    success: true, 
+    countdownId, 
+    seconds: EMAIL_SEND_DELAY_SECONDS,
+    draft: { to: draft.to, subject: draft.subject }
+  };
+}
+
+// Cancel pending email from Command Center
+function IMAN_cancelEmail(countdownId) {
+  const pending = pendingEmails.get(countdownId);
+  if (pending) {
+    clearTimeout(pending.timeout);
+    pendingEmails.delete(countdownId);
+    
+    broadcastToCommandCenter({
+      type: 'email_cancelled',
+      id: countdownId,
+      timestamp: new Date().toISOString()
+    });
+    
+    console.log('[IMAN] Email cancelled:', countdownId);
+    return { success: true };
+  }
+  return { success: false, reason: 'Not found' };
+}
+
+// Actually send the email via Nylas
+async function IMAN_sendEmail(draft) {
+  try {
+    const grantId = await getActiveNylasGrant();
+    if (!grantId) {
+      console.error('[IMAN] No Nylas grant available');
+      return { success: false, reason: 'No Nylas grant' };
+    }
+    
+    const sendResult = await httpsRequest({
+      hostname: 'api.us.nylas.com',
+      path: '/v3/grants/' + grantId + '/messages/send',
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + NYLAS_API_KEY,
+        'Content-Type': 'application/json'
+      }
+    }, JSON.stringify({
+      to: [{ email: draft.to }],
+      subject: draft.subject,
+      body: draft.body
+    }));
+    
+    console.log('[IMAN] Email sent to:', draft.to);
+    
+    // Store in brain
+    await httpsRequest({
+      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+      path: '/rest/v1/aba_memory',
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': 'Bearer ' + SUPABASE_KEY,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal'
+      }
+    }, JSON.stringify({
+      content: 'EMAIL SENT: To=' + draft.to + ' | Subject=' + draft.subject + ' | Body=' + draft.body.substring(0, 500),
+      memory_type: 'email_sent',
+      categories: ['iman', 'email', 'sent'],
+      importance: 6,
+      is_system: true,
+      source: 'iman_send_' + Date.now(),
+      tags: ['email', 'sent', 'iman']
+    }));
+    
+    return { success: true, to: draft.to, subject: draft.subject };
+  } catch (e) {
+    console.error('[IMAN] Send error:', e.message);
+    return { success: false, reason: e.message };
+  }
+}
+
+// Draft email using AI
+async function IMAN_draftEmail(context) {
+  const { to, regarding, tone, points } = context;
+  
+  console.log('[IMAN] Drafting email to:', to, '| Regarding:', regarding);
+  
+  const prompt = 'You are IMAN (Inbox Management Agent Navigator), drafting a professional email.\n\n' +
+    'TO: ' + to + '\n' +
+    'REGARDING: ' + regarding + '\n' +
+    'TONE: ' + (tone || 'professional') + '\n' +
+    'KEY POINTS:\n' + (points ? points.join('\n') : 'General follow-up') + '\n\n' +
+    'Write a complete email. Be concise, professional, human.\n' +
+    'Format:\nSUBJECT: [subject]\nBODY:\n[email body]';
+  
+  try {
+    const response = await callModel(prompt);
+    
+    const subjectMatch = response.match(/SUBJECT:\s*(.+)/i);
+    const bodyMatch = response.match(/BODY:\s*([\s\S]+)/i);
+    
+    return {
+      to,
+      subject: subjectMatch ? subjectMatch[1].trim() : 'Re: ' + regarding,
+      body: bodyMatch ? bodyMatch[1].trim() : response,
+      created: new Date().toISOString()
+    };
+  } catch (e) {
+    console.error('[IMAN] Draft error:', e.message);
+    return null;
+  }
+}
+
 const httpServer = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const path = url.pathname;
@@ -5387,6 +5577,37 @@ Phone: (336) 389-8116</p>
   }
 
 
+  
+  // POST /api/iman/auto-send - Auto draft and send with countdown
+  if (path === '/api/iman/auto-send' && method === 'POST') {
+    const body = await parseBody(req);
+    console.log('[IMAN] Auto-send request:', body.to);
+    const result = await IMAN_autoDraftAndSend(body);
+    return jsonResponse(res, 200, result);
+  }
+  
+  // POST /api/iman/cancel - Cancel pending email
+  if (path === '/api/iman/cancel' && method === 'POST') {
+    const body = await parseBody(req);
+    console.log('[IMAN] Cancel request:', body.countdownId);
+    const result = IMAN_cancelEmail(body.countdownId);
+    return jsonResponse(res, 200, result);
+  }
+  
+  // GET /api/iman/pending - List pending emails
+  if (path === '/api/iman/pending' && method === 'GET') {
+    const pending = [];
+    for (const [id, data] of pendingEmails.entries()) {
+      pending.push({
+        id,
+        to: data.draft.to,
+        subject: data.draft.subject
+      });
+    }
+    return jsonResponse(res, 200, { count: pending.length, pending });
+  }
+
+
   // ⬡B:AIR:REACH.API.NOTFOUND:CODE:infrastructure.error.404:USER→REACH→ERROR:T10:v1.5.0:20260213:n1f2d⬡ CATCH-ALL
   // ═══════════════════════════════════════════════════════════════════════
   jsonResponse(res, 404, { 
@@ -5581,6 +5802,25 @@ ccWss.on('connection', (ws, req) => {
           // List all registered devices
           const devices = await getActiveDevices(payload?.userId);
           ws.send(JSON.stringify({ type: 'devices', devices }));
+          break;
+          
+        case 'cancel_email':
+          // Cancel pending email from Command Center
+          const cancelResult = IMAN_cancelEmail(payload?.countdownId);
+          ws.send(JSON.stringify({ type: 'email_cancel_result', result: cancelResult }));
+          break;
+          
+        case 'send_email_now':
+          // Skip countdown and send immediately
+          const pending = pendingEmails.get(payload?.countdownId);
+          if (pending) {
+            clearTimeout(pending.timeout);
+            pendingEmails.delete(payload.countdownId);
+            const sendNowResult = await IMAN_sendEmail(pending.draft);
+            ws.send(JSON.stringify({ type: 'email_sent_now', result: sendNowResult }));
+          } else {
+            ws.send(JSON.stringify({ type: 'error', message: 'Email not found' }));
+          }
           break;
           
         case 'ping':
