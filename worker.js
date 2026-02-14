@@ -628,11 +628,14 @@ async function JUDE_decideEscalation(lukeAnalysis, coleContext) {
   
   // Decide action based on urgency
   let action = 'log_only';
+  // THROTTLED: Only call on TRUE emergencies (urgency 6)
+  // Lower urgencies use SMS or email to avoid blowing up Brandon's phone
   if (urgency >= 6) action = 'call_emergency';
-  else if (urgency >= 5) action = 'call_immediate';
-  else if (urgency >= 4) action = 'sms_then_call';
+  else if (urgency >= 5) action = 'sms_then_call'; // Changed from call_immediate
+  else if (urgency >= 4) action = 'sms_only'; // Changed from sms_then_call
   else if (urgency >= 3) action = 'sms_only';
   else if (urgency >= 2) action = 'email_only';
+  else action = 'log_only';
   
   return {
     action,
@@ -754,6 +757,48 @@ async function AIR_executeEscalation(judeDecision, packMessage) {
       }
       
     } else if (action === 'call_immediate' || action === 'call_emergency') {
+      // THROTTLE CHECK - Don't blow up Brandon's phone
+      const throttleCheck = canMakeCall(target.phone);
+      if (!throttleCheck.allowed) {
+        console.log(`[AIR] Call throttled: ${throttleCheck.reason}`);
+        result.status = 'throttled';
+        result.reason = throttleCheck.reason;
+        result.fallback = 'sms_sent';
+        
+        // Send SMS instead
+        try {
+          const smsRes = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Messages.json`, {
+            method: 'POST',
+            headers: {
+              'Authorization': 'Basic ' + Buffer.from(`${TWILIO_SID}:${TWILIO_AUTH}`).toString('base64'),
+              'Content-Type': 'application/x-www-form-urlencoded'
+            },
+            body: new URLSearchParams({
+              To: target.phone,
+              From: TWILIO_PHONE,
+              Body: `[ABA - Call throttled] ${packMessage.smsMessage}`
+            }).toString()
+          });
+          const smsData = await smsRes.json();
+          result.smsSid = smsData.sid;
+        } catch (smsErr) {
+          console.log('[AIR] SMS fallback failed:', smsErr.message);
+        }
+        
+        // Broadcast to Command Center
+        broadcastToCommandCenter({
+          type: 'call_throttled',
+          target: target.name,
+          reason: throttleCheck.reason,
+          timestamp: new Date().toISOString()
+        });
+        
+        return result;
+      }
+      
+      // Record this call for throttling
+      recordCall(target.phone);
+      
       // Call via DIAL (Twilio)
       const callRes = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Calls.json`, {
         method: 'POST',
@@ -957,7 +1002,49 @@ async function TRIGGER_systemAlert(alert) {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const HEARTBEAT_INTERVAL = 5 * 60 * 1000; // 5 minutes
-const COMMAND_CENTER_CLIENTS = new Set(); // WebSocket clients
+const COMMAND_CENTER_CLIENTS = new Set();
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:AIR:REACH.ESCALATION.THROTTLE:CODE:call.cooldown.protection:T10:v1.0.0:20260214⬡
+// CALL THROTTLING - Prevent ABA from blowing up Brandon's phone
+// ═══════════════════════════════════════════════════════════════════════════════
+const CALL_COOLDOWN = new Map(); // phone -> last call timestamp
+const CALL_COOLDOWN_MINUTES = 30; // Don't call same person within 30 min
+const MAX_CALLS_PER_HOUR = 3; // Max 3 calls per hour total
+const CALL_HISTORY = []; // timestamps of all calls
+
+function canMakeCall(phone) {
+  const now = Date.now();
+  
+  // Check per-person cooldown
+  const lastCall = CALL_COOLDOWN.get(phone);
+  if (lastCall && (now - lastCall) < CALL_COOLDOWN_MINUTES * 60 * 1000) {
+    const minutesLeft = Math.ceil((CALL_COOLDOWN_MINUTES * 60 * 1000 - (now - lastCall)) / 60000);
+    console.log(`[THROTTLE] Cooldown active for ${phone} - ${minutesLeft} min remaining`);
+    return { allowed: false, reason: `Cooldown: ${minutesLeft} min remaining` };
+  }
+  
+  // Check hourly limit
+  const oneHourAgo = now - 60 * 60 * 1000;
+  const recentCalls = CALL_HISTORY.filter(t => t > oneHourAgo);
+  if (recentCalls.length >= MAX_CALLS_PER_HOUR) {
+    console.log(`[THROTTLE] Hourly limit reached (${recentCalls.length}/${MAX_CALLS_PER_HOUR})`);
+    return { allowed: false, reason: `Hourly limit: ${MAX_CALLS_PER_HOUR} calls/hour` };
+  }
+  
+  return { allowed: true };
+}
+
+function recordCall(phone) {
+  CALL_COOLDOWN.set(phone, Date.now());
+  CALL_HISTORY.push(Date.now());
+  // Clean old history
+  const oneHourAgo = Date.now() - 60 * 60 * 1000;
+  while (CALL_HISTORY.length > 0 && CALL_HISTORY[0] < oneHourAgo) {
+    CALL_HISTORY.shift();
+  }
+}
+ // WebSocket clients
 
 function startPulseHeartbeat() {
   console.log('[PULSE] Starting 24/7 heartbeat loop (every 5 min)...');
@@ -1047,6 +1134,14 @@ async function checkEmails(pulseId) {
       const isImportant = importantKeywords.some(k => combined.includes(k));
       
       if (isImportant) {
+        // Check if we already escalated this email (dedup by message ID)
+        const emailKey = `email_${msg.id}`;
+        if (CALL_COOLDOWN.has(emailKey)) {
+          console.log(`[PULSE:EMAIL] Already escalated: "${subject}" - skipping`);
+          continue;
+        }
+        CALL_COOLDOWN.set(emailKey, Date.now()); // Mark as processed
+        
         console.log(`[PULSE:EMAIL] ⚠️ Important email detected: "${subject}" from ${from}`);
         
         // Trigger escalation
@@ -5198,12 +5293,51 @@ Phone: (336) 389-8116</p>
   
   // GET /api/pulse/status - Get heartbeat status
   if (path === '/api/pulse/status' && method === 'GET') {
+    const oneHourAgo = Date.now() - 60 * 60 * 1000;
+    const recentCalls = CALL_HISTORY.filter(t => t > oneHourAgo);
     return jsonResponse(res, 200, {
       status: 'active',
       uptime: Math.floor(process.uptime()),
       commandCenterClients: COMMAND_CENTER_CLIENTS.size,
       heartbeatInterval: '5 minutes',
-      lastPulse: new Date().toISOString()
+      lastPulse: new Date().toISOString(),
+      callThrottle: {
+        callsThisHour: recentCalls.length,
+        maxCallsPerHour: MAX_CALLS_PER_HOUR,
+        cooldownMinutes: CALL_COOLDOWN_MINUTES,
+        activeCooldowns: CALL_COOLDOWN.size
+      }
+    });
+  }
+  
+  // GET /api/throttle/status - Get call throttle status
+  if (path === '/api/throttle/status' && method === 'GET') {
+    const oneHourAgo = Date.now() - 60 * 60 * 1000;
+    const recentCalls = CALL_HISTORY.filter(t => t > oneHourAgo);
+    const cooldowns = {};
+    for (const [phone, time] of CALL_COOLDOWN.entries()) {
+      if (!phone.startsWith('email_')) {
+        const remaining = Math.max(0, CALL_COOLDOWN_MINUTES * 60 * 1000 - (Date.now() - time));
+        cooldowns[phone] = Math.ceil(remaining / 60000) + ' min remaining';
+      }
+    }
+    return jsonResponse(res, 200, {
+      callsThisHour: recentCalls.length,
+      maxCallsPerHour: MAX_CALLS_PER_HOUR,
+      cooldownMinutes: CALL_COOLDOWN_MINUTES,
+      activeCooldowns: cooldowns,
+      canCallNow: recentCalls.length < MAX_CALLS_PER_HOUR
+    });
+  }
+  
+  // POST /api/throttle/reset - Reset throttle (emergency override)
+  if (path === '/api/throttle/reset' && method === 'POST') {
+    console.log('[THROTTLE] Manual reset triggered');
+    CALL_COOLDOWN.clear();
+    CALL_HISTORY.length = 0;
+    return jsonResponse(res, 200, { 
+      reset: true, 
+      message: 'All cooldowns cleared. ABA can call again immediately.' 
     });
   }
   
