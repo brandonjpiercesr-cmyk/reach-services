@@ -5228,12 +5228,16 @@ Phone: (336) 389-8116</p>
       // REAL 2-WAY CONVERSATION using ConversationRelay
       // User can talk back and have a real conversation with ABA
       // Using ElevenLabs with Brandon's voice: hAQCIV0cazWEuGzMG5bV
+      // Note: In XML, & must be &amp;
+      const wsUrl = 'wss://' + req.headers.host + '/conversation-relay?trace=' + traceId;
+      const safeGreeting = msg.replace(/"/g, "'").replace(/&/g, "and").replace(/</g, "").replace(/>/g, "");
+      
       twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Connect>
     <ConversationRelay 
-      url="wss://${req.headers.host}/conversation-relay?trace=${traceId}&msg=${encodeURIComponent(msg)}"
-      welcomeGreeting="${msg.replace(/"/g, "'")}"
+      url="${wsUrl}"
+      welcomeGreeting="${safeGreeting}"
       ttsProvider="ElevenLabs"
       voice="hAQCIV0cazWEuGzMG5bV"
       transcriptionProvider="deepgram"
