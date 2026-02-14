@@ -942,6 +942,773 @@ async function TRIGGER_systemAlert(alert) {
 
 
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:AIR:REACH.AUTONOMY.LAYER:CODE:infrastructure.proactive.system:
+// AIR→PULSE→HEARTBEAT→AGENTS→ACTION:T10:v1.0.0:20260214:a1u2t⬡
+// 
+// THE AUTONOMY LAYER - Makes ABA a true 24/7 life assistant
+// Not webhook-dependent. PROACTIVE.
+// 
+// ROUTING: PULSE*AIR*AGENTS*ACTION
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SPURT 1: PULSE HEARTBEAT - The 24/7 autonomous loop
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const HEARTBEAT_INTERVAL = 5 * 60 * 1000; // 5 minutes
+const COMMAND_CENTER_CLIENTS = new Set(); // WebSocket clients
+
+function startPulseHeartbeat() {
+  console.log('[PULSE] Starting 24/7 heartbeat loop (every 5 min)...');
+  
+  // Initial pulse
+  setTimeout(() => pulseCheck(), 10000);
+  
+  // Continuous pulse
+  setInterval(() => pulseCheck(), HEARTBEAT_INTERVAL);
+}
+
+async function pulseCheck() {
+  const pulseId = `PULSE-${Date.now()}`;
+  console.log(`[PULSE] ♥ Heartbeat ${pulseId}`);
+  
+  try {
+    // Check 1: Poll emails for important messages
+    await checkEmails(pulseId);
+    
+    // Check 2: Check for upcoming deadlines
+    await checkDeadlines(pulseId);
+    
+    // Check 3: Check pending actions in brain
+    await checkPendingActions(pulseId);
+    
+    // Check 4: Health check all integrations
+    await healthCheck(pulseId);
+    
+    // Broadcast pulse to Command Center
+    broadcastToCommandCenter({
+      type: 'pulse',
+      id: pulseId,
+      timestamp: new Date().toISOString(),
+      status: 'healthy'
+    });
+    
+  } catch (e) {
+    console.error('[PULSE] Heartbeat error:', e.message);
+    broadcastToCommandCenter({
+      type: 'pulse_error',
+      id: pulseId,
+      error: e.message
+    });
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SPURT 2: EMAIL POLLING - Proactive inbox check
+// ═══════════════════════════════════════════════════════════════════════════════
+
+async function checkEmails(pulseId) {
+  console.log(`[PULSE:EMAIL] Checking inbox... (${pulseId})`);
+  
+  try {
+    // Get Nylas grant ID
+    const grantId = await getActiveNylasGrant();
+    if (!grantId) {
+      console.log('[PULSE:EMAIL] No Nylas grant - skipping');
+      return;
+    }
+    
+    // Fetch recent unread emails
+    const nylasResult = await httpsRequest({
+      hostname: 'api.us.nylas.com',
+      path: `/v3/grants/${grantId}/messages?limit=10&unread=true`,
+      method: 'GET',
+      headers: {
+        'Authorization': 'Bearer ' + NYLAS_API_KEY,
+        'Accept': 'application/json'
+      }
+    });
+    
+    const messages = JSON.parse(nylasResult.data.toString()).data || [];
+    console.log(`[PULSE:EMAIL] Found ${messages.length} unread emails`);
+    
+    // Check each for importance
+    const importantKeywords = ['urgent', 'asap', 'immediately', 'deadline', 'investor', 
+      'term sheet', 'funding', 'contract', 'legal', 'nda', 'offer', 'interview',
+      'emergency', 'critical', 'important', 'action required', 'response needed'];
+    
+    for (const msg of messages) {
+      const subject = msg.subject || '';
+      const snippet = msg.snippet || '';
+      const from = (msg.from || []).map(f => f.email).join(', ');
+      const combined = (subject + ' ' + snippet).toLowerCase();
+      
+      const isImportant = importantKeywords.some(k => combined.includes(k));
+      
+      if (isImportant) {
+        console.log(`[PULSE:EMAIL] ⚠️ Important email detected: "${subject}" from ${from}`);
+        
+        // Trigger escalation
+        await TRIGGER_emailReceived({
+          from: from,
+          subject: subject,
+          body: snippet,
+          id: msg.id
+        });
+        
+        // Broadcast to Command Center
+        broadcastToCommandCenter({
+          type: 'important_email',
+          pulseId,
+          subject,
+          from,
+          timestamp: new Date().toISOString()
+        });
+      }
+    }
+  } catch (e) {
+    console.error('[PULSE:EMAIL] Error:', e.message);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SPURT 3: DEADLINE CHECKING - Proactive calendar/job deadlines
+// ═══════════════════════════════════════════════════════════════════════════════
+
+async function checkDeadlines(pulseId) {
+  console.log(`[PULSE:DEADLINE] Checking deadlines... (${pulseId})`);
+  
+  try {
+    const now = new Date();
+    const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+    
+    // Check job deadlines in brain
+    const jobsResult = await httpsRequest({
+      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+      path: '/rest/v1/aba_memory?memory_type=eq.parsed_job&order=created_at.desc&limit=50',
+      method: 'GET',
+      headers: {
+        'apikey': SUPABASE_KEY || SUPABASE_ANON,
+        'Authorization': 'Bearer ' + (SUPABASE_KEY || SUPABASE_ANON)
+      }
+    });
+    
+    const jobs = JSON.parse(jobsResult.data.toString()) || [];
+    
+    for (const jobEntry of jobs) {
+      try {
+        const job = JSON.parse(jobEntry.content);
+        if (job.deadline) {
+          const deadlineDate = new Date(job.deadline);
+          if (deadlineDate >= now && deadlineDate <= tomorrow) {
+            console.log(`[PULSE:DEADLINE] ⚠️ Job deadline in 24h: ${job.title} at ${job.company}`);
+            
+            await TRIGGER_jobDeadline({
+              title: job.title,
+              company: job.company,
+              deadline: job.deadline,
+              url: job.url,
+              id: jobEntry.id
+            });
+            
+            broadcastToCommandCenter({
+              type: 'deadline_alert',
+              pulseId,
+              title: job.title,
+              company: job.company,
+              deadline: job.deadline
+            });
+          }
+        }
+      } catch (e) { /* skip malformed entries */ }
+    }
+    
+    // Check pending calls (scheduled for sms_then_call)
+    const pendingCalls = await httpsRequest({
+      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+      path: '/rest/v1/aba_memory?memory_type=eq.pending_call&order=created_at.asc&limit=10',
+      method: 'GET',
+      headers: {
+        'apikey': SUPABASE_KEY || SUPABASE_ANON,
+        'Authorization': 'Bearer ' + (SUPABASE_KEY || SUPABASE_ANON)
+      }
+    });
+    
+    const pending = JSON.parse(pendingCalls.data.toString()) || [];
+    for (const call of pending) {
+      const created = new Date(call.created_at);
+      const fiveMinAgo = new Date(now.getTime() - 5 * 60 * 1000);
+      
+      if (created < fiveMinAgo) {
+        console.log(`[PULSE:DEADLINE] 📞 Executing pending call from ${call.source}`);
+        // Execute the pending call
+        try {
+          const callData = JSON.parse(call.content);
+          await AIR_executeEscalation(
+            { action: 'call_immediate', target: callData.target },
+            { spokenMessage: callData.message }
+          );
+          
+          // Delete the pending call entry
+          await httpsRequest({
+            hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+            path: '/rest/v1/aba_memory?id=eq.' + call.id,
+            method: 'DELETE',
+            headers: {
+              'apikey': SUPABASE_KEY,
+              'Authorization': 'Bearer ' + SUPABASE_KEY
+            }
+          });
+        } catch (e) {
+          console.error('[PULSE:DEADLINE] Pending call error:', e.message);
+        }
+      }
+    }
+  } catch (e) {
+    console.error('[PULSE:DEADLINE] Error:', e.message);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SPURT 4: PENDING ACTIONS - Check for things AIR needs to follow up on
+// ═══════════════════════════════════════════════════════════════════════════════
+
+async function checkPendingActions(pulseId) {
+  console.log(`[PULSE:ACTIONS] Checking pending actions... (${pulseId})`);
+  
+  try {
+    // Check for pending_action memory types
+    const actionsResult = await httpsRequest({
+      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+      path: '/rest/v1/aba_memory?memory_type=eq.pending_action&order=importance.desc&limit=10',
+      method: 'GET',
+      headers: {
+        'apikey': SUPABASE_KEY || SUPABASE_ANON,
+        'Authorization': 'Bearer ' + (SUPABASE_KEY || SUPABASE_ANON)
+      }
+    });
+    
+    const actions = JSON.parse(actionsResult.data.toString()) || [];
+    
+    for (const action of actions) {
+      console.log(`[PULSE:ACTIONS] Found pending action: ${action.content?.substring(0, 100)}`);
+      
+      broadcastToCommandCenter({
+        type: 'pending_action',
+        pulseId,
+        content: action.content?.substring(0, 200),
+        importance: action.importance
+      });
+    }
+  } catch (e) {
+    console.error('[PULSE:ACTIONS] Error:', e.message);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SPURT 5: HEALTH CHECK - Verify all integrations are alive
+// ═══════════════════════════════════════════════════════════════════════════════
+
+async function healthCheck(pulseId) {
+  const health = {
+    supabase: false,
+    twilio: !!TWILIO_SID,
+    nylas: !!NYLAS_API_KEY,
+    elevenlabs: !!ELEVENLABS_KEY,
+    deepgram: !!DEEPGRAM_KEY,
+    gemini: !!GEMINI_KEY,
+    anthropic: !!ANTHROPIC_KEY
+  };
+  
+  // Test Supabase connection
+  try {
+    await httpsRequest({
+      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+      path: '/rest/v1/aba_memory?limit=1',
+      method: 'GET',
+      headers: {
+        'apikey': SUPABASE_ANON,
+        'Authorization': 'Bearer ' + SUPABASE_ANON
+      }
+    });
+    health.supabase = true;
+  } catch (e) {
+    health.supabase = false;
+  }
+  
+  console.log(`[PULSE:HEALTH] Status: Supabase=${health.supabase}, Twilio=${health.twilio}, Nylas=${health.nylas}`);
+  
+  broadcastToCommandCenter({
+    type: 'health_check',
+    pulseId,
+    health,
+    timestamp: new Date().toISOString()
+  });
+  
+  return health;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SPURT 6: COMMAND CENTER WEBSOCKET - Real-time to 1A Shell
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function setupCommandCenterWebSocket(wss) {
+  wss.on('connection', (ws, req) => {
+    const path = req.url || '';
+    
+    if (path.includes('/command-center') || path.includes('/1a-shell')) {
+      console.log('[COMMAND CENTER] 1A Shell connected');
+      COMMAND_CENTER_CLIENTS.add(ws);
+      
+      // Send welcome message
+      ws.send(JSON.stringify({
+        type: 'connected',
+        service: 'ABA REACH',
+        timestamp: new Date().toISOString(),
+        agents: ['AIR', 'VARA', 'LUKE', 'COLE', 'JUDE', 'PACK', 'IMAN', 'TASTE', 'DIAL', 'PULSE']
+      }));
+      
+      ws.on('message', (data) => {
+        try {
+          const msg = JSON.parse(data.toString());
+          handleCommandCenterMessage(ws, msg);
+        } catch (e) {
+          console.error('[COMMAND CENTER] Message error:', e.message);
+        }
+      });
+      
+      ws.on('close', () => {
+        console.log('[COMMAND CENTER] 1A Shell disconnected');
+        COMMAND_CENTER_CLIENTS.delete(ws);
+      });
+      
+      ws.on('error', (e) => {
+        console.error('[COMMAND CENTER] WebSocket error:', e.message);
+        COMMAND_CENTER_CLIENTS.delete(ws);
+      });
+    }
+  });
+}
+
+function handleCommandCenterMessage(ws, msg) {
+  const { type, payload } = msg;
+  
+  switch (type) {
+    case 'escalate':
+      // 1A Shell triggered escalation
+      AIR_escalate({
+        type: 'manual_escalation',
+        source: 'command_center',
+        content: payload.message,
+        metadata: payload
+      }).then(result => {
+        ws.send(JSON.stringify({ type: 'escalate_result', result }));
+      });
+      break;
+      
+    case 'status':
+      // Request current status
+      ws.send(JSON.stringify({
+        type: 'status',
+        clients: COMMAND_CENTER_CLIENTS.size,
+        uptime: process.uptime(),
+        timestamp: new Date().toISOString()
+      }));
+      break;
+      
+    case 'search':
+      // Search brain via SAGE
+      SAGE_search(payload.query).then(results => {
+        ws.send(JSON.stringify({ type: 'search_results', results }));
+      });
+      break;
+      
+    default:
+      console.log('[COMMAND CENTER] Unknown message type:', type);
+  }
+}
+
+function broadcastToCommandCenter(message) {
+  const payload = JSON.stringify(message);
+  
+  for (const client of COMMAND_CENTER_CLIENTS) {
+    try {
+      if (client.readyState === 1) { // OPEN
+        client.send(payload);
+      }
+    } catch (e) {
+      COMMAND_CENTER_CLIENTS.delete(client);
+    }
+  }
+  
+  // Also log activity to brain
+  if (message.type !== 'pulse' && message.type !== 'health_check') {
+    logActivityToBrain(message);
+  }
+}
+
+async function logActivityToBrain(activity) {
+  try {
+    await httpsRequest({
+      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+      path: '/rest/v1/aba_memory',
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': 'Bearer ' + SUPABASE_KEY,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal'
+      }
+    }, JSON.stringify({
+      content: `ACTIVITY: ${activity.type} | ${JSON.stringify(activity).substring(0, 500)}`,
+      memory_type: 'activity_log',
+      categories: ['activity', activity.type],
+      importance: 3,
+      is_system: true,
+      source: 'command_center_' + Date.now(),
+      tags: ['activity', 'pulse', activity.type]
+    }));
+  } catch (e) { /* non-critical */ }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SPURT 7: SAGE INDEXER - ACL tag search and navigation
+// ═══════════════════════════════════════════════════════════════════════════════
+
+async function SAGE_search(query) {
+  console.log(`[SAGE] Searching: "${query}"`);
+  
+  try {
+    // Search by content
+    const contentSearch = await httpsRequest({
+      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+      path: `/rest/v1/aba_memory?content=ilike.*${encodeURIComponent(query)}*&order=importance.desc&limit=20`,
+      method: 'GET',
+      headers: {
+        'apikey': SUPABASE_KEY || SUPABASE_ANON,
+        'Authorization': 'Bearer ' + (SUPABASE_KEY || SUPABASE_ANON)
+      }
+    });
+    
+    const results = JSON.parse(contentSearch.data.toString()) || [];
+    
+    // Parse ACL tags from results
+    const aclTagged = results.map(r => {
+      const aclMatch = (r.content || '').match(/⬡B:[^⬡]+⬡/g) || [];
+      return {
+        id: r.id,
+        content: r.content?.substring(0, 200),
+        acl_tags: aclMatch,
+        memory_type: r.memory_type,
+        importance: r.importance
+      };
+    });
+    
+    console.log(`[SAGE] Found ${aclTagged.length} results`);
+    return aclTagged;
+  } catch (e) {
+    console.error('[SAGE] Search error:', e.message);
+    return [];
+  }
+}
+
+async function SAGE_indexACL() {
+  console.log('[SAGE] Indexing all ACL tags...');
+  
+  try {
+    // Get all memories with ACL tags
+    const allMemories = await httpsRequest({
+      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+      path: '/rest/v1/aba_memory?content=ilike.*⬡B:*&limit=500',
+      method: 'GET',
+      headers: {
+        'apikey': SUPABASE_KEY || SUPABASE_ANON,
+        'Authorization': 'Bearer ' + (SUPABASE_KEY || SUPABASE_ANON)
+      }
+    });
+    
+    const memories = JSON.parse(allMemories.data.toString()) || [];
+    const aclIndex = {};
+    
+    for (const mem of memories) {
+      const tags = (mem.content || '').match(/⬡B:[^⬡]+⬡/g) || [];
+      for (const tag of tags) {
+        if (!aclIndex[tag]) {
+          aclIndex[tag] = [];
+        }
+        aclIndex[tag].push({
+          id: mem.id,
+          memory_type: mem.memory_type,
+          importance: mem.importance
+        });
+      }
+    }
+    
+    console.log(`[SAGE] Indexed ${Object.keys(aclIndex).length} unique ACL tags`);
+    return aclIndex;
+  } catch (e) {
+    console.error('[SAGE] Index error:', e.message);
+    return {};
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SPURT 8: AUTO-DRAFT EMAILS - IMAN composes, AIR approves
+// ═══════════════════════════════════════════════════════════════════════════════
+
+async function IMAN_draftEmail(context) {
+  const { to, regarding, tone, points } = context;
+  
+  console.log(`[IMAN] Drafting email to ${to} regarding "${regarding}"`);
+  
+  const prompt = `You are IMAN (Inbox Management Agent Navigator), drafting a professional email.
+
+TO: ${to}
+REGARDING: ${regarding}
+TONE: ${tone || 'professional'}
+KEY POINTS TO INCLUDE:
+${points ? points.join('\n') : 'General follow-up'}
+
+Write a complete email (subject line + body). Be concise, professional, and human-sounding.
+Format:
+SUBJECT: [subject]
+BODY:
+[email body]`;
+
+  try {
+    const response = await callModel(prompt);
+    
+    // Parse subject and body
+    const subjectMatch = response.match(/SUBJECT:\s*(.+)/i);
+    const bodyMatch = response.match(/BODY:\s*([\s\S]+)/i);
+    
+    const draft = {
+      to,
+      subject: subjectMatch ? subjectMatch[1].trim() : `Re: ${regarding}`,
+      body: bodyMatch ? bodyMatch[1].trim() : response,
+      status: 'draft',
+      created: new Date().toISOString()
+    };
+    
+    // Store draft in brain for AIR approval
+    await httpsRequest({
+      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+      path: '/rest/v1/aba_memory',
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': 'Bearer ' + SUPABASE_KEY,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal'
+      }
+    }, JSON.stringify({
+      content: JSON.stringify(draft),
+      memory_type: 'email_draft',
+      categories: ['iman', 'email', 'draft'],
+      importance: 7,
+      is_system: true,
+      source: 'iman_draft_' + Date.now(),
+      tags: ['email_draft', 'pending_approval', 'iman']
+    }));
+    
+    console.log(`[IMAN] Draft stored, pending AIR approval`);
+    
+    // Notify Command Center
+    broadcastToCommandCenter({
+      type: 'email_draft',
+      to,
+      subject: draft.subject,
+      status: 'pending_approval'
+    });
+    
+    return draft;
+  } catch (e) {
+    console.error('[IMAN] Draft error:', e.message);
+    return null;
+  }
+}
+
+async function IMAN_sendApprovedEmail(draftId) {
+  console.log(`[IMAN] Sending approved email: ${draftId}`);
+  
+  try {
+    // Fetch draft from brain
+    const draftResult = await httpsRequest({
+      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+      path: `/rest/v1/aba_memory?id=eq.${draftId}`,
+      method: 'GET',
+      headers: {
+        'apikey': SUPABASE_KEY || SUPABASE_ANON,
+        'Authorization': 'Bearer ' + (SUPABASE_KEY || SUPABASE_ANON)
+      }
+    });
+    
+    const draftEntry = JSON.parse(draftResult.data.toString())[0];
+    if (!draftEntry) {
+      console.error('[IMAN] Draft not found');
+      return null;
+    }
+    
+    const draft = JSON.parse(draftEntry.content);
+    
+    // Send via Nylas
+    const grantId = await getActiveNylasGrant();
+    if (!grantId) {
+      console.error('[IMAN] No Nylas grant');
+      return null;
+    }
+    
+    const sendResult = await httpsRequest({
+      hostname: 'api.us.nylas.com',
+      path: `/v3/grants/${grantId}/messages/send`,
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + NYLAS_API_KEY,
+        'Content-Type': 'application/json'
+      }
+    }, JSON.stringify({
+      to: [{ email: draft.to }],
+      subject: draft.subject,
+      body: draft.body
+    }));
+    
+    console.log(`[IMAN] Email sent to ${draft.to}`);
+    
+    // Update draft status
+    await httpsRequest({
+      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+      path: `/rest/v1/aba_memory?id=eq.${draftId}`,
+      method: 'PATCH',
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': 'Bearer ' + SUPABASE_KEY,
+        'Content-Type': 'application/json'
+      }
+    }, JSON.stringify({
+      memory_type: 'email_sent',
+      tags: ['email_sent', 'iman']
+    }));
+    
+    broadcastToCommandCenter({
+      type: 'email_sent',
+      to: draft.to,
+      subject: draft.subject
+    });
+    
+    return { success: true, to: draft.to, subject: draft.subject };
+  } catch (e) {
+    console.error('[IMAN] Send error:', e.message);
+    return null;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SPURT 9: DEVICE REGISTRY - Multi-device sync
+// ═══════════════════════════════════════════════════════════════════════════════
+
+async function registerDevice(deviceInfo) {
+  const { deviceId, type, name, userId } = deviceInfo;
+  
+  console.log(`[DEVICE] Registering device: ${name} (${type})`);
+  
+  try {
+    // Check if device already exists
+    const existing = await httpsRequest({
+      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+      path: `/rest/v1/aba_memory?memory_type=eq.device_registry&content=ilike.*${deviceId}*`,
+      method: 'GET',
+      headers: {
+        'apikey': SUPABASE_KEY || SUPABASE_ANON,
+        'Authorization': 'Bearer ' + (SUPABASE_KEY || SUPABASE_ANON)
+      }
+    });
+    
+    const existingDevices = JSON.parse(existing.data.toString()) || [];
+    
+    if (existingDevices.length > 0) {
+      // Update last seen
+      await httpsRequest({
+        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+        path: `/rest/v1/aba_memory?id=eq.${existingDevices[0].id}`,
+        method: 'PATCH',
+        headers: {
+          'apikey': SUPABASE_KEY,
+          'Authorization': 'Bearer ' + SUPABASE_KEY,
+          'Content-Type': 'application/json'
+        }
+      }, JSON.stringify({
+        content: JSON.stringify({
+          deviceId, type, name, userId,
+          lastSeen: new Date().toISOString()
+        })
+      }));
+      console.log(`[DEVICE] Updated: ${name}`);
+    } else {
+      // Register new device
+      await httpsRequest({
+        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+        path: '/rest/v1/aba_memory',
+        method: 'POST',
+        headers: {
+          'apikey': SUPABASE_KEY,
+          'Authorization': 'Bearer ' + SUPABASE_KEY,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=minimal'
+        }
+      }, JSON.stringify({
+        content: JSON.stringify({
+          deviceId, type, name, userId,
+          registeredAt: new Date().toISOString(),
+          lastSeen: new Date().toISOString()
+        }),
+        memory_type: 'device_registry',
+        categories: ['device', type],
+        importance: 5,
+        is_system: true,
+        source: 'device_registry_' + deviceId,
+        tags: ['device', type, userId || 'anonymous']
+      }));
+      console.log(`[DEVICE] Registered: ${name}`);
+    }
+    
+    return { success: true, deviceId };
+  } catch (e) {
+    console.error('[DEVICE] Registration error:', e.message);
+    return { success: false, error: e.message };
+  }
+}
+
+async function getActiveDevices(userId) {
+  try {
+    const result = await httpsRequest({
+      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+      path: `/rest/v1/aba_memory?memory_type=eq.device_registry&order=updated_at.desc`,
+      method: 'GET',
+      headers: {
+        'apikey': SUPABASE_KEY || SUPABASE_ANON,
+        'Authorization': 'Bearer ' + (SUPABASE_KEY || SUPABASE_ANON)
+      }
+    });
+    
+    const devices = JSON.parse(result.data.toString()) || [];
+    return devices.map(d => {
+      try { return JSON.parse(d.content); } 
+      catch { return null; }
+    }).filter(Boolean);
+  } catch (e) {
+    console.error('[DEVICE] List error:', e.message);
+    return [];
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// EXPORTS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+
+
+
 async function AIR_process(userSaid, history, callerIdentity, demoState) {
   console.log('');
   console.log('═══════════════════════════════════════════════════════════');
@@ -4354,11 +5121,107 @@ Phone: (336) 389-8116</p>
   }
 
 
+  
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // ⬡B:AIR:REACH.AUTONOMY.ROUTES:CODE:routing.autonomy.api:T10:v1.0.0:20260214:a1r1t⬡
+  // AUTONOMY LAYER ROUTES - Making ABA proactive
+  // ═══════════════════════════════════════════════════════════════════════════════
+  
+  // GET /api/sage/search - Search brain via SAGE
+  if (path === '/api/sage/search' && method === 'GET') {
+    const query = url.searchParams.get('q') || '';
+    console.log('[SAGE] API search:', query);
+    const results = await SAGE_search(query);
+    return jsonResponse(res, 200, { query, results, count: results.length });
+  }
+  
+  // GET /api/sage/index - Get ACL tag index
+  if (path === '/api/sage/index' && method === 'GET') {
+    console.log('[SAGE] API index request');
+    const index = await SAGE_indexACL();
+    return jsonResponse(res, 200, { tags: Object.keys(index).length, index });
+  }
+  
+  // POST /api/iman/draft - IMAN drafts an email
+  if (path === '/api/iman/draft' && method === 'POST') {
+    const body = await parseBody(req);
+    console.log('[IMAN] API draft request:', body.to);
+    const draft = await IMAN_draftEmail(body);
+    return jsonResponse(res, 200, { success: !!draft, draft });
+  }
+  
+  // POST /api/iman/send - Send approved email
+  if (path === '/api/iman/send' && method === 'POST') {
+    const body = await parseBody(req);
+    console.log('[IMAN] API send request:', body.draftId);
+    const result = await IMAN_sendApprovedEmail(body.draftId);
+    return jsonResponse(res, 200, result || { success: false });
+  }
+  
+  // GET /api/iman/drafts - List pending drafts
+  if (path === '/api/iman/drafts' && method === 'GET') {
+    try {
+      const draftsResult = await httpsRequest({
+        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+        path: '/rest/v1/aba_memory?memory_type=eq.email_draft&order=created_at.desc&limit=20',
+        method: 'GET',
+        headers: {
+          'apikey': SUPABASE_KEY || SUPABASE_ANON,
+          'Authorization': 'Bearer ' + (SUPABASE_KEY || SUPABASE_ANON)
+        }
+      });
+      const drafts = JSON.parse(draftsResult.data.toString()) || [];
+      return jsonResponse(res, 200, { count: drafts.length, drafts: drafts.map(d => ({
+        id: d.id,
+        ...JSON.parse(d.content || '{}'),
+        created_at: d.created_at
+      }))});
+    } catch (e) {
+      return jsonResponse(res, 500, { error: e.message });
+    }
+  }
+  
+  // POST /api/devices/register - Register a device
+  if (path === '/api/devices/register' && method === 'POST') {
+    const body = await parseBody(req);
+    console.log('[DEVICE] API register:', body.name);
+    const result = await registerDevice(body);
+    return jsonResponse(res, 200, result);
+  }
+  
+  // GET /api/devices - List registered devices
+  if (path === '/api/devices' && method === 'GET') {
+    const userId = url.searchParams.get('userId');
+    const devices = await getActiveDevices(userId);
+    return jsonResponse(res, 200, { count: devices.length, devices });
+  }
+  
+  // GET /api/pulse/status - Get heartbeat status
+  if (path === '/api/pulse/status' && method === 'GET') {
+    return jsonResponse(res, 200, {
+      status: 'active',
+      uptime: Math.floor(process.uptime()),
+      commandCenterClients: COMMAND_CENTER_CLIENTS.size,
+      heartbeatInterval: '5 minutes',
+      lastPulse: new Date().toISOString()
+    });
+  }
+  
+  // POST /api/pulse/trigger - Manual pulse trigger
+  if (path === '/api/pulse/trigger' && method === 'POST') {
+    console.log('[PULSE] Manual trigger via API');
+    pulseCheck().then(() => {
+      console.log('[PULSE] Manual pulse complete');
+    });
+    return jsonResponse(res, 200, { triggered: true, timestamp: new Date().toISOString() });
+  }
+
+
   // ⬡B:AIR:REACH.API.NOTFOUND:CODE:infrastructure.error.404:USER→REACH→ERROR:T10:v1.5.0:20260213:n1f2d⬡ CATCH-ALL
   // ═══════════════════════════════════════════════════════════════════════
   jsonResponse(res, 404, { 
     error: 'Route not found: ' + method + ' ' + path,
-    available: ['/api/escalate', '/api/escalate/twiml', '/api/escalate/confirm', '/api/call/dial', '/api/call/twiml', '/api/call/status', '/api/call/record', '/api/air/trigger/email', '/api/air/trigger/omi', '/api/air/trigger/calendar', '/api/air/trigger/job', '/api/air/trigger/system', '/api/router', '/api/models/claude', '/api/voice/deepgram-token', '/api/voice/tts', '/api/voice/tts-stream', '/api/omi/manifest', '/api/omi/webhook', '/api/sms/send', '/api/brain/search', '/api/brain/store', '/api/scrape-job', '/api/idealist/parse', '/api/idealist/verify', '/api/jobs/parsed', '/api/idealist/backfill'],
+    available: ['/api/escalate', '/api/escalate/twiml', '/api/escalate/confirm', '/api/call/dial', '/api/call/twiml', '/api/call/status', '/api/call/record', '/api/air/trigger/email', '/api/air/trigger/omi', '/api/air/trigger/calendar', '/api/air/trigger/job', '/api/air/trigger/system', '/api/sage/search', '/api/sage/index', '/api/iman/draft', '/api/iman/send', '/api/iman/drafts', '/api/devices/register', '/api/devices', '/api/pulse/status', '/api/pulse/trigger', '/api/router', '/api/models/claude', '/api/voice/deepgram-token', '/api/voice/tts', '/api/voice/tts-stream', '/api/omi/manifest', '/api/omi/webhook', '/api/sms/send', '/api/brain/search', '/api/brain/store', '/ws:command-center'],
     hint: 'We are all ABA'
   });
 });
@@ -4374,6 +5237,112 @@ Phone: (336) 389-8116</p>
 // ⬡B:AIR:REACH.VOICE.WEBSOCKET:CODE:voice.stream.twilio:TWILIO→REACH→DEEPGRAM→AIR→VARA:T8:v1.5.0:20260213:w1s2k⬡
 // ═══════════════════════════════════════════════════════════════════════════
 const wss = new WebSocketServer({ server: httpServer, path: '/media-stream' });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ⬡B:AIR:REACH.COMMANDCENTER.WEBSOCKET:CODE:realtime.1ashell.sync:
+// CC→REACH→AIR→PULSE→1A:T10:v1.0.0:20260214:c1c2w⬡
+// COMMAND CENTER WEBSOCKET - Real-time connection to 1A Shell
+// ═══════════════════════════════════════════════════════════════════════════
+const ccWss = new WebSocketServer({ server: httpServer, path: '/command-center' });
+
+ccWss.on('connection', (ws, req) => {
+  console.log('[COMMAND CENTER] 1A Shell connected');
+  COMMAND_CENTER_CLIENTS.add(ws);
+  
+  // Send welcome message with system status
+  ws.send(JSON.stringify({
+    type: 'connected',
+    service: 'ABA REACH v1.9.0 - AUTONOMY LAYER ACTIVE',
+    timestamp: new Date().toISOString(),
+    agents: ['AIR', 'VARA', 'LUKE', 'COLE', 'JUDE', 'PACK', 'IMAN', 'TASTE', 'DIAL', 'PULSE', 'SAGE'],
+    features: ['proactive_email', 'deadline_alerts', 'auto_escalation', 'device_sync']
+  }));
+  
+  ws.on('message', async (data) => {
+    try {
+      const msg = JSON.parse(data.toString());
+      const { type, payload } = msg;
+      
+      switch (type) {
+        case 'escalate':
+          // Manual escalation from 1A Shell
+          const escalateResult = await AIR_escalate({
+            type: 'manual_escalation',
+            source: 'command_center',
+            content: payload?.message || 'Manual escalation',
+            metadata: payload
+          });
+          ws.send(JSON.stringify({ type: 'escalate_result', result: escalateResult }));
+          break;
+          
+        case 'status':
+          // Request current system status
+          ws.send(JSON.stringify({
+            type: 'status',
+            clients: COMMAND_CENTER_CLIENTS.size,
+            uptime: Math.floor(process.uptime()),
+            timestamp: new Date().toISOString(),
+            heartbeatActive: true
+          }));
+          break;
+          
+        case 'search':
+          // Search brain via SAGE
+          const searchResults = await SAGE_search(payload?.query || '');
+          ws.send(JSON.stringify({ type: 'search_results', results: searchResults }));
+          break;
+          
+        case 'draft_email':
+          // Request IMAN to draft an email
+          const draft = await IMAN_draftEmail(payload);
+          ws.send(JSON.stringify({ type: 'draft_created', draft }));
+          break;
+          
+        case 'send_email':
+          // Send an approved email draft
+          const sendResult = await IMAN_sendApprovedEmail(payload?.draftId);
+          ws.send(JSON.stringify({ type: 'email_sent', result: sendResult }));
+          break;
+          
+        case 'register_device':
+          // Register this device
+          const deviceResult = await registerDevice(payload);
+          ws.send(JSON.stringify({ type: 'device_registered', result: deviceResult }));
+          break;
+          
+        case 'get_devices':
+          // List all registered devices
+          const devices = await getActiveDevices(payload?.userId);
+          ws.send(JSON.stringify({ type: 'devices', devices }));
+          break;
+          
+        case 'ping':
+          ws.send(JSON.stringify({ type: 'pong', timestamp: Date.now() }));
+          break;
+          
+        default:
+          console.log('[COMMAND CENTER] Unknown message type:', type);
+          ws.send(JSON.stringify({ type: 'error', message: 'Unknown type: ' + type }));
+      }
+    } catch (e) {
+      console.error('[COMMAND CENTER] Message error:', e.message);
+      ws.send(JSON.stringify({ type: 'error', message: e.message }));
+    }
+  });
+  
+  ws.on('close', () => {
+    console.log('[COMMAND CENTER] 1A Shell disconnected');
+    COMMAND_CENTER_CLIENTS.delete(ws);
+  });
+  
+  ws.on('error', (e) => {
+    console.error('[COMMAND CENTER] WebSocket error:', e.message);
+    COMMAND_CENTER_CLIENTS.delete(ws);
+  });
+});
+
+console.log('[COMMAND CENTER] WebSocket server ready on /command-center');
+
 
 wss.on('connection', (ws) => {
   console.log('[WEBSOCKET] New connection');
@@ -4490,6 +5459,17 @@ httpServer.listen(PORT, '0.0.0.0', () => {
   console.log('[ELEVENLABS] Streaming TTS - READY');
   console.log('═══════════════════════════════════════════════════════════');
   console.log('We are all ABA.');
+  console.log('═══════════════════════════════════════════════════════════');
+  
+  // ═══════════════════════════════════════════════════════════════════════════
+  // START AUTONOMY LAYER - 24/7 PROACTIVE SYSTEM
+  // ═══════════════════════════════════════════════════════════════════════════
+  console.log('[PULSE] Starting 24/7 autonomous heartbeat...');
+  startPulseHeartbeat();
+  console.log('[SAGE] ACL indexer ready');
+  console.log('[COMMAND CENTER] WebSocket ready for 1A Shell connections');
+  console.log('═══════════════════════════════════════════════════════════');
+  console.log('[ABA] AUTONOMY LAYER ACTIVE - I am now proactive!');
   console.log('═══════════════════════════════════════════════════════════');
 });
 
