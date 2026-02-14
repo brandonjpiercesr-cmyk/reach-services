@@ -1767,6 +1767,114 @@ async function checkEmails(pulseId) {
           timestamp: new Date().toISOString()
         });
       }
+      
+      // ⬡B:AIR:REACH.PULSE.IDEALIST_SCAN:CODE:email.idealist.auto_parse:PULSE→IMAN→HUNTER→BRAIN:T9:v2.6.7:20260214:i1d2e⬡
+      // L6: AIR | L4: EMAIL | L3: IMAN | L2: worker.js | L1: idealist_auto_scan
+      // Brandon: IMAN reads Claudette's inbox, finds Idealist emails, auto-seeds jobs
+      const isIdealist = from.includes('idealist.org') || combined.includes('idealist');
+      if (isIdealist) {
+        const idealistKey = `idealist_${msg.id}`;
+        if (CALL_COOLDOWN.has(idealistKey)) continue;
+        CALL_COOLDOWN.set(idealistKey, Date.now());
+        
+        console.log(`[PULSE:IMAN] 📧 Idealist email detected: "${subject}" - fetching full body...`);
+        
+        try {
+          // Get full email body (snippet doesn't have URLs)
+          const fullMsg = await httpsRequest({
+            hostname: 'api.us.nylas.com',
+            path: '/v3/grants/' + grantId + '/messages/' + msg.id,
+            method: 'GET',
+            headers: { 'Authorization': 'Bearer ' + NYLAS_API_KEY, 'Accept': 'application/json' }
+          });
+          const fullData = JSON.parse(fullMsg.data.toString()).data || JSON.parse(fullMsg.data.toString());
+          const emailBody = fullData.body || fullData.snippet || '';
+          
+          // Decode Postmark tracking URLs to get real Idealist URLs
+          const trackingUrls = emailBody.match(/https?:\/\/track\.pstmrk\.it\/3s\/(www\.idealist\.org[^\s"<>]+)/g) || [];
+          const directUrls = emailBody.match(/https?:\/\/(?:www\.)?idealist\.org\/(?:en\/)?(?:nonprofit-job|job|consultant-job|internship|volunteer-opportunity)\/[^\s"<>)&\]]+/g) || [];
+          
+          const allRaw = [];
+          // Decode tracking URLs
+          for (const tu of trackingUrls) {
+            const match = tu.match(/\/3s\/(www\.idealist\.org[^\s"<>]+)/);
+            if (match) {
+              const decoded = decodeURIComponent(match[1]).replace(/\?.*$/, '');
+              if (decoded.includes('/job/') || decoded.includes('/nonprofit-job/') || decoded.includes('/consultant-job/') || decoded.includes('/internship/')) {
+                allRaw.push('https://' + decoded);
+              }
+            }
+          }
+          // Add direct URLs
+          for (const du of directUrls) {
+            allRaw.push(du.replace(/\?.*$/, ''));
+          }
+          
+          // Deduplicate
+          const jobUrls = [...new Set(allRaw)];
+          console.log(`[PULSE:IMAN] Found ${jobUrls.length} Idealist job URLs`);
+          
+          let seededCount = 0;
+          for (const jobUrl of jobUrls) {
+            // Dedup: check if already in brain
+            const existing = await httpsRequest({
+              hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+              path: '/rest/v1/aba_memory?memory_type=eq.parsed_job&content=ilike.*' + encodeURIComponent(jobUrl.split('/').pop().substring(0, 30)) + '*&limit=1',
+              method: 'GET',
+              headers: { 'apikey': SUPABASE_KEY || SUPABASE_ANON, 'Authorization': 'Bearer ' + (SUPABASE_KEY || SUPABASE_ANON) }
+            });
+            const existingJobs = JSON.parse(existing.data.toString());
+            if (existingJobs.length > 0) continue; // Already seeded
+            
+            // Extract title from URL slug
+            const slug = jobUrl.split('/').pop();
+            const titleClean = slug.replace(/^[a-f0-9]{20,}-/, '').replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+            
+            const jobData = {
+              title: titleClean,
+              url: jobUrl,
+              source: 'idealist',
+              source_email: 'claudette@globalmajoritygroup.com',
+              status: 'new',
+              seeded_at: new Date().toISOString().split('T')[0],
+              auto_seeded: true
+            };
+            
+            await httpsRequest({
+              hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+              path: '/rest/v1/aba_memory',
+              method: 'POST',
+              headers: {
+                'apikey': SUPABASE_KEY,
+                'Authorization': 'Bearer ' + SUPABASE_KEY,
+                'Content-Type': 'application/json',
+                'Prefer': 'return=minimal'
+              }
+            }, JSON.stringify({
+              content: JSON.stringify(jobData),
+              memory_type: 'parsed_job',
+              categories: ['jobs', 'idealist', 'claudette', 'automated'],
+              importance: 6, is_system: true,
+              source: 'iman_auto_scan_' + new Date().toISOString().split('T')[0],
+              tags: ['parsed_job', 'idealist', 'claudette', 'new', 'automated']
+            }));
+            seededCount++;
+          }
+          
+          if (seededCount > 0) {
+            console.log(`[PULSE:IMAN] ✅ Auto-seeded ${seededCount} new jobs from Idealist`);
+            broadcastToCommandCenter({
+              type: 'idealist_jobs_seeded',
+              pulseId,
+              count: seededCount,
+              email: subject,
+              timestamp: new Date().toISOString()
+            });
+          }
+        } catch (idealistErr) {
+          console.error('[PULSE:IMAN] Idealist scan error:', idealistErr.message);
+        }
+      }
     }
   } catch (e) {
     console.error('[PULSE:EMAIL] Error:', e.message);
