@@ -2131,6 +2131,88 @@ async function checkEmails(pulseId) {
           timestamp: new Date().toISOString()
         });
       }
+      
+      // v2.6.8-FORGE-S10 | IMAN Idealist auto-scan in polling loop
+      // Brandon: IMAN reads Claudette's inbox, finds Idealist emails, auto-seeds jobs
+      const isIdealist = from.includes('idealist.org') || combined.includes('idealist');
+      if (isIdealist) {
+        const idealistKey = `idealist_poll_${msg.id}`;
+        if (CALL_COOLDOWN.has(idealistKey)) continue;
+        CALL_COOLDOWN.set(idealistKey, Date.now());
+        
+        console.log(`[PULSE:IMAN] Idealist email: "${subject}" - parsing...`);
+        try {
+          const fullMsg = await httpsRequest({
+            hostname: 'api.us.nylas.com',
+            path: '/v3/grants/' + grantId + '/messages/' + msg.id,
+            method: 'GET',
+            headers: { 'Authorization': 'Bearer ' + NYLAS_API_KEY, 'Accept': 'application/json' }
+          });
+          const fullData = JSON.parse(fullMsg.data.toString());
+          const emailBody = (fullData.data || fullData).body || '';
+          
+          // Decode Postmark tracking URLs
+          const trackingRegex = /https?:\/\/track\.pstmrk\.it\/3s\/(www\.idealist\.org[^\s"<>]+)/g;
+          let match;
+          const jobUrls = new Set();
+          while ((match = trackingRegex.exec(emailBody)) !== null) {
+            const decoded = decodeURIComponent(match[1]).replace(/\?.*$/, '');
+            if (decoded.includes('/job/') || decoded.includes('/nonprofit-job/') || decoded.includes('/consultant-job/')) {
+              jobUrls.add('https://' + decoded);
+            }
+          }
+          
+          let seededCount = 0;
+          for (const jobUrl of jobUrls) {
+            const slug = jobUrl.split('/').pop();
+            const titleClean = slug.replace(/^[a-f0-9]{20,}-/, '').replace(/-/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+            
+            // Dedup check
+            const existing = await httpsRequest({
+              hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+              path: '/rest/v1/aba_memory?memory_type=eq.parsed_job&content=ilike.*' + encodeURIComponent(slug.substring(0, 30)) + '*&limit=1',
+              method: 'GET',
+              headers: { 'apikey': SUPABASE_KEY || SUPABASE_ANON, 'Authorization': 'Bearer ' + (SUPABASE_KEY || SUPABASE_ANON) }
+            });
+            if (JSON.parse(existing.data.toString()).length > 0) continue;
+            
+            await httpsRequest({
+              hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+              path: '/rest/v1/aba_memory',
+              method: 'POST',
+              headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' }
+            }, JSON.stringify({
+              content: JSON.stringify({ title: titleClean, url: jobUrl, source: 'idealist', source_email: 'claudette@globalmajoritygroup.com', status: 'new', auto_seeded: true, seeded_at: new Date().toISOString().split('T')[0] }),
+              memory_type: 'parsed_job',
+              categories: ['jobs', 'idealist', 'claudette', 'automated'],
+              importance: 6, is_system: true,
+              source: 'iman_poll_' + new Date().toISOString().split('T')[0],
+              tags: ['parsed_job', 'idealist', 'claudette', 'new', 'automated']
+            }));
+            seededCount++;
+          }
+          
+          if (seededCount > 0) {
+            console.log('[PULSE:IMAN] Seeded ' + seededCount + ' new Idealist jobs');
+            // Store to Command Center feed
+            await httpsRequest({
+              hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+              path: '/rest/v1/aba_memory',
+              method: 'POST',
+              headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' }
+            }, JSON.stringify({
+              content: '[COMMAND_CENTER] IMAN*AIR*idealist_seeded: Auto-seeded ' + seededCount + ' new jobs from Idealist email: "' + subject + '"',
+              memory_type: 'system',
+              categories: ['command_center', 'iman', 'jobs'],
+              importance: 6, is_system: true,
+              source: 'iman_idealist_' + new Date().toISOString().split('T')[0],
+              tags: ['command_center', 'iman', 'idealist', 'jobs']
+            }));
+          }
+        } catch (idealistErr) {
+          console.error('[PULSE:IMAN] Idealist parse error:', idealistErr.message);
+        }
+      }
     }
   } catch (e) {
     console.error('[PULSE:EMAIL] Error:', e.message);
@@ -6854,6 +6936,91 @@ Phone: (336) 389-8116</p>
     return jsonResponse(res, 200, { tags: Object.keys(index).length, index });
   }
   
+  // ⬡B:AIR:REACH.NYLAS.STATUS:CODE:email.nylas.connection_check:REACH→BRAIN→UI:v2.6.8:20260214:n1s2t⬡
+  // GET /api/nylas/status - Check if Nylas email is connected (UI polls this)
+  if (path === '/api/nylas/status' && method === 'GET') {
+    try {
+      const grantId = await getActiveNylasGrant();
+      if (grantId) {
+        // Also get the email from brain
+        const grantInfo = await httpsRequest({
+          hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+          path: '/rest/v1/aba_memory?tags=cs.{nylas,grant,active}&select=content&order=created_at.desc&limit=1',
+          method: 'GET',
+          headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON }
+        });
+        const grants = JSON.parse(grantInfo.data.toString());
+        let email = 'unknown';
+        if (grants[0]) {
+          const m = grants[0].content.match(/Email: ([^\s|]+)/);
+          if (m) email = m[1];
+        }
+        return jsonResponse(res, 200, { connected: true, grant_id: grantId, email, provider: 'nylas' });
+      }
+      return jsonResponse(res, 200, { connected: false });
+    } catch (e) {
+      return jsonResponse(res, 200, { connected: false, error: e.message });
+    }
+  }
+
+  // ⬡B:AIR:REACH.NYLAS.INBOX:CODE:email.nylas.inbox_read:REACH→NYLAS→UI:v2.6.8:20260214:n1i2b⬡
+  // GET /api/nylas/inbox - Read inbox via Nylas for the UI
+  // L6: AIR | L4: EMAIL | L3: IMAN | L2: worker.js | L1: nylasInboxRead
+  if (path.startsWith('/api/nylas/inbox') && method === 'GET') {
+    try {
+      const grantId = await getActiveNylasGrant();
+      if (!grantId) return jsonResponse(res, 403, { error: 'No email connected. Use Nylas OAuth to connect.' });
+
+      // Parse query params
+      const urlObj = new URL('http://localhost' + path + (reqUrl.includes('?') ? '?' + reqUrl.split('?')[1] : ''));
+      const limit = urlObj.searchParams.get('limit') || '20';
+      const unread = urlObj.searchParams.get('unread') || '';
+      const folder = urlObj.searchParams.get('folder') || 'INBOX';
+
+      let nylasPath = '/v3/grants/' + grantId + '/messages?limit=' + limit;
+      if (unread === 'true') nylasPath += '&unread=true';
+      if (folder && folder !== 'ALL') nylasPath += '&in=' + folder;
+
+      const nylasResult = await httpsRequest({
+        hostname: 'api.us.nylas.com',
+        path: nylasPath,
+        method: 'GET',
+        headers: { 'Authorization': 'Bearer ' + NYLAS_API_KEY, 'Accept': 'application/json' }
+      });
+
+      const nylasData = JSON.parse(nylasResult.data.toString());
+      const messages = (nylasData.data || []).map(msg => ({
+        id: msg.id,
+        subject: msg.subject || '(no subject)',
+        from: (msg.from || []).map(f => ({ name: f.name || '', email: f.email || '' })),
+        to: (msg.to || []).map(t => ({ name: t.name || '', email: t.email || '' })),
+        snippet: msg.snippet || '',
+        date: msg.date ? new Date(msg.date * 1000).toISOString() : '',
+        unread: msg.unread || false,
+        starred: msg.starred || false,
+        labels: msg.labels || msg.folders || [],
+        threadId: msg.thread_id || ''
+      }));
+
+      // IMAN categorization: flag important, Idealist, job-related
+      for (const msg of messages) {
+        const combined = (msg.subject + ' ' + msg.snippet).toLowerCase();
+        const fromEmail = msg.from[0]?.email || '';
+        msg.category = 'general';
+        if (fromEmail.includes('idealist.org')) msg.category = 'job_alert';
+        else if (combined.match(/urgent|asap|deadline|emergency/)) msg.category = 'urgent';
+        else if (combined.match(/interview|offer|position|apply|application/)) msg.category = 'job_related';
+        else if (combined.match(/invoice|payment|receipt|billing/)) msg.category = 'financial';
+        else if (combined.match(/meeting|calendar|invite|rsvp/)) msg.category = 'meeting';
+      }
+
+      return jsonResponse(res, 200, { success: true, emails: messages, count: messages.length, provider: 'nylas' });
+    } catch (e) {
+      console.error('[NYLAS INBOX]', e.message);
+      return jsonResponse(res, 500, { error: 'Failed to read inbox: ' + e.message });
+    }
+  }
+
   // POST /api/iman/draft - IMAN drafts an email
   if (path === '/api/iman/draft' && method === 'POST') {
     const body = await parseBody(req);
@@ -7898,10 +8065,16 @@ async function loopHunterScan() {
   const jobs = await loopSupaRead('aba_memory',
     'memory_type=eq.system&content=ilike.*new_job*&tags=cs.{unprocessed}&limit=10'
   );
-  if (jobs.length > 0) {
-    console.log('[AIR*HUNTER*LOOP] ' + jobs.length + ' unprocessed jobs');
+  // v2.6.8-FORGE-S11 | HUNTER also checks Idealist auto-seeded parsed_jobs
+  // Brandon: IMAN seeds jobs from Claudette's Idealist emails, HUNTER processes them
+  const idealistJobs = await loopSupaRead('aba_memory',
+    'memory_type=eq.parsed_job&tags=cs.{needs_scrape}&limit=10'
+  );
+  const total = jobs.length + idealistJobs.length;
+  if (total > 0) {
+    console.log('[AIR*HUNTER*LOOP] ' + jobs.length + ' unprocessed + ' + idealistJobs.length + ' Idealist jobs');
   }
-  return jobs.length;
+  return total;
 }
 
 // HUNCH: Proactive suggestions (waking hours only)
