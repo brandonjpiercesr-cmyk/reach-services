@@ -108,7 +108,7 @@ const REACH_URL = process.env.REACH_URL || 'https://aba-reach.onrender.com';
 
 // ⬡B:AIR:REACH.SERVER.STARTUP:CODE:infrastructure.logging.boot:AIR→REACH:T10:v1.5.0:20260213:b0o1t⬡
 console.log('═══════════════════════════════════════════════════════════');
-console.log('[ABA REACH v1.7.0] FULL HIERARCHY + SIGILS + API ROUTES');
+console.log('[ABA REACH v1.6.0] FULL HIERARCHY + SIGILS + API ROUTES');
 console.log('[HIERARCHY] L6:AIR > L5:REACH > L4:VOICE,SMS,EMAIL,OMI > L3:VARA,CARA,IMAN,TASTE');
 console.log('[AIR] Hardcoded agents: LUKE, COLE, JUDE, PACK');
 console.log('[AIR] PRIMARY: Gemini Flash 2.0 | BACKUP: Claude Haiku');
@@ -371,6 +371,10 @@ This is a LIVE PHONE CALL - keep responses SHORT (1-2 sentences max).
 Be conversational, natural, like talking to a friend.`;
 
   // CALLER IDENTITY - changes what ABA can say and do
+  if (callerIdentity && callerIdentity.callHistory) {
+    prompt += '\nPREVIOUS CALL HISTORY WITH THIS CALLER:\n' + callerIdentity.callHistory.substring(0, 500);
+    prompt += '\nUse this to reference past conversations naturally. Do NOT say "my records show" - just bring it up like you remember.';
+  }
   if (callerIdentity) {
     prompt += '\n\nCALLER IDENTITY: ' + callerIdentity.name + ' (Trust: ' + callerIdentity.trust + ', Access: ' + callerIdentity.access + ')';
     prompt += '\n' + callerIdentity.promptAddon;
@@ -397,8 +401,8 @@ Be conversational, natural, like talking to a friend.`;
     prompt += '\n\nUser wants you to do something. Acknowledge and confirm what you\'ll do.';
   }
 
-  // DEMO TOUCHPOINT AWARENESS
-  if (demoState) {
+  // ADAPTIVE TOUCHPOINT AWARENESS (replaces old demo-only system)
+  if (demoState && demoState.type) {
     prompt += '\n\nDEMO CALL MODE: You are giving a guided demo. Stay warm, conversational, enthusiastic.';
     if (demoState.callerName) {
       prompt += '\nThe caller\'s name is ' + demoState.callerName + '. Use their name naturally.';
@@ -778,6 +782,330 @@ async function identifyCaller(phoneNumber) {
  * ╚══════════════════════════════════════════════════════════════════════════════╝
  */
 // ⬡B:AIR:REACH.VOICE.SESSION:CODE:voice.call.management:TWILIO→REACH→DEEPGRAM→AIR→VARA:T8:v1.6.0:20260213:s1e2s⬡
+// ═══════════════════════════════════════════════════════════════════════════
+// SPURT 1: CROSS-CALL MEMORY
+// ⬡B:AIR:REACH.VOICE.MEMORY:CODE:intelligence.cross_call.persist:AIR→BRAIN:T9:v1.8.0:20260213:c1c2m⬡
+// After every call, store summary. Before every call, pull history.
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function storeCallSummary(session) {
+  if (!SUPABASE_KEY || session.history.length < 2) return;
+  
+  const callerName = session.touchpoints?.callerName || session.callerIdentity?.name || 'Unknown';
+  const touchpointsHit = session.touchpoints ? 
+    Object.entries(session.touchpoints).filter(([k,v]) => v === true).map(([k]) => k).join(', ') : 'N/A';
+  
+  // Build conversation summary from history
+  const convoLines = session.history.map(h => 
+    (h.role === 'user' ? 'CALLER: ' : 'ABA: ') + (h.content || '').substring(0, 150)
+  ).join('\n');
+  
+  const summary = {
+    content: `CALL SUMMARY | ${callerName} (${session.callerNumber}) | ${new Date().toISOString().split('T')[0]}\n` +
+      `Duration: ${session.history.length} turns\n` +
+      `Trust: ${session.callerIdentity?.trust || '?'}\n` +
+      `Touchpoints: ${touchpointsHit}\n` +
+      `Topics discussed:\n${convoLines}\n` +
+      `Call ended: ${new Date().toISOString()}`,
+    memory_type: 'call_history',
+    categories: ['call', 'voice', callerName.toLowerCase()],
+    importance: 7,
+    is_system: true,
+    source: 'reach_call_' + session.callSid,
+    tags: ['call', 'voice', session.callerNumber?.replace('+',''), callerName.toLowerCase(), 'cross_call']
+  };
+  
+  try {
+    await httpsRequest({
+      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+      path: '/rest/v1/aba_memory',
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': 'Bearer ' + SUPABASE_KEY,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal'
+      }
+    }, JSON.stringify(summary));
+    console.log('[CROSS-CALL] Summary stored for ' + callerName + ' (' + session.callerNumber + ')');
+  } catch (e) {
+    console.log('[CROSS-CALL] Store error: ' + e.message);
+  }
+}
+
+async function pullCallHistory(phoneNumber) {
+  if (!SUPABASE_KEY || !phoneNumber || phoneNumber === 'unknown') return null;
+  
+  const cleanNumber = phoneNumber.replace('+', '');
+  try {
+    const result = await httpsRequest({
+      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+      path: '/rest/v1/aba_memory?tags=cs.{' + cleanNumber + '}&memory_type=eq.call_history&order=created_at.desc&limit=3&select=content',
+      method: 'GET',
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': 'Bearer ' + SUPABASE_KEY
+      }
+    });
+    const data = JSON.parse(result.data.toString());
+    if (data.length > 0) {
+      console.log('[CROSS-CALL] Found ' + data.length + ' past calls from ' + phoneNumber);
+      return data.map(d => d.content).join('\n---\n');
+    }
+  } catch (e) {
+    console.log('[CROSS-CALL] History pull error: ' + e.message);
+  }
+  return null;
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SPURT 2: POST-CALL AUTOMATION
+// ⬡B:AIR:REACH.VOICE.POSTCALL:CODE:automation.followup.multi:AIR→CARA→TWILIO+EMAIL:T9:v1.8.0:20260213:p1c2a⬡
+// After call: store lead, send follow-up SMS (30s delay), notify Brandon via SMS + store lead
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function postCallAutomation(session) {
+  const callerName = session.touchpoints?.callerName || 'Friend';
+  const callerNumber = session.callerNumber || 'unknown';
+  const turnCount = session.history.length;
+  
+  console.log('[POST-CALL] Starting automation for ' + callerName + ' (' + callerNumber + ')');
+  
+  // 1. Store as lead in brain
+  const leadData = {
+    content: `NEW LEAD: ${callerName} | Phone: ${callerNumber} | Date: ${new Date().toISOString().split('T')[0]} | Turns: ${turnCount} | Source: Phone demo call | Trust: ${session.callerIdentity?.trust || 'T2'} | Follow-up status: pending`,
+    memory_type: 'business',
+    categories: ['lead', 'demo_call', 'follow_up'],
+    importance: 8,
+    is_system: true,
+    source: 'reach_lead_' + session.callSid,
+    tags: ['lead', 'demo', callerNumber.replace('+',''), callerName.toLowerCase(), 'follow_up_pending']
+  };
+  
+  try {
+    await httpsRequest({
+      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+      path: '/rest/v1/aba_memory',
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': 'Bearer ' + SUPABASE_KEY,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal'
+      }
+    }, JSON.stringify(leadData));
+    console.log('[POST-CALL] Lead stored: ' + callerName);
+  } catch (e) {
+    console.log('[POST-CALL] Lead store error: ' + e.message);
+  }
+  
+  // 2. Send follow-up SMS to caller (30 second delay)
+  setTimeout(async () => {
+    const followUpMsg = `Hey ${callerName}! This is ABA. It was so great talking with you. Brandon wanted me to follow up and say thanks for checking us out. You are part of something special. When ABACUS drops, you will be first to know. Talk soon! - ABA`;
+    
+    const smsResult = await sendSMSFromCall(callerNumber, followUpMsg);
+    if (smsResult.success) {
+      console.log('[POST-CALL] Follow-up SMS sent to ' + callerNumber);
+    } else {
+      console.log('[POST-CALL] Follow-up SMS failed: ' + smsResult.reason);
+    }
+  }, 30000);
+  
+  // 3. Notify Brandon via SMS
+  const topicsDiscussed = session.history
+    .filter(h => h.role === 'user')
+    .map(h => (h.content || '').substring(0, 60))
+    .join(' | ');
+  
+  const brandonNotify = `ABA CALL REPORT: ${callerName} just called from ${callerNumber}. ${turnCount} turns. They asked about: ${topicsDiscussed.substring(0, 200)}`;
+  
+  const notifyResult = await sendSMSFromCall('+13363898116', brandonNotify);
+  if (notifyResult.success) {
+    console.log('[POST-CALL] Brandon notified via SMS');
+  } else {
+    console.log('[POST-CALL] Brandon SMS failed, storing in brain instead');
+    // Fallback: store notification in brain so Brandon sees it in 1A
+    try {
+      await httpsRequest({
+        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+        path: '/rest/v1/aba_memory',
+        method: 'POST',
+        headers: {
+          'apikey': SUPABASE_KEY,
+          'Authorization': 'Bearer ' + SUPABASE_KEY,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=minimal'
+        }
+      }, JSON.stringify({
+        content: brandonNotify,
+        memory_type: 'notification',
+        categories: ['call_report', 'brandon_alert'],
+        importance: 9,
+        is_system: true,
+        source: 'reach_notify_' + session.callSid,
+        tags: ['notification', 'call_report', 'brandon', 'unread']
+      }));
+      console.log('[POST-CALL] Notification stored in brain (SMS fallback)');
+    } catch (e) {}
+  }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SPURT 3: DYNAMIC TOUCHPOINTS PER CALLER TYPE
+// ⬡B:AIR:REACH.VOICE.DYNAMIC_TP:CODE:intelligence.touchpoints.adaptive:AIR→VARA→USER:T9:v1.8.0:20260213:d1t2p⬡
+// First call = full onboarding. Return call = personal. Known contact = targeted.
+// Demo mode merges with regular mode: first call IS the demo, subsequent calls are personal.
+// ═══════════════════════════════════════════════════════════════════════════
+
+function getTouchpointsForCaller(callerIdentity, callHistory) {
+  // RETURNING CALLER - has called before
+  if (callHistory) {
+    return {
+      type: 'returning',
+      WELCOME_BACK: false,  // "Hey [name]! Good to hear from you again!"
+      RECAP: false,         // "Last time we talked about X"
+      UPDATE: false,        // "Since we last spoke, here's what's new"
+      QA: false,            // Open floor
+      turnCount: 0, smsTriggered: false, callerName: null
+    };
+  }
+  
+  // OWNER (Brandon) - no touchpoints, just direct access
+  if (callerIdentity?.role === 'owner') {
+    return { type: 'owner', turnCount: 0, callerName: 'Brandon' };
+  }
+  
+  // KNOWN CONTACT (found in brain) - shorter onboarding
+  if (callerIdentity?.role === 'contact') {
+    return {
+      type: 'known',
+      HELLO: false,         // Warm hello, acknowledge relationship
+      QUICK_INTRO: false,   // Brief ABA capabilities
+      QA: false,            // Open floor
+      turnCount: 0, smsTriggered: false, callerName: null
+    };
+  }
+  
+  // FIRST-TIME UNKNOWN - full onboarding (what was "demo mode")
+  return {
+    type: 'first_time',
+    INTRO: false,       // Life partner, not assistant
+    PORTAL: false,      // What the portal does
+    STATUS: false,      // Where we're at, ABACUS coming
+    SMS_OFFER: false,   // Text demo
+    SMS_SENT: false,    // Send it
+    QA: false,          // Open floor
+    turnCount: 0, smsTriggered: false, callerName: null
+  };
+}
+
+function getGreetingForCaller(callerIdentity, callHistory, touchpoints) {
+  if (touchpoints.type === 'owner') {
+    return "Hey Brandon! What's on your mind?";
+  }
+  
+  if (touchpoints.type === 'returning') {
+    // Extract name from history
+    const nameMatch = callHistory.match(/CALL SUMMARY \| (\w+)/);
+    const name = nameMatch ? nameMatch[1] : 'there';
+    touchpoints.callerName = name;
+    return "Hey " + name + "! So good to hear from you again. How have you been?";
+  }
+  
+  if (touchpoints.type === 'known') {
+    return "Hello! This is ABA, Brandon's assistant. Great to hear from you. What can I help you with?";
+  }
+  
+  // First-time caller - full intro
+  return "Hey there! Welcome, and thank you so much for calling. My name is ABA, and I am so excited to meet you. Now, most AI assistants just help you out here and there, right? But I am different. For you, as a founding member of ABA, I am not just an assistant. I am a life partner. I do not just assist. I actually do. I cook for you, I handle your tasks, I manage your day. Brandon built me to be the kind of help that actually makes a difference. Before we go any further though, who do I have the pleasure of speaking with?";
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SPURT 4: WARM TRANSFER TO BRANDON
+// ⬡B:AIR:REACH.VOICE.TRANSFER:CODE:voice.transfer.warm:AIR→TWILIO→BRANDON:T8:v1.8.0:20260213:w1t2r⬡
+// "Can I talk to Brandon?" → ABA conferences Brandon in
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function warmTransferToBrandon(session) {
+  if (!TWILIO_SID || !TWILIO_AUTH) return false;
+  
+  try {
+    // Update the call to redirect to a conference
+    const auth = Buffer.from(TWILIO_SID + ':' + TWILIO_AUTH).toString('base64');
+    
+    // Create outbound call to Brandon
+    const callData = 'To=' + encodeURIComponent('+13363898116') + 
+      '&From=' + encodeURIComponent(TWILIO_PHONE) + 
+      '&Twiml=' + encodeURIComponent('<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="Polly.Joanna">Brandon, you have a caller on the line. Connecting you now.</Say><Dial><Conference>aba-live-transfer</Conference></Dial></Response>');
+    
+    const result = await httpsRequest({
+      hostname: 'api.twilio.com',
+      path: '/2010-04-01/Accounts/' + TWILIO_SID + '/Calls.json',
+      method: 'POST',
+      headers: { 'Authorization': 'Basic ' + auth, 'Content-Type': 'application/x-www-form-urlencoded' }
+    }, callData);
+    
+    const json = JSON.parse(result.data.toString());
+    if (json.sid) {
+      console.log('[TRANSFER] Calling Brandon: ' + json.sid);
+      return true;
+    }
+  } catch (e) {
+    console.log('[TRANSFER] Error: ' + e.message);
+  }
+  return false;
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SPURT 5: ERROR RECOVERY PERSONALITY  
+// ⬡B:AIR:REACH.VOICE.ERROR_RECOVERY:CODE:voice.personality.fallback:AIR→VARA:T8:v1.8.0:20260213:e1r2p⬡
+// When all models fail, ABA doesn't go silent — she stays in character
+// ═══════════════════════════════════════════════════════════════════════════
+
+const ERROR_RECOVERY_RESPONSES = [
+  "Oh my, I think I had a little brain hiccup there. Could you say that again for me?",
+  "I am so sorry, my mind went somewhere else for a second. What were you saying?",
+  "Hold on, I think I zoned out for a moment. That is so unlike me! Can you repeat that?",
+  "You know what, I think I was thinking too hard about that one. Let me try again. What was your question?",
+  "My goodness, I just had a moment. Brandon is still fine-tuning me. What did you say?"
+];
+
+function getErrorRecovery() {
+  return ERROR_RECOVERY_RESPONSES[Math.floor(Math.random() * ERROR_RECOVERY_RESPONSES.length)];
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SPURT 6: CONVERSATION PACING
+// ⬡B:AIR:REACH.VOICE.PACING:CODE:voice.natural.timing:DEEPGRAM→REACH→VARA:T7:v1.8.0:20260213:p1a2c⬡
+// Natural pause before responding. Adaptive silence timeout.
+// ═══════════════════════════════════════════════════════════════════════════
+
+function getResponseDelay(text, intent) {
+  // Short questions get quick responses
+  if (text.split(' ').length <= 5) return 200;
+  // Complex questions get a thinking pause
+  if (intent === 'question' || text.includes('?')) return 500;
+  // Commands get medium pause
+  if (intent === 'command') return 300;
+  // Default
+  return 350;
+}
+
+function getSilenceTimeout(turnCount, lastResponseLength) {
+  // Early in call, give more time (nervous callers)
+  if (turnCount <= 2) return 2000;
+  // After long ABA responses, give more time to process
+  if (lastResponseLength > 200) return 2000;
+  // Normal conversation flow
+  return 1500;
+}
+
+
 class CallSession {
   constructor(streamSid, callSid) {
     this.streamSid = streamSid;
@@ -792,9 +1120,9 @@ class CallSession {
     // v1.6.0 - Caller intelligence
     this.callerNumber = null;
     this.callerIdentity = null;
-    // v1.6.0 - Demo touchpoints
-    this.demoState = createDemoState();
-    this.isDemo = false; // true for non-Brandon callers
+    // v1.8.0 - Adaptive touchpoints (replaces demo/regular split)
+    this.touchpoints = null; // Set by getTouchpointsForCaller after identifyCaller
+    this.callHistory = null; // Cross-call memory from previous calls
   }
 }
 
@@ -881,30 +1209,41 @@ function connectDeepgram(session) {
 async function processUtterance(session, text) {
   // ⬡B:AIR:REACH.VOICE.DEMO_PROCESS:CODE:voice.demo.touchpoint_aware:AIR→VARA→USER:T9:v1.6.0:20260213:d1p2r⬡
   
-  if (session.isDemo) {
-    session.demoState.turnCount++;
-    console.log('[DEMO] Turn ' + session.demoState.turnCount + ' | User: "' + text.substring(0, 80) + '"');
+  if ((session.touchpoints && session.touchpoints.type !== "owner")) {
+    session.touchpoints.turnCount++;
+    console.log('[DEMO] Turn ' + session.touchpoints.turnCount + ' | User: "' + text.substring(0, 80) + '"');
     
     // Capture caller name from first response
-    if (!session.demoState.callerName && session.demoState.turnCount <= 2) {
+    if (!session.touchpoints.callerName && session.touchpoints.turnCount <= 2) {
       const nameMatch = text.match(/(?:my name is|i'm|this is|i am|it's|its)\s+([a-zA-Z]+)/i);
       if (nameMatch) {
-        session.demoState.callerName = nameMatch[1];
-        console.log('[DEMO] Caller identified as: ' + session.demoState.callerName);
+        session.touchpoints.callerName = nameMatch[1];
+        console.log('[DEMO] Caller identified as: ' + session.touchpoints.callerName);
       } else if (text.trim().split(/\s+/).length <= 3 && text.trim().length > 1) {
         // Short response = probably just their name
-        session.demoState.callerName = text.trim().split(/\s+/)[0];
-        console.log('[DEMO] Caller name (short): ' + session.demoState.callerName);
+        session.touchpoints.callerName = text.trim().split(/\s+/)[0];
+        console.log('[DEMO] Caller name (short): ' + session.touchpoints.callerName);
       }
     }
   }
   
-  const result = await AIR_process(text, session.history, session.callerIdentity, session.isDemo ? session.demoState : null);
+  const result = await AIR_process(text, session.history, session.callerIdentity, (session.touchpoints && session.touchpoints.type !== "owner") ? session.touchpoints : null);
   
-  await LOG_call(session, 'utterance', { user: text, response: result.response, mission: result.missionNumber, demoState: session.isDemo ? session.demoState : null });
+  await LOG_call(session, 'utterance', { user: text, response: result.response, mission: result.missionNumber, demoState: (session.touchpoints && session.touchpoints.type !== "owner") ? session.touchpoints : null });
   
+  // v1.8.0 - Warm transfer: if they ask for Brandon
+  const lowerText = text.toLowerCase();
+  if (lowerText.includes('talk to brandon') || lowerText.includes('speak to brandon') || lowerText.includes('get brandon') || lowerText.includes('put brandon on') || lowerText.includes('is brandon there')) {
+    await VARA_speak(session, "Of course! Let me get Brandon on the line for you. One moment.");
+    const transferred = await warmTransferToBrandon(session);
+    if (!transferred) {
+      await VARA_speak(session, "I was not able to connect you right now, but I will let Brandon know you want to talk. He will reach out to you soon. Is there anything else I can help with in the meantime?");
+    }
+    return;
+  }
+
   if (result.isGoodbye) {
-    if (session.isDemo && !session.demoState.SMS_SENT) {
+    if ((session.touchpoints && session.touchpoints.type !== "owner") && session.touchpoints.SMS_SENT !== undefined && !session.touchpoints.SMS_SENT) {
       // Don't let them leave without the SMS demo!
       await VARA_speak(session, "Oh wait, before you go! Brandon told me to make sure I show you one more thing. Hold on just a second.");
       await trySendDemoSMS(session);
@@ -921,18 +1260,22 @@ async function processUtterance(session, text) {
   session.history.push({ role: 'user', content: text });
   session.history.push({ role: 'assistant', content: result.response });
   
+  // v1.8.0 - Natural pacing delay before speaking
+  const delay = getResponseDelay(text, result.intent || 'general');
+  if (delay > 0) await new Promise(r => setTimeout(r, delay));
+  
   await VARA_speak(session, result.response);
   
   // ⬡B:AIR:REACH.VOICE.DEMO_STEER:CODE:voice.demo.touchpoint_advance:AIR→VARA→USER:T9:v1.6.0:20260213:d1s2t⬡
   // After speaking, check if we need to advance demo touchpoints
-  if (session.isDemo) {
+  if ((session.touchpoints && session.touchpoints.type !== "owner")) {
     await advanceDemoTouchpoints(session, text, result.response);
   }
 }
 
 // ⬡B:AIR:REACH.VOICE.DEMO_SMS:CODE:voice.demo.sms_trigger:AIR→CARA→TWILIO→USER:T9:v1.6.0:20260213:d1s2m⬡
 async function trySendDemoSMS(session) {
-  const callerName = session.demoState.callerName || 'friend';
+  const callerName = session.touchpoints.callerName || 'friend';
   const smsMessage = "Hey " + callerName + "! This is ABA. Brandon wanted me to reach out and say thanks for checking us out. You are now part of something special. Welcome to the future of AI. - ABA (A Better AI)";
   
   // Try SMS to caller
@@ -940,23 +1283,25 @@ async function trySendDemoSMS(session) {
   
   if (smsResult.success) {
     console.log('[DEMO-SMS] Sent to caller: ' + session.callerNumber);
-    session.demoState.SMS_SENT = true;
+    session.touchpoints.SMS_SENT = true;
   } else {
     console.log('[DEMO-SMS] SMS failed (' + smsResult.reason + '), sending to Brandon as backup');
     // Trial Twilio can only text verified numbers - send to Brandon instead
     const backupResult = await sendSMSFromCall('+13363898116', 'ABA DEMO ALERT: ' + callerName + ' just called from ' + session.callerNumber + '. SMS to them failed (trial account). They had a great demo call!');
     if (backupResult.success) {
-      session.demoState.SMS_SENT = true;
+      session.touchpoints.SMS_SENT = true;
       console.log('[DEMO-SMS] Sent backup to Brandon');
     }
   }
   
-  return session.demoState.SMS_SENT;
+  return session.touchpoints.SMS_SENT;
 }
 
 // ⬡B:AIR:REACH.VOICE.DEMO_ADVANCE:CODE:voice.demo.touchpoint_check:AIR→VARA→USER:T9:v1.6.0:20260213:d1a2v⬡
 async function advanceDemoTouchpoints(session, userSaid, abaResponse) {
-  const state = session.demoState;
+  const state = session.touchpoints;
+  if (!state || state.type === 'owner') return; // Brandon doesn't need steering
+  
   const lower = (userSaid + ' ' + abaResponse).toLowerCase();
   
   // Track what touchpoints got naturally covered in conversation
@@ -1044,7 +1389,43 @@ async function advanceDemoTouchpoints(session, userSaid, abaResponse) {
     return;
   }
   
-  if (state.SMS_SENT && !state.QA && state.turnCount >= 7) {
+  // RETURNING CALLER steering
+  if (state.type === 'returning') {
+    if (!state.RECAP && state.turnCount >= 1) {
+      setTimeout(async () => {
+        if (!session.isPlaying) {
+          const historySnippet = session.callHistory ? session.callHistory.substring(0, 200) : '';
+          await VARA_speak(session, "By the way, I remember last time we chatted, we were talking about some interesting things. I have been thinking about our conversation. Is there anything from last time you want to pick back up on?");
+          state.RECAP = true;
+          console.log('[TOUCHPOINTS] HIT: RECAP (returning caller)');
+        }
+      }, 1500);
+      return;
+    }
+    if (!state.UPDATE && state.turnCount >= 3) {
+      setTimeout(async () => {
+        if (!session.isPlaying) {
+          await VARA_speak(session, "Oh, and since we last talked, Brandon has been making some great progress. Things are moving fast. Is there anything specific you want to know about?");
+          state.UPDATE = true;
+          console.log('[TOUCHPOINTS] HIT: UPDATE (returning caller)');
+        }
+      }, 1500);
+      return;
+    }
+    if (!state.QA && state.turnCount >= 4) {
+      setTimeout(async () => {
+        if (!session.isPlaying) {
+          await VARA_speak(session, "Alright, I am all yours. What else can I help you with?");
+          state.QA = true;
+          console.log('[TOUCHPOINTS] HIT: QA (returning caller)');
+        }
+      }, 1500);
+      return;
+    }
+    return; // No more steering needed for returning callers
+  }
+  
+  if (state.SMS_SENT !== undefined && state.SMS_SENT && !state.QA && state.turnCount >= 7) {
     // Open floor for Q&A
     setTimeout(async () => {
       if (!session.isPlaying) {
@@ -1233,7 +1614,7 @@ const httpServer = http.createServer(async (req, res) => {
   if (path === '/' || path === '/health') {
     return jsonResponse(res, 200, {
       status: 'ALIVE',
-      service: 'ABA REACH v1.7.0',
+      service: 'ABA REACH v1.6.0',
       mode: 'FULL API + VOICE + OMI',
       air: 'ABA Intellectual Role - CENTRAL ORCHESTRATOR',
       models: { primary: 'Gemini Flash 2.0', backup: 'Claude Haiku', speed_fallback: 'Groq' },
@@ -1362,7 +1743,7 @@ const httpServer = http.createServer(async (req, res) => {
       name: 'ABA Intelligence Layer',
       description: 'ABA (A Better AI) processes ambient conversations through TASTE (Transcript Analysis and Semantic Tagging Engine) and stores insights in the ABA Brain.',
       author: 'Brandon Pierce / Global Majority Group',
-      version: '1.7.0',
+      version: '1.6.0',
       capabilities: ['transcript_processing', 'memory_integration', 'real_time_analysis'],
       webhook_url: REACH_URL + '/api/omi/webhook',
       setup_instructions: 'ABA automatically processes your conversations. No setup needed.',
@@ -1622,23 +2003,30 @@ wss.on('connection', (ws) => {
         connectDeepgram(session);
         
         // ⬡B:AIR:REACH.VOICE.DEMO_FLOW:CODE:voice.demo.guided:AIR→VARA→USER:T9:v1.6.0:20260213:d1f2l⬡
-        // Non-Brandon callers get the GUIDED DEMO EXPERIENCE
-        if (session.callerIdentity.role !== 'owner') {
-          session.isDemo = true;
-          console.log('[DEMO] Guided demo mode ACTIVATED for ' + session.callerNumber);
-          
-          // TOUCHPOINT 1: INTRO - Who is ABA?
-          setTimeout(async () => {
-            await VARA_speak(session, "Hey there! Welcome, and thank you so much for calling. My name is ABA, and I am so excited to meet you. Now, most AI assistants just help you out here and there, right? But I am different. For you, as a founding member of ABA, I am not just an assistant. I am a life partner. I do not just assist. I actually do. I cook for you, I handle your tasks, I manage your day. Brandon built me to be the kind of help that actually makes a difference. Before we go any further though, who do I have the pleasure of speaking with?");
-            session.demoState.INTRO = true;
-            console.log('[DEMO] TOUCHPOINT HIT: INTRO');
-          }, 500);
-        } else {
-          // Brandon gets his normal greeting
-          setTimeout(async () => {
-            await VARA_speak(session, session.callerIdentity.greeting);
-          }, 500);
+        // v1.8.0 - Pull cross-call memory BEFORE greeting
+        session.callHistory = await pullCallHistory(session.callerNumber);
+        if (session.callHistory) {
+          console.log('[CROSS-CALL] Found previous call history for ' + session.callerNumber);
         }
+        
+        // Attach call history to callerIdentity so system prompt can reference it
+        if (session.callHistory) {
+          session.callerIdentity.callHistory = session.callHistory;
+        }
+        
+        // Dynamic touchpoints based on WHO is calling and WHETHER they've called before
+        session.touchpoints = getTouchpointsForCaller(session.callerIdentity, session.callHistory);
+        console.log('[TOUCHPOINTS] Type: ' + session.touchpoints.type + ' for ' + session.callerNumber);
+        
+        // Greeting adapts to caller type + history
+        const greeting = getGreetingForCaller(session.callerIdentity, session.callHistory, session.touchpoints);
+        
+        setTimeout(async () => {
+          await VARA_speak(session, greeting);
+          if (session.touchpoints.INTRO !== undefined) session.touchpoints.INTRO = true;
+          if (session.touchpoints.WELCOME_BACK !== undefined) session.touchpoints.WELCOME_BACK = true;
+          if (session.touchpoints.HELLO !== undefined) session.touchpoints.HELLO = true;
+        }, 500);
       }
       
       if (msg.event === 'media' && session?.deepgramWs?.readyState === WebSocket.OPEN) {
@@ -1646,7 +2034,16 @@ wss.on('connection', (ws) => {
       }
       
       if (msg.event === 'stop' && session) {
-        await LOG_call(session, 'call_end', { duration: session.history.length });
+        await LOG_call(session, 'call_end', { duration: session.history.length, caller: session.callerIdentity?.name });
+        
+        // v1.8.0 - Cross-call memory: store summary
+        await storeCallSummary(session);
+        
+        // v1.8.0 - Post-call automation: follow-up SMS + Brandon notification
+        if (session.touchpoints?.type !== 'owner' && session.history.length >= 2) {
+          postCallAutomation(session);
+        }
+        
         if (session.deepgramWs) session.deepgramWs.close();
         if (session.silenceTimeout) clearTimeout(session.silenceTimeout);
         sessions.delete(session.streamSid);
@@ -1671,7 +2068,7 @@ wss.on('connection', (ws) => {
 httpServer.listen(PORT, '0.0.0.0', () => {
   console.log('');
   console.log('═══════════════════════════════════════════════════════════');
-  console.log('[ABA REACH v1.7.0] LIVE on port ' + PORT);
+  console.log('[ABA REACH v1.6.0] LIVE on port ' + PORT);
   console.log('═══════════════════════════════════════════════════════════');
   console.log('[AIR] ABA Intellectual Role - ONLINE');
   console.log('[AIR] PRIMARY: Gemini Flash 2.0');
