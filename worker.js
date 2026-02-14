@@ -5429,6 +5429,24 @@ Phone: (336) 389-8116</p>
 
       console.log('[TASTE] Transcript stored in brain');
       
+      // ═══════════════════════════════════════════════════════════════════════════
+      // ⬡B:ABCD:BOTH:OMI.AIR.ROUTING:WIRE:v2.5.1:20260214⬡
+      // WIRED: If transcript contains "ABA" command, route through AIR
+      // Pattern: OMI → processOMIThroughAIR → AIR_process → DISPATCH → Agent
+      // ═══════════════════════════════════════════════════════════════════════════
+      const userId = body.uid || body.user_id || 'unknown';
+      const airRouteResult = await processOMIThroughAIR(transcript, userId);
+      if (airRouteResult) {
+        console.log('[OMI→AIR] Command was routed through AIR');
+        // Broadcast to Command Center
+        broadcastToCommandCenter({
+          type: 'omi_air_command',
+          transcript: transcript.substring(0, 100),
+          airResponse: airRouteResult.response?.substring(0, 100) || 'processed',
+          timestamp: new Date().toISOString()
+        });
+      }
+      
       // ═══════ TASTE → AIR ESCALATION CHECK ═══════
       // Check if transcript contains urgent keywords and trigger AIR if so
       const omiResult = await TRIGGER_omiHeard({ 
@@ -7810,6 +7828,65 @@ wss.on('connection', (ws) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:ABCD:ABAOS:HEARTBEAT:v2.5.1:20260214⬡
+// AUTONOMOUS HEARTBEAT - ABA runs 24/7 without human intervention
+// Runs every 5 minutes
+// ═══════════════════════════════════════════════════════════════════════════════
+let heartbeatRunning = false;
+let heartbeatCount = 0;
+let lastHeartbeat = null;
+
+async function REACH_heartbeat() {
+  if (heartbeatRunning) return;
+  heartbeatRunning = true;
+  heartbeatCount++;
+  lastHeartbeat = new Date().toISOString();
+  
+  console.log('[HEARTBEAT] Cycle ' + heartbeatCount + ' at ' + lastHeartbeat);
+  
+  try {
+    // Check ABACIA-SERVICES status
+    const abaciaCheck = await httpsRequest({
+      hostname: 'abacia-services.onrender.com',
+      path: '/',
+      method: 'GET',
+      headers: { 'Accept': 'application/json' }
+    });
+    
+    if (abaciaCheck.status === 200) {
+      const status = JSON.parse(abaciaCheck.data.toString());
+      console.log('[HEARTBEAT] ABACIA: ' + (status.heartbeat?.running ? 'ALIVE' : 'DOWN'));
+    }
+    
+    // Broadcast to Command Center
+    broadcastToCommandCenter({
+      type: 'heartbeat',
+      cycle: heartbeatCount,
+      timestamp: lastHeartbeat,
+      status: 'alive',
+      service: 'REACH'
+    });
+    
+  } catch (e) {
+    console.log('[HEARTBEAT] Error: ' + e.message);
+  } finally {
+    heartbeatRunning = false;
+  }
+}
+
+function startHeartbeat() {
+  console.log('[HEARTBEAT] Starting autonomous heartbeat (every 5 min)');
+  REACH_heartbeat(); // Run immediately
+  setInterval(REACH_heartbeat, 5 * 60 * 1000); // Then every 5 min
+}
+
+function getHeartbeatStatus() {
+  return { running: true, cycleCount: heartbeatCount, lastCycle: lastHeartbeat };
+}
+
+
 // ⬡B:AIR:REACH.SERVER.LISTEN:CODE:infrastructure.boot.start:AIR→REACH:T10:v1.5.0:20260213:l1s2n⬡
 // ═══════════════════════════════════════════════════════════════════════════
 httpServer.listen(PORT, '0.0.0.0', () => {
@@ -7830,6 +7907,11 @@ httpServer.listen(PORT, '0.0.0.0', () => {
   console.log('[DEEPGRAM] Real-time STT with VAD - READY');
   console.log('[ELEVENLABS] Streaming TTS - READY');
   console.log('═══════════════════════════════════════════════════════════');
+  
+  // ⬡B:ABCD:ABAOS:HEARTBEAT.START:WIRE:v2.5.1:20260214⬡
+  // WIRED: Start the autonomous heartbeat
+  startHeartbeat();
+  console.log('[HEARTBEAT] Autonomous heartbeat STARTED');
   console.log('We are all ABA.');
   console.log('═══════════════════════════════════════════════════════════');
   
