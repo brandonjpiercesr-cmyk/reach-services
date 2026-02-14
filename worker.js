@@ -2866,7 +2866,27 @@ Phone: (336) 389-8116</p>
       }, storeData);
 
       console.log('[TASTE] Transcript stored in brain');
-      return jsonResponse(res, 200, { status: 'processed', agent: 'TASTE', stored: true });
+      
+      // ═══════ TASTE → AIR ESCALATION CHECK ═══════
+      // Check if transcript contains urgent keywords and trigger AIR if so
+      const omiResult = await TRIGGER_omiHeard({ 
+        text: transcript, 
+        session_id: body.session_id || 'unknown',
+        timestamp: timestamp 
+      });
+      
+      if (omiResult.success) {
+        console.log('[TASTE] Urgent content detected, AIR escalation triggered');
+        return jsonResponse(res, 200, { 
+          status: 'processed', 
+          agent: 'TASTE', 
+          stored: true, 
+          escalated: true,
+          routing: omiResult.routing 
+        });
+      }
+      
+      return jsonResponse(res, 200, { status: 'processed', agent: 'TASTE', stored: true, escalated: false });
     } catch (e) {
       console.error('[OMI] Webhook error:', e.message);
       return jsonResponse(res, 200, { status: 'received', error: e.message });
@@ -3645,11 +3665,60 @@ Phone: (336) 389-8116</p>
                 source: 'nylas_webhook_vara_' + Date.now()
               }));
             } catch (varaErr) { /* non-critical */ }
+            
+            // ═══════ CHECK FOR URGENT JOB DEADLINES → TRIGGER AIR ═══════
+            // If any job has a deadline within 3 days, trigger escalation
+            const now = new Date();
+            const threeDaysFromNow = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
+            
+            for (const job of jobs) {
+              if (job.deadline && job.verified) {
+                try {
+                  const deadlineDate = new Date(job.deadline);
+                  if (deadlineDate <= threeDaysFromNow && deadlineDate >= now) {
+                    console.log('[IDEALIST] Job deadline within 3 days, triggering AIR:', job.title);
+                    await TRIGGER_jobDeadline({
+                      title: job.title,
+                      company: job.company,
+                      deadline: job.deadline,
+                      url: job.url,
+                      id: job.url
+                    });
+                  }
+                } catch (deadlineErr) { /* non-critical */ }
+              }
+            }
           }
           
           results.push({ subject, urlsFound: urls.length, jobsParsed: jobs.length, jobsVerified: jobs.filter(j=>j.verified).length });
         } else {
-          results.push({ subject, skipped: true, reason: isIdealist ? 'no body' : 'not idealist' });
+          // ═══════ CHECK FOR IMPORTANT NON-IDEALIST EMAILS → TRIGGER AIR ═══════
+          // IMAN routes important emails to AIR for escalation analysis
+          const importantKeywords = ['urgent', 'asap', 'immediately', 'deadline', 'investor', 
+            'term sheet', 'funding', 'contract', 'legal', 'nda', 'offer', 'interview',
+            'emergency', 'critical', 'important', 'action required', 'response needed'];
+          
+          const combinedText = (subject + ' ' + emailBody).toLowerCase();
+          const isImportant = importantKeywords.some(k => combinedText.includes(k));
+          
+          if (isImportant && !isIdealist) {
+            // Trigger AIR escalation
+            console.log('[IMAN] Important email detected, triggering AIR escalation');
+            try {
+              await TRIGGER_emailReceived({
+                from: from,
+                subject: subject,
+                body: emailBody.substring(0, 1000),
+                id: messageData.id || messageData.message_id
+              });
+              results.push({ subject, escalated: true, reason: 'Important email sent to AIR' });
+            } catch (escErr) {
+              console.error('[IMAN] Escalation error:', escErr.message);
+              results.push({ subject, escalated: false, error: escErr.message });
+            }
+          } else {
+            results.push({ subject, skipped: true, reason: isIdealist ? 'no body' : 'not important' });
+          }
         }
       }
       
