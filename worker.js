@@ -3702,11 +3702,108 @@ Phone: (336) 389-8116</p>
     return;
   }
 
+  // ⬡B:reach:HTTP:idealist_backfill⬡ /api/idealist/backfill - PULL ALL IDEALIST EMAILS VIA NYLAS + PARSE
+  // ═══════════════════════════════════════════════════════════════════════
+  if (path === '/api/idealist/backfill' && method === 'POST') {
+    try {
+      // Get Nylas grant from brain
+      const grantResult = await httpsRequest({
+        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+        path: '/rest/v1/aba_memory?tags=cs.{nylas,grant,active}&select=content&order=created_at.desc&limit=1',
+        method: 'GET',
+        headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
+      });
+      const grantData = JSON.parse(grantResult.data.toString());
+      const grantMatch = grantData[0]?.content?.match(/NYLAS GRANT: ([a-f0-9-]+)/);
+      if (!grantMatch) return jsonResponse(res, 400, { error: 'No active Nylas grant found. Connect email first.' });
+      const grantId = grantMatch[1];
+      
+      // Search Claudette's emails for Idealist
+      const msgResult = await httpsRequest({
+        hostname: 'api.us.nylas.com',
+        path: '/v3/grants/' + grantId + '/messages?from=noreply@idealist.org&limit=50',
+        method: 'GET',
+        headers: { 'Authorization': 'Bearer ' + NYLAS_API_KEY, 'Accept': 'application/json' }
+      });
+      const msgData = JSON.parse(msgResult.data.toString());
+      const messages = msgData.data || [];
+      
+      if (messages.length === 0) return jsonResponse(res, 200, { message: 'No Idealist emails found', jobs: [], total: 0 });
+      
+      // Parse each email for Idealist URLs
+      let allJobs = [];
+      let errors = [];
+      for (const msg of messages.slice(0, 20)) { // Max 20 emails at a time
+        const body = msg.body || '';
+        const urlRegex = /https?:\/\/(?:www\.)?idealist\.org\/en\/(?:nonprofit-job|consultant-job|internship)\/[^\s"'<>]+/g;
+        const urls = [...new Set((body.match(urlRegex) || []))];
+        
+        for (const url of urls.slice(0, 5)) { // Max 5 per email
+          try {
+            const fetchResult = await httpsRequest({
+              hostname: new URL(url).hostname,
+              path: new URL(url).pathname,
+              method: 'GET',
+              headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ABA/1.0)' }
+            });
+            const html = fetchResult.data.toString().substring(0, 15000);
+            
+            if (!ANTHROPIC_KEY) continue;
+            const aiResult = await httpsRequest({
+              hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST',
+              headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' }
+            }, JSON.stringify({
+              model: 'claude-haiku-4-5-20251001', max_tokens: 600,
+              system: 'Extract job posting details. Return ONLY JSON: {title, company, location, salary, description, employment_type, remote, deadline, requirements}. Empty string if unknown.',
+              messages: [{ role: 'user', content: 'URL: ' + url + '\n\nHTML:\n' + html }]
+            }));
+            const aiData = JSON.parse(aiResult.data.toString());
+            const text = aiData.content?.[0]?.text || '';
+            const jsonMatch = text.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+              const job = JSON.parse(jsonMatch[0]);
+              job.url = url;
+              job.source = 'idealist_backfill';
+              job.emailDate = msg.date;
+              allJobs.push(job);
+              
+              // Store in brain
+              if (SUPABASE_KEY) {
+                await httpsRequest({
+                  hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+                  path: '/rest/v1/aba_memory', method: 'POST',
+                  headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' }
+                }, JSON.stringify({
+                  content: JSON.stringify(job),
+                  memory_type: 'job_posting',
+                  importance: 7,
+                  is_system: false,
+                  source: 'idealist_backfill_' + new Date().toISOString().split('T')[0],
+                  tags: ['jobs', 'idealist', 'backfill', job.employment_type?.toLowerCase()?.includes('contract') ? 'contract' : 'full_time']
+                }));
+              }
+            }
+          } catch(e) { errors.push({ url, error: e.message }); }
+        }
+      }
+      
+      return jsonResponse(res, 200, {
+        success: true,
+        emailsProcessed: Math.min(messages.length, 20),
+        totalEmails: messages.length,
+        jobsParsed: allJobs.length,
+        jobs: allJobs,
+        errors: errors.length > 0 ? errors : undefined,
+        note: messages.length > 20 ? 'Only processed first 20 emails. Call again for more.' : 'All emails processed.'
+      });
+    } catch(e) { return jsonResponse(res, 500, { error: e.message }); }
+  }
+
   // ⬡B:AIR:REACH.API.NOTFOUND:CODE:infrastructure.error.404:USER→REACH→ERROR:T10:v1.5.0:20260213:n1f2d⬡ CATCH-ALL
   // ═══════════════════════════════════════════════════════════════════════
   jsonResponse(res, 404, { 
     error: 'Route not found: ' + method + ' ' + path,
-    available: ['/api/escalate', '/api/escalate/twiml', '/api/escalate/confirm', '/api/call/dial', '/api/call/twiml', '/api/call/status', '/api/call/record', '/api/router', '/api/models/claude', '/api/voice/deepgram-token', '/api/voice/tts', '/api/omi/manifest', '/api/omi/webhook', '/api/sms/send', '/api/brain/search', '/api/brain/store', '/api/scrape-job', '/api/idealist/parse', '/api/idealist/verify', '/api/jobs/parsed'],
+    available: ['/api/escalate', '/api/escalate/twiml', '/api/escalate/confirm', '/api/call/dial', '/api/call/twiml', '/api/call/status', '/api/call/record', '/api/router', '/api/models/claude', '/api/voice/deepgram-token', '/api/voice/tts', '/api/omi/manifest', '/api/omi/webhook', '/api/sms/send', '/api/brain/search', '/api/brain/store', '/api/scrape-job', '/api/idealist/parse', '/api/idealist/verify', '/api/jobs/parsed', '/api/idealist/backfill'],
     hint: 'We are all ABA'
   });
 });
