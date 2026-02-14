@@ -5227,17 +5227,20 @@ Phone: (336) 389-8116</p>
     if (mode === 'twoway') {
       // REAL 2-WAY CONVERSATION using ConversationRelay
       // User can talk back and have a real conversation with ABA
+      // Using ElevenLabs with Brandon's voice: hAQCIV0cazWEuGzMG5bV
       twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Connect>
     <ConversationRelay 
       url="wss://${req.headers.host}/conversation-relay?trace=${traceId}&msg=${encodeURIComponent(msg)}"
       welcomeGreeting="${msg.replace(/"/g, "'")}"
-      voice="Google.en-US-Neural2-F"
-      transcriptionProvider="google"
-      speechModel="telephony"
+      ttsProvider="ElevenLabs"
+      voice="hAQCIV0cazWEuGzMG5bV"
+      transcriptionProvider="deepgram"
+      speechModel="nova-2-general"
       interruptible="true"
       interruptByDtmf="true"
+      elevenlabsTextNormalization="on"
     />
   </Connect>
 </Response>`;
