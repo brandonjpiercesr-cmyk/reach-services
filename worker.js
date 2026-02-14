@@ -3266,7 +3266,7 @@ async function AIR_text(userMessage, history) {
 // - Cooldown/countdown visible in Command Center
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const EMAIL_SEND_DELAY_SECONDS = 30; // 30 second countdown before auto-send
+const EMAIL_SEND_DELAY_SECONDS = 1800; // 30 MINUTES countdown before auto-send
 const EMAIL_RECIPIENTS_ALLOWED = ['brandon']; // Only Brandon for now
 const pendingEmails = new Map(); // draftId -> timeout
 
