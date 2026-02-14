@@ -67,7 +67,7 @@ const TWILIO_PHONE = process.env.TWILIO_PHONE_NUMBER;
 
 // ⬡B:AIR:REACH.CONFIG.ELEVENLABS:CONFIG:voice.tts.personality:AIR→REACH→VARA:T8:v1.5.0:20260213:e1l2v⬡
 const ELEVENLABS_KEY = process.env.ELEVENLABS_API_KEY || 'sk_e0b48157805968dbb370f299b60e22001189bd85c3864040';
-const ELEVENLABS_VOICE = process.env.ELEVENLABS_VOICE_ID || 'bcbkbYJpNzQGHml4XFrp'; // ABA's Nigerian-American JARVIS voice
+const ELEVENLABS_VOICE = 'hAQCIV0cazWEuGzMG5bV'; // Brandon's ONLY voice - NEVER CHANGE THIS
 const ELEVENLABS_MODEL = 'eleven_flash_v2_5';
 
 // ⬡B:AIR:REACH.CONFIG.DEEPGRAM:CONFIG:voice.stt.transcription:AIR→REACH→TASTE:T8:v1.5.0:20260213:d1g2m⬡
@@ -596,41 +596,22 @@ async function JUDE_decideEscalation(lukeAnalysis, coleContext) {
   const { urgency, category } = lukeAnalysis;
   
   // Contact registry with trigger categories
+  // SIMPLIFIED: This ABA instance serves Brandon only
+  // BJ, CJ, Eric will have their OWN ABA instances with their OWN phone numbers
+  // No hardcoded routing - each person's ABA calls THEM
   const registry = {
-    brandon: { 
+    owner: { 
       name: 'Brandon Pierce Sr.', 
       phone: '+13363898116', 
       priority: 1,
-      categories: ['investor', 'money', 'legal', 'security', 'emergency']
-    },
-    cj: { 
-      name: 'CJ Moore', 
-      phone: '+19199170686', 
-      priority: 2,
-      categories: ['job', 'application', 'deadline', 'client_work']
-    },
-    bj: { 
-      name: 'BJ Pierce', 
-      phone: '+19803958662', 
-      priority: 2,
-      categories: ['interview', 'school', 'family']
-    },
-    eric: {
-      name: 'Dr. Eric Lane Sr.',
-      phone: '+13369266857', // TODO: Get Eric's real number
-      priority: 2,
-      categories: ['academic', 'research', 'mentorship', 'advisory']
+      categories: ['all'] // Owner gets ALL escalations from their ABA
     }
   };
   
-  // Find best target based on category
-  let target = registry.brandon; // Default to Brandon
-  for (const [key, person] of Object.entries(registry)) {
-    if (person.categories.includes(category)) {
-      target = person;
-      break;
-    }
-  }
+  // Always target the owner of this ABA instance
+  let target = registry.owner;
+  // Future: Pull owner from Supabase user profile
+  const _unused = category; // Category would be used in multi-tenant setup
   
   // Decide action based on urgency
   let action = 'log_only';
@@ -5040,21 +5021,41 @@ Phone: (336) 389-8116</p>
   if (path === '/api/escalate/twiml' && (method === 'GET' || method === 'POST')) {
     const url = new URL(req.url, `http://${req.headers.host}`);
     const msg = url.searchParams.get('msg') || 'This is an urgent message from ABA.';
-    const traceId = url.searchParams.get('trace') || 'unknown';
+    const traceId = url.searchParams.get('trace') || 'esc-' + Date.now();
+    const mode = url.searchParams.get('mode') || 'twoway'; // 'twoway' or 'announce'
     
-    // Use ElevenLabs VARA voice via <Play> URLs
-    // Each audio segment is generated dynamically
-    const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+    let twiml;
+    
+    if (mode === 'twoway') {
+      // REAL 2-WAY CONVERSATION using ConversationRelay
+      // User can talk back and have a real conversation with ABA
+      twiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Connect>
+    <ConversationRelay 
+      url="wss://${req.headers.host}/conversation-relay?trace=${traceId}&msg=${encodeURIComponent(msg)}"
+      welcomeGreeting="${msg.replace(/"/g, "'")}"
+      voice="Google.en-US-Neural2-F"
+      transcriptionProvider="google"
+      speechModel="telephony"
+      interruptible="true"
+      interruptByDtmf="true"
+    />
+  </Connect>
+</Response>`;
+    } else {
+      // One-way announcement mode (legacy)
+      twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Pause length="1"/>
   <Play>${REACH_URL}/api/voice/tts-stream?text=${encodeURIComponent(msg)}</Play>
   <Pause length="1"/>
-  <Play>${REACH_URL}/api/voice/tts-stream?text=${encodeURIComponent('Press any key to confirm you received this message, or stay on the line to speak with me.')}</Play>
   <Gather numDigits="1" timeout="10" action="${REACH_URL}/api/escalate/confirm?trace=${traceId}">
-    <Play>${REACH_URL}/api/voice/tts-stream?text=${encodeURIComponent('Waiting for your response.')}</Play>
+    <Play>${REACH_URL}/api/voice/tts-stream?text=${encodeURIComponent('Press any key to confirm, or stay on the line.')}</Play>
   </Gather>
-  <Play>${REACH_URL}/api/voice/tts-stream?text=${encodeURIComponent('No response received. I will try again shortly. Goodbye.')}</Play>
+  <Play>${REACH_URL}/api/voice/tts-stream?text=${encodeURIComponent('Goodbye.')}</Play>
 </Response>`;
+    }
     
     res.writeHead(200, { 'Content-Type': 'text/xml' });
     res.end(twiml);
@@ -5395,6 +5396,103 @@ Phone: (336) 389-8116</p>
  * ║ ROUTING: TWILIO→WEBSOCKET→REACH→DEEPGRAM→AIR→VARA→ELEVENLABS→TWILIO→USER    ║
  * ╚══════════════════════════════════════════════════════════════════════════════╝
  */
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:AIR:REACH.CONVERSATIONRELAY:CODE:voice.twoway.realtime:
+// TWILIO→CR→WEBSOCKET→AIR→VARA→USER:T10:v1.0.0:20260214:c1r2w⬡
+//
+// CONVERSATIONRELAY - Real 2-way AI phone conversations
+// User speaks → Twilio STT → WebSocket → AIR processes → VARA responds → User hears
+// This is the REAL deal - not one-way announcements
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ConversationRelay WebSocket handler
+function setupConversationRelay(wss) {
+  // This will be called from the main wss.on('connection') handler
+}
+
+// Generate TwiML for ConversationRelay 2-way calls
+function generateConversationRelayTwiML(context) {
+  const { greeting, traceId } = context;
+  
+  // ConversationRelay handles STT/TTS automatically via Twilio's providers
+  // We just need to provide the WebSocket URL and let it connect
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Connect>
+    <ConversationRelay 
+      url="wss://aba-reach.onrender.com/conversation-relay?trace=${traceId}"
+      welcomeGreeting="${greeting || 'Hello, this is ABA. How can I help you?'}"
+      voice="Google.en-US-Neural2-F"
+      transcriptionProvider="google"
+      speechModel="telephony"
+      interruptible="true"
+      interruptByDtmf="true"
+    />
+  </Connect>
+</Response>`;
+}
+
+// Handle ConversationRelay WebSocket messages
+async function handleConversationRelayMessage(ws, message, sessionData) {
+  const { type } = message;
+  
+  switch (type) {
+    case 'setup':
+      // Initial connection setup
+      console.log('[CR] Setup for call:', message.callSid);
+      sessionData.callSid = message.callSid;
+      sessionData.history = [];
+      break;
+      
+    case 'prompt':
+      // User said something - process it through AIR
+      const userText = message.voicePrompt;
+      console.log('[CR] User said:', userText);
+      
+      // Route through AIR for intelligent response
+      const response = await AIR_process(userText, sessionData.history, { name: 'Phone Caller', trust: 'medium' });
+      
+      // Add to history
+      sessionData.history.push({ role: 'user', content: userText });
+      sessionData.history.push({ role: 'assistant', content: response });
+      
+      // Send response back - ConversationRelay will TTS it
+      ws.send(JSON.stringify({
+        type: 'text',
+        token: response,
+        last: true
+      }));
+      break;
+      
+    case 'interrupt':
+      // User interrupted - stop current response
+      console.log('[CR] User interrupted');
+      break;
+      
+    case 'dtmf':
+      // User pressed a key
+      console.log('[CR] DTMF:', message.digit);
+      if (message.digit === '0') {
+        ws.send(JSON.stringify({
+          type: 'text',
+          token: 'Transferring you to Brandon now.',
+          last: true
+        }));
+        // Could trigger live transfer here
+      }
+      break;
+      
+    case 'error':
+      console.error('[CR] Error:', message.description);
+      break;
+      
+    case 'end':
+      console.log('[CR] Call ended');
+      break;
+  }
+}
+
 // ⬡B:AIR:REACH.VOICE.WEBSOCKET:CODE:voice.stream.twilio:TWILIO→REACH→DEEPGRAM→AIR→VARA:T8:v1.5.0:20260213:w1s2k⬡
 // ═══════════════════════════════════════════════════════════════════════════
 const wss = new WebSocketServer({ server: httpServer, path: '/media-stream' });
@@ -5503,6 +5601,141 @@ ccWss.on('connection', (ws, req) => {
 });
 
 console.log('[COMMAND CENTER] WebSocket server ready on /command-center');
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:AIR:REACH.CR.WEBSOCKET:CODE:voice.conversationrelay.ws:T10:v1.0.0:20260214⬡
+// CONVERSATIONRELAY WEBSOCKET - Real 2-way phone conversations
+// ═══════════════════════════════════════════════════════════════════════════════
+const crWss = new WebSocketServer({ server: httpServer, path: '/conversation-relay' });
+
+const crSessions = new Map(); // callSid -> session data
+
+crWss.on('connection', async (ws, req) => {
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const traceId = url.searchParams.get('trace') || 'cr-' + Date.now();
+  
+  console.log('[CR] New ConversationRelay connection | Trace:', traceId);
+  
+  const sessionData = {
+    traceId,
+    history: [],
+    callSid: null
+  };
+  
+  ws.on('message', async (data) => {
+    try {
+      const message = JSON.parse(data.toString());
+      
+      switch (message.type) {
+        case 'setup':
+          sessionData.callSid = message.callSid;
+          crSessions.set(message.callSid, sessionData);
+          console.log('[CR] Setup complete | CallSid:', message.callSid);
+          break;
+          
+        case 'prompt':
+          // User spoke - this is the transcribed text
+          const userText = message.voicePrompt;
+          console.log('[CR] User:', userText);
+          
+          // Route through AIR for intelligent response
+          try {
+            const response = await AIR_process(
+              userText, 
+              sessionData.history, 
+              { name: 'Phone Caller', trust: 'medium', access: 'standard' },
+              null
+            );
+            
+            // Add to history
+            sessionData.history.push({ role: 'user', content: userText });
+            sessionData.history.push({ role: 'assistant', content: response });
+            
+            console.log('[CR] ABA:', response.substring(0, 100) + '...');
+            
+            // Send response - ConversationRelay will TTS it
+            ws.send(JSON.stringify({
+              type: 'text',
+              token: response,
+              last: true
+            }));
+          } catch (e) {
+            console.error('[CR] AIR error:', e.message);
+            ws.send(JSON.stringify({
+              type: 'text',
+              token: 'I apologize, I had trouble processing that. Could you repeat?',
+              last: true
+            }));
+          }
+          break;
+          
+        case 'interrupt':
+          console.log('[CR] User interrupted');
+          // Clear any pending response
+          ws.send(JSON.stringify({ type: 'clear' }));
+          break;
+          
+        case 'dtmf':
+          console.log('[CR] DTMF digit:', message.digit);
+          if (message.digit === '0') {
+            ws.send(JSON.stringify({
+              type: 'text',
+              token: 'Press 0 was received. Goodbye.',
+              last: true
+            }));
+          }
+          break;
+          
+        case 'error':
+          console.error('[CR] Error:', message.description);
+          break;
+          
+        case 'end':
+          console.log('[CR] Call ended | CallSid:', sessionData.callSid);
+          if (sessionData.callSid) {
+            crSessions.delete(sessionData.callSid);
+          }
+          // Store conversation in brain
+          if (sessionData.history.length > 0) {
+            try {
+              await fetch(SUPABASE_URL + '/rest/v1/aba_memory', {
+                method: 'POST',
+                headers: {
+                  'apikey': SUPABASE_KEY,
+                  'Authorization': 'Bearer ' + SUPABASE_KEY,
+                  'Content-Type': 'application/json',
+                  'Prefer': 'return=minimal'
+                },
+                body: JSON.stringify({
+                  content: 'CR CALL TRANSCRIPT (' + traceId + '): ' + sessionData.history.map(h => h.role + ': ' + h.content).join(' | '),
+                  memory_type: 'phone_transcript',
+                  categories: ['conversationrelay', 'phone', 'twoway'],
+                  importance: 7,
+                  is_system: true,
+                  source: 'cr_call_' + traceId,
+                  tags: ['cr', 'phone', 'twoway', 'transcript']
+                })
+              });
+            } catch (e) { /* non-critical */ }
+          }
+          break;
+      }
+    } catch (e) {
+      console.error('[CR] Message parse error:', e.message);
+    }
+  });
+  
+  ws.on('close', () => {
+    console.log('[CR] WebSocket closed | Trace:', traceId);
+  });
+  
+  ws.on('error', (e) => {
+    console.error('[CR] WebSocket error:', e.message);
+  });
+});
+
+console.log('[CR] ConversationRelay WebSocket ready on /conversation-relay');
+
 
 
 wss.on('connection', (ws) => {
