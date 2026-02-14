@@ -509,6 +509,258 @@ async function buildProactiveGreeting(callerIdentity) {
   return greeting;
 }
 
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:AIR:REACH.AGENTS.RADAR:FUNC:calendar.read:v2.1.0:20260214⬡
+// RADAR Agent - Realtime Autonomous Data and Activity Recorder
+// L3: Manager-level agent for calendar
+// Uses Google Calendar API
+// ═══════════════════════════════════════════════════════════════════════════════
+async function RADAR_getCalendar(callerIdentity) {
+  console.log('[RADAR] Getting calendar for:', callerIdentity?.name || 'unknown');
+  
+  // Only allow for high-trust callers
+  if (!callerIdentity || !['T10', 'T9', 'T8'].includes(callerIdentity.trust)) {
+    return { allowed: false, summary: "I can share your schedule once I know who I am speaking with." };
+  }
+  
+  try {
+    // Check for Google Calendar token in brain
+    const tokenResult = await httpsRequest({
+      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+      path: '/rest/v1/aba_memory?memory_type=eq.google_calendar_token&limit=1&order=created_at.desc',
+      method: 'GET',
+      headers: {
+        'apikey': SUPABASE_ANON,
+        'Authorization': 'Bearer ' + SUPABASE_ANON
+      }
+    });
+    
+    if (tokenResult.status === 200) {
+      const tokens = JSON.parse(tokenResult.data.toString());
+      if (tokens.length > 0 && tokens[0].content) {
+        let tokenData;
+        try {
+          tokenData = JSON.parse(tokens[0].content);
+        } catch (e) {
+          tokenData = { access_token: tokens[0].content };
+        }
+        
+        const accessToken = tokenData.access_token;
+        if (!accessToken) {
+          return { allowed: true, summary: "I need to connect to your calendar. Would you like me to set that up?" };
+        }
+        
+        // Get today's events
+        const now = new Date();
+        const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+        const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).toISOString();
+        
+        const calResult = await httpsRequest({
+          hostname: 'www.googleapis.com',
+          path: '/calendar/v3/calendars/primary/events?timeMin=' + encodeURIComponent(startOfDay) + '&timeMax=' + encodeURIComponent(endOfDay) + '&singleEvents=true&orderBy=startTime',
+          method: 'GET',
+          headers: {
+            'Authorization': 'Bearer ' + accessToken,
+            'Accept': 'application/json'
+          }
+        });
+        
+        if (calResult.status === 200) {
+          const calData = JSON.parse(calResult.data.toString());
+          const events = calData.items || [];
+          
+          if (events.length === 0) {
+            return { allowed: true, count: 0, summary: "Your calendar is clear today. Nothing scheduled - a good day to focus on what matters most to you." };
+          }
+          
+          // Build warm summary
+          const eventNames = events.slice(0, 3).map(e => e.summary || 'Untitled').join(', ');
+          if (events.length === 1) {
+            const e = events[0];
+            const time = e.start?.dateTime ? new Date(e.start.dateTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : 'today';
+            return { allowed: true, count: 1, summary: 'You have one thing on your calendar today - "' + e.summary + '" at ' + time + '. Would you like me to tell you more about it?' };
+          } else {
+            return { allowed: true, count: events.length, summary: 'You have ' + events.length + ' things on your calendar today, including ' + eventNames + '. Want me to walk you through them?' };
+          }
+        } else if (calResult.status === 401) {
+          return { allowed: true, needsReauth: true, summary: "My calendar connection needs a refresh. Could you reconnect Google Calendar when you get a chance?" };
+        }
+      }
+    }
+    
+    return { allowed: true, summary: "I do not have calendar access set up yet. Would you like me to connect to your Google Calendar?" };
+    
+  } catch (e) {
+    console.log('[RADAR] Error:', e.message);
+    return { allowed: true, summary: "I had trouble checking your calendar. Let me try again." };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:AIR:REACH.AGENTS.PRESS:FUNC:news.search:v2.1.0:20260214⬡
+// PRESS Agent - Proactive Real-time Event and Story Scanner
+// L3: Manager-level agent for news
+// Uses Perplexity API for real-time news
+// ═══════════════════════════════════════════════════════════════════════════════
+async function PRESS_getNews(query) {
+  console.log('[PRESS] News query:', query);
+  
+  const PERPLEXITY_KEY = process.env.PERPLEXITY_API_KEY;
+  
+  try {
+    const result = await httpsRequest({
+      hostname: 'api.perplexity.ai',
+      path: '/chat/completions',
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + PERPLEXITY_KEY,
+        'Content-Type': 'application/json'
+      }
+    }, JSON.stringify({
+      model: 'llama-3.1-sonar-small-128k-online',
+      messages: [
+        { role: 'system', content: 'You are a news assistant. Give brief, factual news summaries in 2-3 sentences. Be warm and conversational, not robotic. Current date: ' + new Date().toLocaleDateString() },
+        { role: 'user', content: query }
+      ],
+      max_tokens: 150
+    }));
+    
+    if (result.status === 200) {
+      const data = JSON.parse(result.data.toString());
+      const answer = data.choices?.[0]?.message?.content;
+      if (answer) {
+        return answer;
+      }
+    }
+    
+    return "I could not find news on that topic right now. Is there something specific you would like me to look into?";
+    
+  } catch (e) {
+    console.log('[PRESS] Error:', e.message);
+    return "I had trouble getting the latest news. Let me try again in a moment.";
+  }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:AIR:REACH.AGENTS.DIAL:FUNC:outbound.elevenlabs:v2.1.0:20260214⬡
+// DIAL Agent - 2-Way Outbound Calls via ElevenLabs
+// L3: Manager-level agent for outbound voice
+// Uses ElevenLabs Conversational AI for full 2-way calls
+// ═══════════════════════════════════════════════════════════════════════════════
+async function DIAL_callWithElevenLabs(phoneNumber, purpose, callerContext) {
+  console.log('[DIAL] 2-way outbound call to:', phoneNumber);
+  
+  const ELEVENLABS_KEY = process.env.ELEVENLABS_API_KEY || 'sk_e0b48157805968dbb370f299b60e22001189bd85c3864040';
+  const AGENT_ID = 'agent_0601khe2q0gben08ws34bzf7a0sa'; // ABA agent
+  const TWILIO_FROM = '+13362037510';
+  
+  try {
+    // ElevenLabs outbound call API
+    const result = await httpsRequest({
+      hostname: 'api.elevenlabs.io',
+      path: '/v1/convai/conversation/create-phone-call',
+      method: 'POST',
+      headers: {
+        'xi-api-key': ELEVENLABS_KEY,
+        'Content-Type': 'application/json'
+      }
+    }, JSON.stringify({
+      agent_id: AGENT_ID,
+      agent_phone_number_id: 'twilio', // or the specific phone number ID
+      customer_phone_number: phoneNumber,
+      customer_phone_number_to_dial_from: TWILIO_FROM,
+      conversation_initiation_client_data: {
+        purpose: purpose,
+        caller_context: callerContext || 'proactive outreach',
+        vara_style: 'warm_butler'
+      }
+    }));
+    
+    if (result.status === 200 || result.status === 201) {
+      const data = JSON.parse(result.data.toString());
+      console.log('[DIAL] ElevenLabs call initiated:', data.conversation_id);
+      
+      // Log to brain
+      storeToBrain({
+        content: 'OUTBOUND CALL INITIATED: ' + phoneNumber + ' | Purpose: ' + purpose + ' | ConvID: ' + (data.conversation_id || 'unknown'),
+        memory_type: 'call_log',
+        categories: ['call', 'outbound', 'elevenlabs'],
+        importance: 6,
+        source: 'dial_outbound_' + Date.now(),
+        tags: ['call', 'outbound']
+      }).catch(e => console.log('[BRAIN] Store error:', e.message));
+      
+      // Broadcast to Command Center
+      broadcastToCommandCenter({
+        type: 'outbound_call',
+        source: 'dial',
+        phone: phoneNumber,
+        purpose: purpose,
+        conversation_id: data.conversation_id,
+        timestamp: new Date().toISOString()
+      });
+      
+      return {
+        success: true,
+        conversation_id: data.conversation_id,
+        message: 'I am calling ' + phoneNumber + ' now with a full two-way conversation capability.'
+      };
+    } else {
+      console.log('[DIAL] ElevenLabs API error:', result.status);
+      // Fallback to old Twilio TwiML method
+      return await DIAL_callWithTwiML(phoneNumber, purpose);
+    }
+    
+  } catch (e) {
+    console.log('[DIAL] ElevenLabs outbound error:', e.message);
+    // Fallback
+    return await DIAL_callWithTwiML(phoneNumber, purpose);
+  }
+}
+
+// Fallback TwiML method for outbound (one-way announcement)
+async function DIAL_callWithTwiML(phoneNumber, message) {
+  console.log('[DIAL] Fallback to TwiML for:', phoneNumber);
+  
+  const TWILIO_SID = process.env.TWILIO_ACCOUNT_SID;
+  const TWILIO_TOKEN = process.env.TWILIO_AUTH_TOKEN;
+  const TWILIO_FROM = '+13362037510';
+  
+  try {
+    const auth = Buffer.from(TWILIO_SID + ':' + TWILIO_TOKEN).toString('base64');
+    
+    const twimlUrl = 'https://aba-reach.onrender.com/api/call/twiml?message=' + encodeURIComponent(message);
+    
+    const params = new URLSearchParams({
+      To: phoneNumber,
+      From: TWILIO_FROM,
+      Url: twimlUrl
+    }).toString();
+    
+    const result = await httpsRequest({
+      hostname: 'api.twilio.com',
+      path: '/2010-04-01/Accounts/' + TWILIO_SID + '/Calls.json',
+      method: 'POST',
+      headers: {
+        'Authorization': 'Basic ' + auth,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      }
+    }, params);
+    
+    if (result.status === 201) {
+      return { success: true, message: 'Call placed using announcement mode.' };
+    }
+    
+    return { success: false, message: 'Could not place the call right now.' };
+    
+  } catch (e) {
+    console.log('[DIAL] TwiML error:', e.message);
+    return { success: false, message: 'I had trouble making that call.' };
+  }
+}
+
 async function LUKE_process(userSaid) {
   console.log('[LUKE] Processing query: "' + userSaid + '"');
   
@@ -4216,6 +4468,19 @@ Phone: (336) 389-8116</p>
         console.log('[AIR] Routing to IMAN agent (email)');
         const emailResult = await IMAN_readEmails(callerIdentity);
         agentResponse = emailResult.summary;
+      }
+      // RADAR Agent - Calendar queries
+      else if (msgLower.includes('calendar') || msgLower.includes('schedule') || msgLower.includes('meeting') ||
+               msgLower.includes('appointment') || msgLower.includes('today') && (msgLower.includes('have') || msgLower.includes('what'))) {
+        console.log('[AIR] Routing to RADAR agent (calendar)');
+        const calResult = await RADAR_getCalendar(callerIdentity);
+        agentResponse = calResult.summary;
+      }
+      // PRESS Agent - News queries
+      else if (msgLower.includes('news') || msgLower.includes('headline') || msgLower.includes('happening') ||
+               msgLower.includes('latest') && (msgLower.includes('on') || msgLower.includes('about'))) {
+        console.log('[AIR] Routing to PRESS agent (news)');
+        agentResponse = await PRESS_getNews(userMessage);
       }
       
       // If an agent handled it, return that response
