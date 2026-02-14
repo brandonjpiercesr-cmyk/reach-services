@@ -5384,8 +5384,9 @@ Phone: (336) 389-8116</p>
 <Response>
   <Play>${REACH_URL}/api/voice/tts-stream?text=${encodeURIComponent(safeGreeting)}</Play>
   <Connect>
-    <Stream url="wss://${req.headers.host}/media-stream?trace=${traceId}" />
+    <Stream url="wss://${req.headers.host}/media-stream?trace=${traceId}&outbound=true" track="both_tracks" />
   </Connect>
+  <Pause length="3600"/>
 </Response>`;
     } else {
       // One-way announcement mode (legacy)
@@ -6148,6 +6149,9 @@ wss.on('connection', (ws) => {
         session = new CallSession(msg.start.streamSid, msg.start.callSid);
         session.twilioWs = ws;
         sessions.set(msg.start.streamSid, session);
+        
+        // Check if this is an outbound call (from escalation)
+        session.isOutbound = msg.start.customParameters?.outbound === 'true';
         
         // ⬡B:AIR:REACH.VOICE.CALLER_EXTRACT:CODE:identity.extract.twilio:TWILIO→REACH→AIR:T9:v1.6.0:20260213:c1e2x⬡
         // Extract caller number from Twilio stream parameters
