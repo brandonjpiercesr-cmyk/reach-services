@@ -6970,6 +6970,19 @@ async function runAutonomousLoop() {
     const scoutRan = await loopScoutScan();
     const embedCount = await loopSageEmbed();
 
+    // v2.6.7 | KEEPALIVE | Ping 1A Shell every 2nd tick (10 min) to prevent cold starts
+    // Render free tier sleeps after 15 min. 10 min pings keep it awake.
+    if (loopCount % 2 === 0) {
+      try {
+        await new Promise(function(resolve) {
+          https.get('https://onea-shell.onrender.com/health', function(r) {
+            r.on('data', function() {});
+            r.on('end', resolve);
+          }).on('error', resolve);
+        });
+      } catch (e) { /* best effort */ }
+    }
+
     // PULSE heartbeat every 6th tick (30 min)
     if (loopCount % 6 === 0) {
       await loopSupaWrite('aba_memory', {
