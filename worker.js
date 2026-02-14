@@ -5380,11 +5380,14 @@ Phone: (336) 389-8116</p>
       // Play greeting with ElevenLabs, then stream bidirectional audio
       const safeGreeting = msg.replace(/"/g, "'").replace(/&/g, "and").replace(/</g, "").replace(/>/g, "");
       
+      // Build WebSocket URL - use &amp; for XML encoding
+      const wsUrl = 'wss://' + req.headers.host + '/media-stream?trace=' + traceId + '&amp;outbound=true';
+      
       twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Play>${REACH_URL}/api/voice/tts-stream?text=${encodeURIComponent(safeGreeting)}</Play>
   <Connect>
-    <Stream url="wss://${req.headers.host}/media-stream?trace=${traceId}&outbound=true" track="both_tracks" />
+    <Stream url="${wsUrl}" track="both_tracks" />
   </Connect>
   <Pause length="3600"/>
 </Response>`;
