@@ -449,6 +449,162 @@ async function lookupCallerByPhone(phoneNumber) {
 
 
 // ═══════════════════════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:AIR:REACH.MEMORY.RECALL:FUNC:conversation.history:v2.4.1:20260214⬡
+// RECALL - Get last conversation with this caller
+// Cross-call memory - remember what we talked about
+// ═══════════════════════════════════════════════════════════════════════════════
+async function RECALL_lastConversation(callerIdentity) {
+  console.log('[RECALL] Getting last conversation for:', callerIdentity?.name || 'unknown');
+  
+  if (!callerIdentity || !callerIdentity.phone) {
+    return null;
+  }
+  
+  try {
+    const phoneDigits = callerIdentity.phone.replace(/[^0-9]/g, '').slice(-10);
+    
+    // Search for recent voice transcripts with this caller
+    const result = await httpsRequest({
+      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+      path: '/rest/v1/aba_memory?memory_type=eq.voice_transcript&content=ilike.*' + phoneDigits + '*&order=created_at.desc&limit=3',
+      method: 'GET',
+      headers: {
+        'apikey': SUPABASE_ANON,
+        'Authorization': 'Bearer ' + SUPABASE_ANON
+      }
+    });
+    
+    if (result.status === 200) {
+      const data = JSON.parse(result.data.toString());
+      if (data.length > 0) {
+        console.log('[RECALL] Found', data.length, 'previous conversations');
+        return {
+          found: true,
+          lastTopic: data[0].content,
+          conversationCount: data.length
+        };
+      }
+    }
+    
+    // Also check by name
+    const nameResult = await httpsRequest({
+      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+      path: '/rest/v1/aba_memory?memory_type=eq.voice_transcript&content=ilike.*' + (callerIdentity.name || 'unknown') + '*&order=created_at.desc&limit=3',
+      method: 'GET',
+      headers: {
+        'apikey': SUPABASE_ANON,
+        'Authorization': 'Bearer ' + SUPABASE_ANON
+      }
+    });
+    
+    if (nameResult.status === 200) {
+      const nameData = JSON.parse(nameResult.data.toString());
+      if (nameData.length > 0) {
+        console.log('[RECALL] Found', nameData.length, 'previous conversations by name');
+        return {
+          found: true,
+          lastTopic: nameData[0].content,
+          conversationCount: nameData.length
+        };
+      }
+    }
+    
+    return { found: false };
+    
+  } catch (e) {
+    console.log('[RECALL] Error:', e.message);
+    return { found: false };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:AIR:REACH.MEMORY.STORE:FUNC:conversation.save:v2.4.1:20260214⬡
+// Store conversation to brain for future recall
+// ═══════════════════════════════════════════════════════════════════════════════
+async function STORE_conversation(callerIdentity, userSaid, abaResponse, conversationId) {
+  console.log('[STORE] Saving conversation to brain');
+  
+  try {
+    await storeToBrain({
+      content: 'VOICE CALL [' + (conversationId || Date.now()) + ']: ' + 
+               (callerIdentity?.name || 'Unknown') + ' (' + (callerIdentity?.phone || 'no phone') + ') ' +
+               'asked: "' + userSaid + '" | ABA responded: "' + (abaResponse || '').substring(0, 200) + '"',
+      memory_type: 'voice_transcript',
+      categories: ['voice', 'call', 'transcript'],
+      importance: 6,
+      source: 'voice_call_' + (conversationId || Date.now()),
+      tags: ['voice', 'transcript', callerIdentity?.name?.toLowerCase() || 'unknown']
+    });
+    console.log('[STORE] Conversation saved');
+    return true;
+  } catch (e) {
+    console.log('[STORE] Error:', e.message);
+    return false;
+  }
+}
+
+// ⬡B:AIR:REACH.AGENTS.CLIMATE:FUNC:weather.lookup:v2.4.1:20260214⬡
+// CLIMATE Agent - Weather lookup
+// L3: Manager-level agent for weather
+// Uses Open-Meteo API (free, no key required)
+// ═══════════════════════════════════════════════════════════════════════════════
+async function CLIMATE_getWeather(location) {
+  console.log('[CLIMATE] Weather query for:', location);
+  
+  // Default to Greensboro NC for Brandon
+  let lat = 36.0726;
+  let lon = -79.7920;
+  let cityName = 'Greensboro';
+  
+  const locLower = (location || '').toLowerCase();
+  
+  // Check for known locations
+  if (locLower.includes('greensboro') || locLower.includes('high point')) {
+    lat = 36.0726; lon = -79.7920; cityName = 'Greensboro';
+  } else if (locLower.includes('new york') || locLower.includes('nyc')) {
+    lat = 40.7128; lon = -74.0060; cityName = 'New York';
+  } else if (locLower.includes('los angeles') || locLower.includes('la')) {
+    lat = 34.0522; lon = -118.2437; cityName = 'Los Angeles';
+  }
+  
+  try {
+    const result = await httpsRequest({
+      hostname: 'api.open-meteo.com',
+      path: '/v1/forecast?latitude=' + lat + '&longitude=' + lon + '&current=temperature_2m,weather_code&temperature_unit=fahrenheit',
+      method: 'GET',
+      headers: { 'Accept': 'application/json' }
+    });
+    
+    if (result.status === 200) {
+      const data = JSON.parse(result.data.toString());
+      const temp = Math.round(data.current?.temperature_2m || 0);
+      const code = data.current?.weather_code || 0;
+      
+      // Weather code descriptions
+      let condition = 'clear';
+      if (code >= 1 && code <= 3) condition = 'partly cloudy';
+      else if (code >= 45 && code <= 48) condition = 'foggy';
+      else if (code >= 51 && code <= 55) condition = 'drizzling';
+      else if (code >= 61 && code <= 65) condition = 'rainy';
+      else if (code >= 71 && code <= 77) condition = 'snowy';
+      else if (code >= 80 && code <= 82) condition = 'showery';
+      else if (code >= 95) condition = 'stormy';
+      
+      return 'It is currently ' + temp + ' degrees and ' + condition + ' in ' + cityName + '.';
+    }
+    
+    return 'I could not get the weather right now. Let me try again in a moment.';
+    
+  } catch (e) {
+    console.log('[CLIMATE] Error:', e.message);
+    return 'I had trouble checking the weather. Is there anything else I can help with?';
+  }
+}
+
 // ⬡B:AIR:REACH.AGENTS.PLAY:FUNC:sports.espn:v2.1.0:20260214⬡
 // PLAY Agent - Performance and Live Activity Yielder
 // L3: Manager-level agent for sports scores
@@ -2635,6 +2791,26 @@ async function AIR_DISPATCH(lukeAnalysis, judeResult, callerIdentity) {
   const agentNames = judeResult.agents.map(a => (a.name || '').toLowerCase());
   console.log('[AIR DISPATCH] JUDE found agents:', agentNames.join(', ') || 'none');
   
+    // ⬡B:AIR:REACH.DISPATCH.CLIMATE:ROUTE:weather:v2.4.1:20260214⬡
+  // CLIMATE Agent - Weather queries (L3: Manager)
+  if (query.includes('weather') || query.includes('temperature') || query.includes('outside') ||
+      query.includes('cold') || query.includes('hot') || query.includes('rain')) {
+    console.log('[AIR DISPATCH] → L3: CLIMATE (Weather)');
+    try {
+      // Use caller's known location if available
+      let location = lukeAnalysis.raw;
+      if (callerIdentity && callerIdentity.name === 'Brandon') {
+        location = 'Greensboro, NC'; // Brandon's location
+      }
+      const result = await CLIMATE_getWeather(location);
+      if (result) {
+        return { handled: true, agent: 'CLIMATE', data: result, type: 'weather' };
+      }
+    } catch (e) {
+      console.log('[AIR DISPATCH] CLIMATE error:', e.message);
+    }
+  }
+  
   // ⬡B:AIR:REACH.DISPATCH.PLAY:ROUTE:sports:v2.4.0:20260214⬡
   // PLAY Agent - Sports queries (L3: Manager, LIFESTYLE department)
   if (query.includes('score') || query.includes('laker') || query.includes('game') ||
@@ -2733,6 +2909,28 @@ async function AIR_process(userSaid, history, callerIdentity, demoState) {
   
   // ⬡B:AIR:REACH.ORCHESTRATOR.SUMMON_COLE:CODE:routing.agent.context:AIR→COLE→BRAIN→AIR:T10:v1.5.0:20260213:s1c2l⬡
   const coleResult = await COLE_scour(lukeAnalysis);
+
+  // ⬡B:AIR:REACH.CONTEXT.CALLER:CODE:enrichment:v2.4.1:20260214⬡
+  // Enrich with caller context and cross-call memory
+  if (callerIdentity && callerIdentity.found) {
+    coleResult.callerContext = {
+      name: callerIdentity.name,
+      trust: callerIdentity.trust,
+      location: callerIdentity.name === 'Brandon' ? 'Greensboro, NC' : null
+    };
+    console.log('[AIR] Enriched caller context for:', callerIdentity.name);
+  }
+
+  // Cross-call memory
+  try {
+    const lastConvo = await RECALL_lastConversation(callerIdentity);
+    if (lastConvo && lastConvo.found) {
+      coleResult.lastConversation = lastConvo.lastTopic;
+      console.log('[AIR] Found previous conversation');
+    }
+  } catch (e) {
+    console.log('[AIR] Recall error:', e.message);
+  }
   
   // ⬡B:AIR:REACH.ORCHESTRATOR.SUMMON_JUDE:CODE:routing.agent.discovery:AIR→JUDE→BRAIN→AIR:T10:v1.5.0:20260213:s1j2d⬡
   const judeResult = await JUDE_findAgents(lukeAnalysis);
