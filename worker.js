@@ -3371,11 +3371,35 @@ Phone: (336) 389-8116</p>
     });
   }
 
+  // ⬡B:reach:HTTP:jobs_parsed⬡ /api/jobs/parsed - READ JOBS FROM SUPABASE BRAIN
+  // ═══════════════════════════════════════════════════════════════════════
+  if (path === '/api/jobs/parsed' && method === 'GET') {
+    try {
+      const url = new URL(req.url, 'http://localhost');
+      const limitParam = url.searchParams.get('limit') || '50';
+      const SUPA_URL = process.env.SUPABASE_URL || 'https://htlxjkbrstpwwtzsbyvb.supabase.co';
+      const SUPA_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY;
+      if (!SUPA_KEY) return jsonResponse(res, 503, { error: 'No Supabase key configured' });
+      const supaResp = await httpsRequest({
+        hostname: new URL(SUPA_URL).hostname,
+        path: `/rest/v1/aba_memory?memory_type=eq.job_posting&order=importance.desc&limit=${limitParam}`,
+        method: 'GET',
+        headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY }
+      });
+      const memories = JSON.parse(supaResp.data.toString());
+      const jobs = memories.map(m => {
+        try { return { id: m.id, ...JSON.parse(m.content), storedAt: m.created_at, importance: m.importance, tags: m.tags }; }
+        catch(e) { return { id: m.id, raw: m.content, storedAt: m.created_at }; }
+      });
+      return jsonResponse(res, 200, { jobs, total: jobs.length, source: 'supabase_brain' });
+    } catch(e) { return jsonResponse(res, 500, { error: e.message }); }
+  }
+
   // ⬡B:AIR:REACH.API.NOTFOUND:CODE:infrastructure.error.404:USER→REACH→ERROR:T10:v1.5.0:20260213:n1f2d⬡ CATCH-ALL
   // ═══════════════════════════════════════════════════════════════════════
   jsonResponse(res, 404, { 
     error: 'Route not found: ' + method + ' ' + path,
-    available: ['/api/call/dial', '/api/call/twiml', '/api/call/status', '/api/call/record', '/api/router', '/api/models/claude', '/api/voice/deepgram-token', '/api/voice/tts', '/api/omi/manifest', '/api/omi/webhook', '/api/sms/send', '/api/brain/search', '/api/brain/store', '/api/scrape-job', '/api/idealist/parse', '/api/idealist/verify'],
+    available: ['/api/call/dial', '/api/call/twiml', '/api/call/status', '/api/call/record', '/api/router', '/api/models/claude', '/api/voice/deepgram-token', '/api/voice/tts', '/api/omi/manifest', '/api/omi/webhook', '/api/sms/send', '/api/brain/search', '/api/brain/store', '/api/scrape-job', '/api/idealist/parse', '/api/idealist/verify', '/api/jobs/parsed'],
     hint: 'We are all ABA'
   });
 });
