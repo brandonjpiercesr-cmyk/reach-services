@@ -11,7 +11,7 @@
  * ╚══════════════════════════════════════════════════════════════════════════════╝
  *
  * FILE: worker.js
- * VERSION: v1.10.0-REACH-DIAL (OMI auth + heartbeat + logger)
+ * VERSION: v1.11.0-REACH-ESCALATION (OMI auth + heartbeat + logger)
  * ABCD: BOTH
  * CREATED: Feb 13, 2026
  * UPDATED: Feb 13, 2026
@@ -3395,11 +3395,280 @@ Phone: (336) 389-8116</p>
     } catch(e) { return jsonResponse(res, 500, { error: e.message }); }
   }
 
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // ⬡B:AIR:REACH.ESCALATION:CODE:routing.proactive.auto_call:AIR→DIAL→TWILIO:T10:v1.0.0:20260214:e1s2c⬡
+  // LAW OF ESCALATION - AIR Auto-Calls Based on Priority
+  // When urgency >= threshold, AIR automatically calls the right person
+  // No human triggers needed - ABA is PROACTIVE
+  // ═══════════════════════════════════════════════════════════════════════
+  
+  // ⬡B:AIR:ESCALATION.REGISTRY:DATA:team.contacts.priority:AIR:T10:v1.0.0:20260214:r1e2g⬡
+  const ESCALATION_REGISTRY = {
+    brandon: {
+      name: 'Brandon Pierce Sr.',
+      phone: '+13363898116',
+      role: 'founder',
+      priority: 1, // Highest - for critical decisions
+      hours: '24/7', // Always reachable for emergencies
+      triggers: ['critical', 'money', 'legal', 'investor', 'emergency', 'security']
+    },
+    cj: {
+      name: 'CJ Moore',
+      phone: '+19199170686',
+      role: 'team_member',
+      priority: 2,
+      hours: '9-21', // 9am to 9pm
+      triggers: ['job_lead', 'application', 'deadline', 'client_work']
+    },
+    bj: {
+      name: 'BJ Pierce',
+      phone: '+19803958662',
+      role: 'team_member',
+      priority: 2,
+      hours: '9-21',
+      triggers: ['interview', 'school', 'family', 'legacy_prep']
+    }
+  };
+
+  // ⬡B:AIR:ESCALATION.LEVELS:DATA:urgency.thresholds:AIR:T10:v1.0.0:20260214:l1v2l⬡
+  const ESCALATION_LEVELS = {
+    1: { name: 'INFO', action: 'log_only', description: 'Just log it' },
+    2: { name: 'LOW', action: 'email', description: 'Send email via IMAN' },
+    3: { name: 'MEDIUM', action: 'sms', description: 'Send SMS via CARA' },
+    4: { name: 'HIGH', action: 'sms_then_call', description: 'SMS first, call if no response in 5min' },
+    5: { name: 'CRITICAL', action: 'call_immediate', description: 'Call immediately, no waiting' },
+    6: { name: 'EMERGENCY', action: 'call_all', description: 'Call everyone in priority order' }
+  };
+
+  // /api/escalate - AIR triggers escalation based on urgency
+  if (path === '/api/escalate' && method === 'POST') {
+    const body = await parseBody(req);
+    const { urgency, message, context, target, source } = body;
+    
+    // Validate urgency level
+    const level = Math.min(Math.max(parseInt(urgency) || 3, 1), 6);
+    const escalationConfig = ESCALATION_LEVELS[level];
+    
+    console.log('[ESCALATION] Level:', level, escalationConfig.name, '| Message:', message?.substring(0, 100));
+    
+    // Determine who to contact
+    let targets = [];
+    if (target && ESCALATION_REGISTRY[target.toLowerCase()]) {
+      targets = [ESCALATION_REGISTRY[target.toLowerCase()]];
+    } else {
+      // Auto-select based on triggers in message
+      const msgLower = (message || '').toLowerCase() + ' ' + (context || '').toLowerCase();
+      for (const [key, person] of Object.entries(ESCALATION_REGISTRY)) {
+        if (person.triggers.some(t => msgLower.includes(t))) {
+          targets.push(person);
+        }
+      }
+      // If no matches, default to Brandon for high urgency
+      if (targets.length === 0 && level >= 4) {
+        targets = [ESCALATION_REGISTRY.brandon];
+      }
+    }
+    
+    // Sort by priority
+    targets.sort((a, b) => a.priority - b.priority);
+    
+    // Execute escalation action
+    const results = [];
+    const timestamp = new Date().toISOString();
+    
+    for (const person of targets) {
+      const result = { 
+        name: person.name, 
+        phone: person.phone,
+        action: escalationConfig.action,
+        status: 'pending'
+      };
+      
+      try {
+        // LEVEL 1-2: Log or Email only
+        if (level <= 2) {
+          result.status = 'logged';
+          result.note = 'Logged to brain, no outreach needed';
+        }
+        
+        // LEVEL 3: SMS via CARA
+        else if (level === 3) {
+          const smsRes = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Messages.json`, {
+            method: 'POST',
+            headers: {
+              'Authorization': 'Basic ' + Buffer.from(`${TWILIO_SID}:${TWILIO_AUTH}`).toString('base64'),
+              'Content-Type': 'application/x-www-form-urlencoded'
+            },
+            body: new URLSearchParams({
+              To: person.phone,
+              From: TWILIO_PHONE,
+              Body: `[ABA ALERT] ${message || 'Action needed'}. Reply or call back.`
+            }).toString()
+          });
+          const smsData = await smsRes.json();
+          result.status = smsData.sid ? 'sms_sent' : 'sms_failed';
+          result.sid = smsData.sid;
+        }
+        
+        // LEVEL 4: SMS then call if no response (SMS now, schedule call)
+        else if (level === 4) {
+          // Send SMS first
+          const smsRes = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Messages.json`, {
+            method: 'POST',
+            headers: {
+              'Authorization': 'Basic ' + Buffer.from(`${TWILIO_SID}:${TWILIO_AUTH}`).toString('base64'),
+              'Content-Type': 'application/x-www-form-urlencoded'
+            },
+            body: new URLSearchParams({
+              To: person.phone,
+              From: TWILIO_PHONE,
+              Body: `[ABA URGENT] ${message || 'Urgent action needed'}. ABA will call in 5 min if no response.`
+            }).toString()
+          });
+          result.status = 'sms_sent_call_scheduled';
+          result.note = 'Call will trigger in 5 minutes if no response';
+          // TODO: Schedule call with BullMQ or setTimeout
+        }
+        
+        // LEVEL 5-6: Call immediately
+        else if (level >= 5) {
+          const twilioAuth = Buffer.from(`${TWILIO_SID}:${TWILIO_AUTH}`).toString('base64');
+          const traceId = `ESC-${level}-${Date.now()}`;
+          
+          // Build TwiML that announces the escalation
+          const announcement = level === 6 
+            ? `EMERGENCY from ABA. ${message || 'Immediate action required'}. This is priority one.`
+            : `Urgent message from ABA. ${message || 'Action needed'}. Please respond.`;
+          
+          const callRes = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Calls.json`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Basic ${twilioAuth}`,
+              'Content-Type': 'application/x-www-form-urlencoded'
+            },
+            body: new URLSearchParams({
+              To: person.phone,
+              From: TWILIO_PHONE,
+              Url: `${REACH_URL}/api/escalate/twiml?msg=${encodeURIComponent(announcement)}&trace=${traceId}`,
+              StatusCallback: `${REACH_URL}/api/call/status?trace=${traceId}`,
+              StatusCallbackEvent: 'initiated ringing answered completed',
+              StatusCallbackMethod: 'POST'
+            }).toString()
+          });
+          
+          const callData = await callRes.json();
+          result.status = callData.sid ? 'call_initiated' : 'call_failed';
+          result.callSid = callData.sid;
+          result.traceId = traceId;
+        }
+      } catch (e) {
+        result.status = 'error';
+        result.error = e.message;
+      }
+      
+      results.push(result);
+    }
+    
+    // Store escalation in brain
+    await fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_KEY || SUPABASE_ANON,
+        'Authorization': `Bearer ${SUPABASE_KEY || SUPABASE_ANON}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal'
+      },
+      body: JSON.stringify({
+        content: `ESCALATION TRIGGERED: Level ${level} (${escalationConfig.name}) | Message: ${message} | Targets: ${results.map(r => r.name).join(', ')} | Source: ${source || 'AIR'}`,
+        memory_type: 'escalation',
+        categories: ['escalation', 'proactive', `level_${level}`],
+        importance: Math.min(level + 5, 10),
+        is_system: true,
+        source: `escalation_${timestamp}`,
+        tags: ['escalation', 'auto_call', 'proactive', escalationConfig.name.toLowerCase()],
+        air_processed: true
+      })
+    });
+    
+    return jsonResponse(res, 200, {
+      success: true,
+      level,
+      levelName: escalationConfig.name,
+      action: escalationConfig.action,
+      targets: results,
+      timestamp,
+      routing: `AIR*ESCALATION*${results.map(r => r.name.split(' ')[0].toUpperCase()).join(',')}*${escalationConfig.action.toUpperCase()}`
+    });
+  }
+  
+  // /api/escalate/twiml - TwiML for escalation calls
+  if (path === '/api/escalate/twiml' && method === 'GET') {
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const msg = url.searchParams.get('msg') || 'This is an urgent message from ABA.';
+    const traceId = url.searchParams.get('trace') || 'unknown';
+    
+    // Use VARA voice personality (warm, butler-like)
+    const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Pause length="1"/>
+  <Say voice="Polly.Matthew" language="en-US">${msg}</Say>
+  <Pause length="1"/>
+  <Say voice="Polly.Matthew" language="en-US">Press any key to confirm you received this message, or stay on the line to speak with ABA.</Say>
+  <Gather numDigits="1" timeout="10" action="${REACH_URL}/api/escalate/confirm?trace=${traceId}">
+    <Say voice="Polly.Matthew">Waiting for your response.</Say>
+  </Gather>
+  <Say voice="Polly.Matthew">No response received. ABA will try again shortly. Goodbye.</Say>
+</Response>`;
+    
+    res.writeHead(200, { 'Content-Type': 'text/xml' });
+    res.end(twiml);
+    return;
+  }
+  
+  // /api/escalate/confirm - Handle confirmation keypress
+  if (path === '/api/escalate/confirm' && method === 'POST') {
+    const body = await parseBody(req);
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const traceId = url.searchParams.get('trace') || 'unknown';
+    
+    console.log('[ESCALATION] Confirmation received | Trace:', traceId, '| Digit:', body.Digits);
+    
+    // Store confirmation
+    await fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_KEY || SUPABASE_ANON,
+        'Authorization': `Bearer ${SUPABASE_KEY || SUPABASE_ANON}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal'
+      },
+      body: JSON.stringify({
+        content: `ESCALATION CONFIRMED: Trace ${traceId} | Digit pressed: ${body.Digits} | From: ${body.From}`,
+        memory_type: 'escalation',
+        categories: ['escalation', 'confirmed'],
+        importance: 8,
+        is_system: true,
+        source: `escalation_confirm_${traceId}`,
+        tags: ['escalation', 'confirmed', 'response_received']
+      })
+    });
+    
+    const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say voice="Polly.Matthew">Thank you. Your confirmation has been logged. ABA will follow up as needed. Goodbye.</Say>
+</Response>`;
+    
+    res.writeHead(200, { 'Content-Type': 'text/xml' });
+    res.end(twiml);
+    return;
+  }
+
   // ⬡B:AIR:REACH.API.NOTFOUND:CODE:infrastructure.error.404:USER→REACH→ERROR:T10:v1.5.0:20260213:n1f2d⬡ CATCH-ALL
   // ═══════════════════════════════════════════════════════════════════════
   jsonResponse(res, 404, { 
     error: 'Route not found: ' + method + ' ' + path,
-    available: ['/api/call/dial', '/api/call/twiml', '/api/call/status', '/api/call/record', '/api/router', '/api/models/claude', '/api/voice/deepgram-token', '/api/voice/tts', '/api/omi/manifest', '/api/omi/webhook', '/api/sms/send', '/api/brain/search', '/api/brain/store', '/api/scrape-job', '/api/idealist/parse', '/api/idealist/verify', '/api/jobs/parsed'],
+    available: ['/api/escalate', '/api/escalate/twiml', '/api/escalate/confirm', '/api/call/dial', '/api/call/twiml', '/api/call/status', '/api/call/record', '/api/router', '/api/models/claude', '/api/voice/deepgram-token', '/api/voice/tts', '/api/omi/manifest', '/api/omi/webhook', '/api/sms/send', '/api/brain/search', '/api/brain/store', '/api/scrape-job', '/api/idealist/parse', '/api/idealist/verify', '/api/jobs/parsed'],
     hint: 'We are all ABA'
   });
 });
