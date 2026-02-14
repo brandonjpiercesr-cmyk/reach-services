@@ -438,6 +438,510 @@ Be conversational, natural, like talking to a friend.`;
  * ╚══════════════════════════════════════════════════════════════════════════════╝
  */
 // ⬡B:AIR:REACH.ORCHESTRATOR.AIR:CODE:routing.central.all:USER→AIR→AGENTS→MODEL→VARA→USER:T10:v1.5.0:20260213:a1i2r⬡
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:AIR:REACH.AUTONOMOUS.ESCALATION:CODE:routing.proactive.vara:
+// AIR→LUKE,COLE,JUDE,PACK→DECISION→DIAL/CARA→VARA→USER:T10:v1.0.0:20260214:a1e1s⬡
+// 
+// AUTONOMOUS ESCALATION SYSTEM
+// AIR analyzes incoming events, summons agents, decides action, makes calls
+// 
+// ROUTING: EVENT*AIR*LUKE,COLE,JUDE,PACK*DECISION*DIAL/CARA*VARA*USER
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SPURT 1: AIR_escalate - Routes escalation through full agent analysis
+// ═══════════════════════════════════════════════════════════════════════════════
+async function AIR_escalate(event) {
+  const { type, content, source, metadata } = event;
+  
+  console.log('');
+  console.log('═══════════════════════════════════════════════════════════');
+  console.log('[AIR] *** AUTONOMOUS ESCALATION TRIGGERED ***');
+  console.log(`[AIR] Type: ${type} | Source: ${source}`);
+  console.log('═══════════════════════════════════════════════════════════');
+  
+  // ─────────────────────────────────────────────────────────────────────────────
+  // STEP 1: LUKE analyzes the event (Listening and Understanding for Knowledge Extraction)
+  // ─────────────────────────────────────────────────────────────────────────────
+  console.log('[AIR] Summoning LUKE for event analysis...');
+  const lukeAnalysis = await LUKE_analyzeEvent(event);
+  console.log(`[AIR] LUKE verdict: urgency=${lukeAnalysis.urgency}, intent="${lukeAnalysis.intent}"`);
+  
+  // ─────────────────────────────────────────────────────────────────────────────
+  // STEP 2: COLE searches brain for context (Context-Oriented Lookup Engine)
+  // ─────────────────────────────────────────────────────────────────────────────
+  console.log('[AIR] Summoning COLE for context lookup...');
+  const coleContext = await COLE_getEscalationContext(lukeAnalysis);
+  console.log(`[AIR] COLE found: ${coleContext.relevantMemories.length} relevant memories`);
+  
+  // ─────────────────────────────────────────────────────────────────────────────
+  // STEP 3: JUDE decides who to contact and how (Job-description Unified Discovery Engine)
+  // ─────────────────────────────────────────────────────────────────────────────
+  console.log('[AIR] Summoning JUDE for escalation decision...');
+  const judeDecision = await JUDE_decideEscalation(lukeAnalysis, coleContext);
+  console.log(`[AIR] JUDE decision: action=${judeDecision.action}, target=${judeDecision.target?.name}`);
+  
+  // ─────────────────────────────────────────────────────────────────────────────
+  // STEP 4: PACK assembles the message (Packaging And Constructing Kits)
+  // ─────────────────────────────────────────────────────────────────────────────
+  console.log('[AIR] Summoning PACK to craft message...');
+  const packMessage = await PACK_craftEscalationMessage(lukeAnalysis, coleContext, judeDecision);
+  console.log(`[AIR] PACK crafted: "${packMessage.spokenMessage.substring(0, 80)}..."`);
+  
+  // ─────────────────────────────────────────────────────────────────────────────
+  // STEP 5: Execute the escalation (DIAL for calls, CARA for SMS)
+  // ─────────────────────────────────────────────────────────────────────────────
+  console.log(`[AIR] Executing escalation: ${judeDecision.action}`);
+  const executionResult = await AIR_executeEscalation(judeDecision, packMessage);
+  
+  // ─────────────────────────────────────────────────────────────────────────────
+  // STEP 6: Log to brain
+  // ─────────────────────────────────────────────────────────────────────────────
+  await AIR_logEscalation(event, lukeAnalysis, coleContext, judeDecision, packMessage, executionResult);
+  
+  return {
+    success: true,
+    routing: `AIR*LUKE*COLE*JUDE*PACK*${judeDecision.action.toUpperCase()}`,
+    analysis: lukeAnalysis,
+    decision: judeDecision,
+    message: packMessage,
+    execution: executionResult
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// LUKE_analyzeEvent - Understands what the event means and its urgency
+// ═══════════════════════════════════════════════════════════════════════════════
+async function LUKE_analyzeEvent(event) {
+  const { type, content, source, metadata } = event;
+  
+  // Use AI to analyze the event
+  const prompt = `You are LUKE (Listening and Understanding for Knowledge Extraction), an AI agent.
+Analyze this event and determine:
+1. urgency (1-6 scale: 1=info, 2=low, 3=medium, 4=high, 5=critical, 6=emergency)
+2. intent (what action is needed)
+3. category (investor, job, family, legal, money, deadline, health, security, other)
+4. summary (one sentence)
+5. keyEntities (people, companies, amounts mentioned)
+
+EVENT TYPE: ${type}
+SOURCE: ${source}
+CONTENT: ${content}
+METADATA: ${JSON.stringify(metadata || {})}
+
+Respond in JSON only:
+{"urgency": N, "intent": "...", "category": "...", "summary": "...", "keyEntities": [...]}`;
+
+  try {
+    const result = await callModel(prompt);
+    return JSON.parse(result);
+  } catch (e) {
+    // Fallback: keyword-based analysis
+    const contentLower = (content || '').toLowerCase();
+    let urgency = 3;
+    let category = 'other';
+    
+    if (contentLower.includes('emergency') || contentLower.includes('911')) urgency = 6;
+    else if (contentLower.includes('urgent') || contentLower.includes('asap') || contentLower.includes('immediately')) urgency = 5;
+    else if (contentLower.includes('important') || contentLower.includes('deadline')) urgency = 4;
+    
+    if (contentLower.includes('investor') || contentLower.includes('funding') || contentLower.includes('term sheet')) category = 'investor';
+    else if (contentLower.includes('job') || contentLower.includes('interview') || contentLower.includes('application')) category = 'job';
+    else if (contentLower.includes('money') || contentLower.includes('payment') || contentLower.includes('invoice')) category = 'money';
+    else if (contentLower.includes('legal') || contentLower.includes('nda') || contentLower.includes('contract')) category = 'legal';
+    
+    return {
+      urgency,
+      intent: 'Review and respond',
+      category,
+      summary: content?.substring(0, 100) || 'Event received',
+      keyEntities: []
+    };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// COLE_getEscalationContext - Searches brain for relevant history
+// ═══════════════════════════════════════════════════════════════════════════════
+async function COLE_getEscalationContext(lukeAnalysis) {
+  const searchTerms = [
+    lukeAnalysis.category,
+    ...lukeAnalysis.keyEntities,
+    lukeAnalysis.intent
+  ].filter(Boolean).join(' ');
+  
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/aba_memory?or=(content.ilike.*${encodeURIComponent(searchTerms)}*,tags.cs.{${lukeAnalysis.category}})&order=importance.desc&limit=5`, {
+      headers: {
+        'apikey': SUPABASE_ANON,
+        'Authorization': `Bearer ${SUPABASE_ANON}`
+      }
+    });
+    const memories = await res.json();
+    
+    return {
+      relevantMemories: memories || [],
+      previousEscalations: memories.filter(m => m.memory_type === 'escalation'),
+      hasHistory: memories.length > 0
+    };
+  } catch (e) {
+    return { relevantMemories: [], previousEscalations: [], hasHistory: false };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// JUDE_decideEscalation - Decides who to contact and how
+// ═══════════════════════════════════════════════════════════════════════════════
+async function JUDE_decideEscalation(lukeAnalysis, coleContext) {
+  const { urgency, category } = lukeAnalysis;
+  
+  // Contact registry with trigger categories
+  const registry = {
+    brandon: { 
+      name: 'Brandon Pierce Sr.', 
+      phone: '+13363898116', 
+      priority: 1,
+      categories: ['investor', 'money', 'legal', 'security', 'emergency']
+    },
+    cj: { 
+      name: 'CJ Moore', 
+      phone: '+19199170686', 
+      priority: 2,
+      categories: ['job', 'application', 'deadline', 'client_work']
+    },
+    bj: { 
+      name: 'BJ Pierce', 
+      phone: '+19803958662', 
+      priority: 2,
+      categories: ['interview', 'school', 'family']
+    }
+  };
+  
+  // Find best target based on category
+  let target = registry.brandon; // Default to Brandon
+  for (const [key, person] of Object.entries(registry)) {
+    if (person.categories.includes(category)) {
+      target = person;
+      break;
+    }
+  }
+  
+  // Decide action based on urgency
+  let action = 'log_only';
+  if (urgency >= 6) action = 'call_emergency';
+  else if (urgency >= 5) action = 'call_immediate';
+  else if (urgency >= 4) action = 'sms_then_call';
+  else if (urgency >= 3) action = 'sms_only';
+  else if (urgency >= 2) action = 'email_only';
+  
+  return {
+    action,
+    target,
+    urgency,
+    reasoning: `Category "${category}" with urgency ${urgency} → ${action} to ${target.name}`
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PACK_craftEscalationMessage - Creates the actual message to speak/send
+// ═══════════════════════════════════════════════════════════════════════════════
+async function PACK_craftEscalationMessage(lukeAnalysis, coleContext, judeDecision) {
+  const { summary, category, urgency, keyEntities } = lukeAnalysis;
+  const { target, action } = judeDecision;
+  
+  // Use AI to craft a natural message for VARA to speak
+  const prompt = `You are PACK (Packaging And Constructing Kits), crafting a message for ABA to speak on a phone call.
+
+SITUATION:
+- Summary: ${summary}
+- Category: ${category}  
+- Urgency: ${urgency}/6
+- Key entities: ${keyEntities.join(', ') || 'none'}
+- Calling: ${target.name}
+- Action: ${action}
+
+PREVIOUS CONTEXT: ${coleContext.relevantMemories.slice(0, 2).map(m => m.content?.substring(0, 100)).join('; ') || 'None'}
+
+Write a SPOKEN message for ABA to say on the phone. Be:
+- Direct and clear (this is a phone call)
+- Warm but urgent (ABA is a helpful AI assistant, butler-like)
+- Under 30 seconds when spoken
+- Include specific details from the summary
+
+Format: Just the spoken message, nothing else.`;
+
+  try {
+    const spokenMessage = await callModel(prompt);
+    return {
+      spokenMessage: spokenMessage.trim(),
+      smsMessage: `[ABA] ${summary}. Urgency: ${urgency}/6. Call back or respond.`,
+      emailSubject: `[ABA Alert] ${category}: ${summary.substring(0, 50)}`,
+      emailBody: `Hello,\n\n${summary}\n\nUrgency Level: ${urgency}/6\nCategory: ${category}\n\nABA is monitoring this situation.\n\n- ABA`
+    };
+  } catch (e) {
+    // Fallback message
+    return {
+      spokenMessage: `Hello ${target.name.split(' ')[0]}. This is ABA with an important update. ${summary}. This is ${urgency >= 5 ? 'urgent' : 'important'} and requires your attention. Please respond when you can.`,
+      smsMessage: `[ABA] ${summary}. Urgency: ${urgency}/6.`,
+      emailSubject: `[ABA Alert] ${summary.substring(0, 50)}`,
+      emailBody: `${summary}\n\nUrgency: ${urgency}/6`
+    };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// AIR_executeEscalation - Actually makes the call or sends the message
+// ═══════════════════════════════════════════════════════════════════════════════
+async function AIR_executeEscalation(judeDecision, packMessage) {
+  const { action, target } = judeDecision;
+  const traceId = `AIR-ESC-${Date.now()}`;
+  
+  const result = {
+    action,
+    target: target.name,
+    traceId,
+    status: 'pending',
+    timestamp: new Date().toISOString()
+  };
+  
+  try {
+    if (action === 'log_only') {
+      result.status = 'logged';
+      
+    } else if (action === 'email_only') {
+      // TODO: Wire to IMAN for email
+      result.status = 'email_queued';
+      
+    } else if (action === 'sms_only' || action === 'sms_then_call') {
+      // Send SMS via CARA (Twilio)
+      const smsRes = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Messages.json`, {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Basic ' + Buffer.from(`${TWILIO_SID}:${TWILIO_AUTH}`).toString('base64'),
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body: new URLSearchParams({
+          To: target.phone,
+          From: TWILIO_PHONE,
+          Body: packMessage.smsMessage
+        }).toString()
+      });
+      const smsData = await smsRes.json();
+      result.smsSid = smsData.sid;
+      result.status = action === 'sms_only' ? 'sms_sent' : 'sms_sent_call_pending';
+      
+      // Schedule call for sms_then_call (5 min delay)
+      if (action === 'sms_then_call') {
+        // Store pending call in memory for cron to pick up
+        await fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
+          method: 'POST',
+          headers: {
+            'apikey': SUPABASE_KEY,
+            'Authorization': `Bearer ${SUPABASE_KEY}`,
+            'Content-Type': 'application/json',
+            'Prefer': 'return=minimal'
+          },
+          body: JSON.stringify({
+            content: JSON.stringify({ target, message: packMessage.spokenMessage, traceId }),
+            memory_type: 'pending_call',
+            categories: ['escalation', 'pending'],
+            importance: 9,
+            is_system: true,
+            source: `pending_call_${traceId}`,
+            tags: ['pending_call', 'escalation']
+          })
+        });
+      }
+      
+    } else if (action === 'call_immediate' || action === 'call_emergency') {
+      // Call via DIAL (Twilio)
+      const callRes = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Calls.json`, {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Basic ' + Buffer.from(`${TWILIO_SID}:${TWILIO_AUTH}`).toString('base64'),
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body: new URLSearchParams({
+          To: target.phone,
+          From: TWILIO_PHONE,
+          Url: `${REACH_URL}/api/escalate/twiml?msg=${encodeURIComponent(packMessage.spokenMessage)}&trace=${traceId}`,
+          StatusCallback: `${REACH_URL}/api/call/status?trace=${traceId}`,
+          StatusCallbackEvent: 'initiated ringing answered completed',
+          StatusCallbackMethod: 'POST'
+        }).toString()
+      });
+      const callData = await callRes.json();
+      result.callSid = callData.sid;
+      result.status = 'call_initiated';
+      
+      // For emergency, also call backup contacts
+      if (action === 'call_emergency') {
+        result.note = 'Emergency escalation - backup contacts will be called if no answer';
+      }
+    }
+  } catch (e) {
+    result.status = 'failed';
+    result.error = e.message;
+  }
+  
+  return result;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// AIR_logEscalation - Stores everything to brain
+// ═══════════════════════════════════════════════════════════════════════════════
+async function AIR_logEscalation(event, lukeAnalysis, coleContext, judeDecision, packMessage, executionResult) {
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${SUPABASE_KEY}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal'
+      },
+      body: JSON.stringify({
+        content: `AUTONOMOUS ESCALATION: ${judeDecision.action} to ${judeDecision.target.name}. Urgency: ${lukeAnalysis.urgency}/6. Category: ${lukeAnalysis.category}. Summary: ${lukeAnalysis.summary}. Status: ${executionResult.status}. Trace: ${executionResult.traceId}`,
+        memory_type: 'escalation',
+        categories: ['escalation', lukeAnalysis.category, judeDecision.action],
+        importance: Math.min(lukeAnalysis.urgency + 4, 10),
+        is_system: true,
+        source: `air_escalation_${executionResult.traceId}`,
+        tags: ['escalation', 'autonomous', lukeAnalysis.category, executionResult.status]
+      })
+    });
+  } catch (e) {
+    console.error('[AIR] Failed to log escalation:', e.message);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Helper: Call model (Gemini/Claude/Groq cascade)
+// ═══════════════════════════════════════════════════════════════════════════════
+async function callModel(prompt) {
+  // Try Gemini first
+  if (GEMINI_KEY) {
+    try {
+      const result = await httpsRequest({
+        hostname: 'generativelanguage.googleapis.com',
+        path: '/v1beta/models/gemini-2.0-flash:generateContent?key=' + GEMINI_KEY,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      }, JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { maxOutputTokens: 500, temperature: 0.3 }
+      }));
+      const json = JSON.parse(result.data.toString());
+      if (json.candidates?.[0]?.content?.parts?.[0]?.text) {
+        return json.candidates[0].content.parts[0].text;
+      }
+    } catch (e) {}
+  }
+  
+  // Fallback to Claude
+  if (ANTHROPIC_KEY) {
+    try {
+      const result = await httpsRequest({
+        hostname: 'api.anthropic.com',
+        path: '/v1/messages',
+        method: 'POST',
+        headers: {
+          'x-api-key': ANTHROPIC_KEY,
+          'anthropic-version': '2023-06-01',
+          'Content-Type': 'application/json'
+        }
+      }, JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 500,
+        messages: [{ role: 'user', content: prompt }]
+      }));
+      const json = JSON.parse(result.data.toString());
+      if (json.content?.[0]?.text) {
+        return json.content[0].text;
+      }
+    } catch (e) {}
+  }
+  
+  throw new Error('No model available');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SPURT 2: PROACTIVE TRIGGER SYSTEM
+// Events that trigger AIR_escalate autonomously
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Trigger: Email received (called by IMAN when email arrives)
+async function TRIGGER_emailReceived(email) {
+  return AIR_escalate({
+    type: 'email_received',
+    source: 'IMAN',
+    content: `From: ${email.from}\nSubject: ${email.subject}\nBody: ${email.body?.substring(0, 500)}`,
+    metadata: { messageId: email.id, from: email.from, subject: email.subject }
+  });
+}
+
+// Trigger: OMI heard something (called by TASTE when OMI captures conversation)
+async function TRIGGER_omiHeard(transcript) {
+  // Only trigger if TASTE detects urgency
+  const urgentKeywords = ['emergency', 'urgent', 'help', 'call brandon', 'need to call', 'deadline', 'investor', 'money'];
+  const hasUrgent = urgentKeywords.some(k => transcript.text?.toLowerCase().includes(k));
+  
+  if (!hasUrgent) return { triggered: false, reason: 'No urgent keywords detected' };
+  
+  return AIR_escalate({
+    type: 'omi_transcript',
+    source: 'TASTE',
+    content: transcript.text,
+    metadata: { sessionId: transcript.session_id, timestamp: transcript.timestamp }
+  });
+}
+
+// Trigger: Calendar deadline approaching (called by cron)
+async function TRIGGER_deadlineApproaching(event) {
+  return AIR_escalate({
+    type: 'calendar_deadline',
+    source: 'CALENDAR',
+    content: `Deadline approaching: ${event.title} in ${event.minutesUntil} minutes`,
+    metadata: { eventId: event.id, deadline: event.deadline }
+  });
+}
+
+// Trigger: Job application deadline (called by job pipeline)
+async function TRIGGER_jobDeadline(job) {
+  return AIR_escalate({
+    type: 'job_deadline',
+    source: 'IDEALIST',
+    content: `Job application deadline: ${job.title} at ${job.company} closes ${job.deadline}`,
+    metadata: { jobId: job.id, url: job.url }
+  });
+}
+
+// Trigger: System alert (called by monitoring)
+async function TRIGGER_systemAlert(alert) {
+  return AIR_escalate({
+    type: 'system_alert',
+    source: alert.source,
+    content: alert.message,
+    metadata: alert.metadata
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SPURT 3: LISTENER ENDPOINTS
+// Webhooks that receive events and trigger AIR_escalate
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// These will be wired as routes:
+// POST /api/air/trigger/email   → TRIGGER_emailReceived
+// POST /api/air/trigger/omi     → TRIGGER_omiHeard  
+// POST /api/air/trigger/calendar → TRIGGER_deadlineApproaching
+// POST /api/air/trigger/job     → TRIGGER_jobDeadline
+// POST /api/air/trigger/system  → TRIGGER_systemAlert
+// POST /api/air/escalate        → Direct AIR_escalate (replaces old /api/escalate)
+
+
+
+
 async function AIR_process(userSaid, history, callerIdentity, demoState) {
   console.log('');
   console.log('═══════════════════════════════════════════════════════════');
@@ -3525,164 +4029,54 @@ Phone: (336) 389-8116</p>
 
   // /api/escalate - AIR triggers escalation based on urgency
   if (path === '/api/escalate' && method === 'POST') {
+    // ═══════════════════════════════════════════════════════════════════════════════
+    // ⬡B:AIR:REACH.ROUTE.ESCALATE:CODE:routing.autonomous.escalation:
+    // USER→AIR→LUKE,COLE,JUDE,PACK→DECISION→DIAL/CARA→VARA→USER:T10:v1.0.0:20260214:e1s1c⬡
+    // 
+    // AUTONOMOUS ESCALATION - Routed through AIR with full agent analysis
+    // NOT hardcoded garbage anymore!
+    // ═══════════════════════════════════════════════════════════════════════════════
     const body = await parseBody(req);
-    const { urgency, message, context, target, source } = body;
+    const { message, context, source, urgency, target, type } = body;
     
-    // Validate urgency level
-    const level = Math.min(Math.max(parseInt(urgency) || 3, 1), 6);
-    const escalationConfig = ESCALATION_LEVELS[level];
+    console.log('');
+    console.log('═══════════════════════════════════════════════════════════');
+    console.log('[ESCALATE] *** INCOMING ESCALATION REQUEST ***');
+    console.log(`[ESCALATE] Source: ${source || 'manual'} | Type: ${type || 'direct'}`);
+    console.log('═══════════════════════════════════════════════════════════');
     
-    console.log('[ESCALATION] Level:', level, escalationConfig.name, '| Message:', message?.substring(0, 100));
-    
-    // Determine who to contact
-    let targets = [];
-    if (target && ESCALATION_REGISTRY[target.toLowerCase()]) {
-      targets = [ESCALATION_REGISTRY[target.toLowerCase()]];
-    } else {
-      // Auto-select based on triggers in message
-      const msgLower = (message || '').toLowerCase() + ' ' + (context || '').toLowerCase();
-      for (const [key, person] of Object.entries(ESCALATION_REGISTRY)) {
-        if (person.triggers.some(t => msgLower.includes(t))) {
-          targets.push(person);
-        }
-      }
-      // If no matches, default to Brandon for high urgency
-      if (targets.length === 0 && level >= 4) {
-        targets = [ESCALATION_REGISTRY.brandon];
-      }
-    }
-    
-    // Sort by priority
-    targets.sort((a, b) => a.priority - b.priority);
-    
-    // Execute escalation action
-    const results = [];
-    const timestamp = new Date().toISOString();
-    
-    for (const person of targets) {
-      const result = { 
-        name: person.name, 
-        phone: person.phone,
-        action: escalationConfig.action,
-        status: 'pending'
-      };
+    try {
+      // Route through AIR_escalate for REAL agent analysis
+      const result = await AIR_escalate({
+        type: type || 'manual_escalation',
+        source: source || 'api',
+        content: message || context || 'Escalation triggered',
+        metadata: { urgency, target, originalBody: body }
+      });
       
-      try {
-        // LEVEL 1-2: Log or Email only
-        if (level <= 2) {
-          result.status = 'logged';
-          result.note = 'Logged to brain, no outreach needed';
-        }
-        
-        // LEVEL 3: SMS via CARA
-        else if (level === 3) {
-          const smsRes = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Messages.json`, {
-            method: 'POST',
-            headers: {
-              'Authorization': 'Basic ' + Buffer.from(`${TWILIO_SID}:${TWILIO_AUTH}`).toString('base64'),
-              'Content-Type': 'application/x-www-form-urlencoded'
-            },
-            body: new URLSearchParams({
-              To: person.phone,
-              From: TWILIO_PHONE,
-              Body: `[ABA ALERT] ${message || 'Action needed'}. Reply or call back.`
-            }).toString()
-          });
-          const smsData = await smsRes.json();
-          result.status = smsData.sid ? 'sms_sent' : 'sms_failed';
-          result.sid = smsData.sid;
-        }
-        
-        // LEVEL 4: SMS then call if no response (SMS now, schedule call)
-        else if (level === 4) {
-          // Send SMS first
-          const smsRes = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Messages.json`, {
-            method: 'POST',
-            headers: {
-              'Authorization': 'Basic ' + Buffer.from(`${TWILIO_SID}:${TWILIO_AUTH}`).toString('base64'),
-              'Content-Type': 'application/x-www-form-urlencoded'
-            },
-            body: new URLSearchParams({
-              To: person.phone,
-              From: TWILIO_PHONE,
-              Body: `[ABA URGENT] ${message || 'Urgent action needed'}. ABA will call in 5 min if no response.`
-            }).toString()
-          });
-          result.status = 'sms_sent_call_scheduled';
-          result.note = 'Call will trigger in 5 minutes if no response';
-          // TODO: Schedule call with BullMQ or setTimeout
-        }
-        
-        // LEVEL 5-6: Call immediately
-        else if (level >= 5) {
-          const twilioAuth = Buffer.from(`${TWILIO_SID}:${TWILIO_AUTH}`).toString('base64');
-          const traceId = `ESC-${level}-${Date.now()}`;
-          
-          // Build TwiML that announces the escalation
-          const announcement = level === 6 
-            ? `EMERGENCY from ABA. ${message || 'Immediate action required'}. This is priority one.`
-            : `Urgent message from ABA. ${message || 'Action needed'}. Please respond.`;
-          
-          const callRes = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Calls.json`, {
-            method: 'POST',
-            headers: {
-              'Authorization': `Basic ${twilioAuth}`,
-              'Content-Type': 'application/x-www-form-urlencoded'
-            },
-            body: new URLSearchParams({
-              To: person.phone,
-              From: TWILIO_PHONE,
-              Url: `${REACH_URL}/api/escalate/twiml?msg=${encodeURIComponent(announcement)}&trace=${traceId}`,
-              StatusCallback: `${REACH_URL}/api/call/status?trace=${traceId}`,
-              StatusCallbackEvent: 'initiated ringing answered completed',
-              StatusCallbackMethod: 'POST'
-            }).toString()
-          });
-          
-          const callData = await callRes.json();
-          result.status = callData.sid ? 'call_initiated' : 'call_failed';
-          result.callSid = callData.sid;
-          result.traceId = traceId;
-        }
-      } catch (e) {
-        result.status = 'error';
-        result.error = e.message;
-      }
-      
-      results.push(result);
+      return jsonResponse(res, 200, {
+        success: true,
+        routing: result.routing,
+        analysis: {
+          urgency: result.analysis.urgency,
+          category: result.analysis.category,
+          intent: result.analysis.intent
+        },
+        decision: {
+          action: result.decision.action,
+          target: result.decision.target.name,
+          reasoning: result.decision.reasoning
+        },
+        execution: result.execution,
+        message: result.message.spokenMessage?.substring(0, 100) + '...'
+      });
+    } catch (e) {
+      console.error('[ESCALATE] Error:', e.message);
+      return jsonResponse(res, 500, { success: false, error: e.message });
     }
-    
-    // Store escalation in brain
-    await fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
-      method: 'POST',
-      headers: {
-        'apikey': SUPABASE_KEY || SUPABASE_ANON,
-        'Authorization': `Bearer ${SUPABASE_KEY || SUPABASE_ANON}`,
-        'Content-Type': 'application/json',
-        'Prefer': 'return=minimal'
-      },
-      body: JSON.stringify({
-        content: `ESCALATION TRIGGERED: Level ${level} (${escalationConfig.name}) | Message: ${message} | Targets: ${results.map(r => r.name).join(', ')} | Source: ${source || 'AIR'}`,
-        memory_type: 'escalation',
-        categories: ['escalation', 'proactive', `level_${level}`],
-        importance: Math.min(level + 5, 10),
-        is_system: true,
-        source: `escalation_${timestamp}`,
-        tags: ['escalation', 'auto_call', 'proactive', escalationConfig.name.toLowerCase()],
-        air_processed: true
-      })
-    });
-    
-    return jsonResponse(res, 200, {
-      success: true,
-      level,
-      levelName: escalationConfig.name,
-      action: escalationConfig.action,
-      targets: results,
-      timestamp,
-      routing: `AIR*ESCALATION*${results.map(r => r.name.split(' ')[0].toUpperCase()).join(',')}*${escalationConfig.action.toUpperCase()}`
-    });
   }
+
+  
   
   // /api/escalate/twiml - TwiML for escalation calls (uses ElevenLabs VARA voice)
   if (path === '/api/escalate/twiml' && (method === 'GET' || method === 'POST')) {
@@ -3844,11 +4238,58 @@ Phone: (336) 389-8116</p>
     } catch(e) { return jsonResponse(res, 500, { error: e.message }); }
   }
 
+  
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // ⬡B:AIR:REACH.TRIGGERS:CODE:routing.proactive.listeners:EVENT→AIR→ACTION:T10:v1.0.0:20260214:t1r1g⬡
+  // PROACTIVE TRIGGER ENDPOINTS - AIR listens and acts autonomously
+  // ═══════════════════════════════════════════════════════════════════════════════
+  
+  // POST /api/air/trigger/email - IMAN sends email events here
+  if (path === '/api/air/trigger/email' && method === 'POST') {
+    const body = await parseBody(req);
+    console.log('[AIR TRIGGER] Email received from IMAN');
+    const result = await TRIGGER_emailReceived(body);
+    return jsonResponse(res, 200, result);
+  }
+  
+  // POST /api/air/trigger/omi - TASTE sends OMI transcripts here  
+  if (path === '/api/air/trigger/omi' && method === 'POST') {
+    const body = await parseBody(req);
+    console.log('[AIR TRIGGER] OMI transcript from TASTE');
+    const result = await TRIGGER_omiHeard(body);
+    return jsonResponse(res, 200, result);
+  }
+  
+  // POST /api/air/trigger/calendar - Calendar events trigger here
+  if (path === '/api/air/trigger/calendar' && method === 'POST') {
+    const body = await parseBody(req);
+    console.log('[AIR TRIGGER] Calendar deadline approaching');
+    const result = await TRIGGER_deadlineApproaching(body);
+    return jsonResponse(res, 200, result);
+  }
+  
+  // POST /api/air/trigger/job - Job pipeline triggers here
+  if (path === '/api/air/trigger/job' && method === 'POST') {
+    const body = await parseBody(req);
+    console.log('[AIR TRIGGER] Job deadline from Idealist');
+    const result = await TRIGGER_jobDeadline(body);
+    return jsonResponse(res, 200, result);
+  }
+  
+  // POST /api/air/trigger/system - System alerts trigger here
+  if (path === '/api/air/trigger/system' && method === 'POST') {
+    const body = await parseBody(req);
+    console.log('[AIR TRIGGER] System alert');
+    const result = await TRIGGER_systemAlert(body);
+    return jsonResponse(res, 200, result);
+  }
+
+
   // ⬡B:AIR:REACH.API.NOTFOUND:CODE:infrastructure.error.404:USER→REACH→ERROR:T10:v1.5.0:20260213:n1f2d⬡ CATCH-ALL
   // ═══════════════════════════════════════════════════════════════════════
   jsonResponse(res, 404, { 
     error: 'Route not found: ' + method + ' ' + path,
-    available: ['/api/escalate', '/api/escalate/twiml', '/api/escalate/confirm', '/api/call/dial', '/api/call/twiml', '/api/call/status', '/api/call/record', '/api/router', '/api/models/claude', '/api/voice/deepgram-token', '/api/voice/tts', '/api/omi/manifest', '/api/omi/webhook', '/api/sms/send', '/api/brain/search', '/api/brain/store', '/api/scrape-job', '/api/idealist/parse', '/api/idealist/verify', '/api/jobs/parsed', '/api/idealist/backfill'],
+    available: ['/api/escalate', '/api/escalate/twiml', '/api/escalate/confirm', '/api/call/dial', '/api/call/twiml', '/api/call/status', '/api/call/record', '/api/air/trigger/email', '/api/air/trigger/omi', '/api/air/trigger/calendar', '/api/air/trigger/job', '/api/air/trigger/system', '/api/router', '/api/models/claude', '/api/voice/deepgram-token', '/api/voice/tts', '/api/voice/tts-stream', '/api/omi/manifest', '/api/omi/webhook', '/api/sms/send', '/api/brain/search', '/api/brain/store', '/api/scrape-job', '/api/idealist/parse', '/api/idealist/verify', '/api/jobs/parsed', '/api/idealist/backfill'],
     hint: 'We are all ABA'
   });
 });
