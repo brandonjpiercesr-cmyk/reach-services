@@ -82,6 +82,9 @@ const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
 // ⬡B:AIR:REACH.CONFIG.GROQ:CONFIG:models.fallback.speed:AIR→REACH→MODEL:T7:v1.5.0:20260213:g1r2q⬡
 const GROQ_KEY = process.env.GROQ_API_KEY;
 
+// v2.6.5-P4-S1 | CONFIG | OpenAI for embeddings (text-embedding-ada-002 = 1536 dims)
+const OPENAI_KEY = process.env.OPENAI_API_KEY;
+
 // ⬡B:AIR:REACH.CONFIG.NYLAS:CONFIG:email.oauth.multiuser:AIR→REACH→IMAN:T7:v1.5.0:20260213:n1y2l⬡
 const NYLAS_API_KEY = process.env.NYLAS_API_KEY;
 const NYLAS_CLIENT_ID = process.env.NYLAS_CLIENT_ID;
@@ -4254,6 +4257,154 @@ Phone: (336) 389-8116</p>
     }
   }
 
+  // ═══════════════════════════════════════════════════════════════════════
+  // ⬡B:AIR:REACH.API.BRAIN_SEMANTIC:CODE:memory.semantic.search:AIR→BRAIN:T10:v2.6.5:20260214:s1m2s⬡
+  // SEMANTIC SEARCH — pgvector cosine similarity via match_memories RPC
+  // Takes text query → generates embedding → finds similar memories
+  // L3: SAGE (Search Assessment and Governance Engine) | L4: OPS
+  // ═══════════════════════════════════════════════════════════════════════
+  if (path === '/api/brain/semantic' && method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      const { query, threshold, limit } = body;
+      if (!query) return jsonResponse(res, 400, { error: 'query required' });
+
+      // Step 1: Generate embedding via OpenAI text-embedding-ada-002
+      if (!OPENAI_KEY) return jsonResponse(res, 500, { error: 'OPENAI_API_KEY not set on REACH' });
+
+      const embedResult = await new Promise((resolve, reject) => {
+        const postData = JSON.stringify({
+          model: 'text-embedding-ada-002',
+          input: query
+        });
+        const embedReq = https.request({
+          hostname: 'api.openai.com',
+          path: '/v1/embeddings',
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + OPENAI_KEY,
+            'Content-Length': Buffer.byteLength(postData)
+          }
+        }, (embedRes) => {
+          let data = '';
+          embedRes.on('data', c => data += c);
+          embedRes.on('end', () => resolve(JSON.parse(data)));
+        });
+        embedReq.on('error', reject);
+        embedReq.write(postData);
+        embedReq.end();
+      });
+
+      if (!embedResult.data || !embedResult.data[0]) {
+        return jsonResponse(res, 500, { error: 'Embedding generation failed', details: embedResult });
+      }
+
+      const queryEmbedding = embedResult.data[0].embedding;
+
+      // Step 2: Call match_memories RPC with the embedding
+      const matchResult = await new Promise((resolve, reject) => {
+        const matchData = JSON.stringify({
+          query_embedding: queryEmbedding,
+          match_threshold: threshold || 0.5,
+          match_count: limit || 10
+        });
+        const key = SUPABASE_KEY || SUPABASE_ANON;
+        const matchReq = https.request({
+          hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+          path: '/rest/v1/rpc/match_memories',
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': key,
+            'Authorization': 'Bearer ' + key,
+            'Content-Length': Buffer.byteLength(matchData)
+          }
+        }, (matchRes) => {
+          let data = '';
+          matchRes.on('data', c => data += c);
+          matchRes.on('end', () => resolve(JSON.parse(data)));
+        });
+        matchReq.on('error', reject);
+        matchReq.write(matchData);
+        matchReq.end();
+      });
+
+      console.log('[AIR*SAGE*SEMANTIC] Query: "' + query + '" → ' + (Array.isArray(matchResult) ? matchResult.length : 0) + ' matches');
+      return jsonResponse(res, 200, { results: matchResult, query, method: 'semantic_pgvector' });
+    } catch (e) {
+      console.error('[SEMANTIC] Error:', e.message);
+      return jsonResponse(res, 500, { error: e.message });
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // ⬡B:AIR:REACH.API.BRAIN_EMBED:CODE:memory.embed.generate:AIR→BRAIN:T10:v2.6.5:20260214:e1m2b⬡
+  // EMBED BACKFILL — generates embeddings for memories that don't have them
+  // L3: SAGE (Search Assessment and Governance Engine) | L4: OPS
+  // ═══════════════════════════════════════════════════════════════════════
+  if (path === '/api/brain/embed-backfill' && method === 'POST') {
+    try {
+      if (!OPENAI_KEY) return jsonResponse(res, 500, { error: 'OPENAI_API_KEY not set' });
+      const key = SUPABASE_KEY || SUPABASE_ANON;
+
+      // Get memories without embeddings
+      const unembedded = await new Promise((resolve, reject) => {
+        const uReq = https.request({
+          hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+          path: '/rest/v1/aba_memory?embedding=is.null&select=id,content&limit=20',
+          method: 'GET',
+          headers: { 'apikey': key, 'Authorization': 'Bearer ' + key }
+        }, (uRes) => {
+          let d = ''; uRes.on('data', c => d += c); uRes.on('end', () => resolve(JSON.parse(d)));
+        });
+        uReq.on('error', reject);
+        uReq.end();
+      });
+
+      if (!Array.isArray(unembedded) || unembedded.length === 0) {
+        return jsonResponse(res, 200, { message: 'All memories embedded', count: 0 });
+      }
+
+      let embedded = 0;
+      for (const mem of unembedded) {
+        const text = (mem.content || '').substring(0, 8000);
+        if (!text) continue;
+
+        // Generate embedding
+        const embedResult = await new Promise((resolve, reject) => {
+          const pd = JSON.stringify({ model: 'text-embedding-ada-002', input: text });
+          const er = https.request({
+            hostname: 'api.openai.com', path: '/v1/embeddings', method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + OPENAI_KEY, 'Content-Length': Buffer.byteLength(pd) }
+          }, (res2) => { let d = ''; res2.on('data', c => d += c); res2.on('end', () => resolve(JSON.parse(d))); });
+          er.on('error', reject); er.write(pd); er.end();
+        });
+
+        if (embedResult.data && embedResult.data[0]) {
+          // Store embedding
+          const vec = JSON.stringify(embedResult.data[0].embedding);
+          const updateData = JSON.stringify({ embedding: vec });
+          await new Promise((resolve, reject) => {
+            const ur = https.request({
+              hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+              path: '/rest/v1/aba_memory?id=eq.' + mem.id,
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json', 'apikey': key, 'Authorization': 'Bearer ' + key, 'Prefer': 'return=minimal', 'Content-Length': Buffer.byteLength(updateData) }
+            }, (res2) => { let d = ''; res2.on('data', c => d += c); res2.on('end', () => resolve(d)); });
+            ur.on('error', reject); ur.write(updateData); ur.end();
+          });
+          embedded++;
+        }
+      }
+
+      console.log('[AIR*SAGE*EMBED] Backfilled ' + embedded + ' embeddings');
+      return jsonResponse(res, 200, { embedded, total_unembedded: unembedded.length });
+    } catch (e) {
+      return jsonResponse(res, 500, { error: e.message });
+    }
+  }
+
   
   // ═══════════════════════════════════════════════════════════════════════
   // ⬡B:AIR:REACH.API.NYLAS_CALLBACK:CODE:email.oauth.callback:NYLAS→REACH→BRAIN:T9:v1.8.0:20260214:n1c2b⬡
@@ -6337,6 +6488,135 @@ async function loopAirCall(message, systemPrompt, model) {
 
 // ── AGENT TASKS ─────────────────────────────────────────────────────────────
 
+// RADAR (Request Analysis and Directive Assignment Router): Validates work requests
+async function loopRadarScan() {
+  const tasks = await loopSupaRead('aba_memory',
+    'memory_type=eq.system&content=ilike.*work_request*&tags=cs.{unprocessed}&order=created_at.desc&limit=5'
+  );
+  if (tasks.length > 0) {
+    console.log('[AIR*RADAR*LOOP] ' + tasks.length + ' work requests to validate');
+    for (const task of tasks) {
+      const result = await loopAirCall(
+        'Validate this work request:\n' + task.content,
+        'You are RADAR (Request Analysis and Directive Assignment Router). Read the full context, audit for errors (wrong recipients, missing info, multiple assignments), state your understanding. Return JSON: { "valid": true/false, "issues": [], "understanding": "...", "recommended_action": "..." }',
+        'claude-haiku-4-5-20251001'
+      );
+      if (result) {
+        await loopSupaWrite('aba_memory', {
+          content: '[COMMAND_CENTER] RADAR*AIR*validated: ' + result.substring(0, 500),
+          memory_type: 'system', categories: ['command_center', 'radar'],
+          importance: 6, is_system: true,
+          source: 'radar_auto_' + new Date().toISOString(),
+          tags: ['command_center', 'radar', 'processed']
+        });
+      }
+    }
+  }
+  return tasks.length;
+}
+
+// MACE (Master Architecture Compliance Engine): Reviews architecture decisions
+async function loopMaceScan() {
+  // Only run every 12th tick (1 hour)
+  if (loopCount % 12 !== 0) return 0;
+  
+  const recentChanges = await loopSupaRead('aba_memory',
+    'memory_type=eq.system&content=ilike.*DEPLOYED*&order=created_at.desc&limit=5'
+  );
+  if (recentChanges.length > 0) {
+    const context = recentChanges.map(function(r) { return r.content; }).join('\n---\n');
+    const review = await loopAirCall(
+      'Review these recent deployments for architecture compliance:\n' + context,
+      'You are MACE (Master Architecture Compliance Engine). Check: (1) Does everything route through AIR? (2) Are ACL tags present? (3) Agent ownership assigned? (4) No orphan services? (5) Hierarchy L6→L1 maintained? Return JSON: { "compliant": true/false, "violations": [], "score": 0-10, "recommendations": [] }',
+      'claude-haiku-4-5-20251001'
+    );
+    if (review) {
+      await loopSupaWrite('aba_memory', {
+        content: '[COMMAND_CENTER] MACE*AIR*architecture_review: ' + review.substring(0, 500),
+        memory_type: 'system', categories: ['command_center', 'mace'],
+        importance: 7, is_system: true,
+        source: 'mace_auto_' + new Date().toISOString(),
+        tags: ['command_center', 'mace', 'architecture']
+      });
+      console.log('[AIR*MACE*LOOP] Architecture review complete');
+      return 1;
+    }
+  }
+  return 0;
+}
+
+// SCOUT (Search Check Output Under Test): Runs 10-point compliance scan
+async function loopScoutScan() {
+  // Only run every 24th tick (2 hours)
+  if (loopCount % 24 !== 0) return 0;
+
+  const recentDeploys = await loopSupaRead('aba_memory',
+    'content=ilike.*DEPLOYED*&order=created_at.desc&limit=1'
+  );
+  if (recentDeploys.length > 0) {
+    const scan = await loopAirCall(
+      'Latest deployment:\n' + recentDeploys[0].content + '\n\nRun SCOUT 10-point compliance check.',
+      'You are SCOUT (Search Check Output Under Test). Run 10 checks: (1) Not scaffold (2) Not demo garbage (3) Not hardcoded (4) Routes through AIR (5) ACL tagged (6) Agent owned (7) Actually works (8) Version annotated (9) No orphan imports (10) Error handling. Based on deployment notes, give pass/warn/fail for each. Return JSON: { "score": "X/10", "checks": [{"name": "...", "status": "pass|warn|fail", "detail": "..."}], "overall": "..." }',
+      'claude-haiku-4-5-20251001'
+    );
+    if (scan) {
+      await loopSupaWrite('aba_memory', {
+        content: '[COMMAND_CENTER] SCOUT*AIR*compliance_scan: ' + scan.substring(0, 500),
+        memory_type: 'system', categories: ['command_center', 'scout'],
+        importance: 7, is_system: true,
+        source: 'scout_auto_' + new Date().toISOString(),
+        tags: ['command_center', 'scout', 'compliance']
+      });
+      console.log('[AIR*SCOUT*LOOP] Compliance scan complete');
+      return 1;
+    }
+  }
+  return 0;
+}
+
+// SAGE embedding backfill: Generates embeddings for unembedded memories
+async function loopSageEmbed() {
+  // Only run every 6th tick (30 min)
+  if (loopCount % 6 !== 1) return 0;
+  if (!OPENAI_KEY) return 0;
+
+  const unembedded = await loopSupaRead('aba_memory', 'embedding=is.null&select=id,content&limit=5');
+  if (unembedded.length === 0) return 0;
+
+  let count = 0;
+  const key = SUPABASE_KEY || SUPABASE_ANON;
+  for (const mem of unembedded) {
+    const text = (mem.content || '').substring(0, 8000);
+    if (!text) continue;
+    try {
+      const embedResult = await new Promise(function(resolve, reject) {
+        const pd = JSON.stringify({ model: 'text-embedding-ada-002', input: text });
+        const er = https.request({
+          hostname: 'api.openai.com', path: '/v1/embeddings', method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + OPENAI_KEY, 'Content-Length': Buffer.byteLength(pd) }
+        }, function(res) { let d = ''; res.on('data', function(c) { d += c; }); res.on('end', function() { resolve(JSON.parse(d)); }); });
+        er.on('error', reject); er.write(pd); er.end();
+      });
+      if (embedResult.data && embedResult.data[0]) {
+        const vec = JSON.stringify(embedResult.data[0].embedding);
+        const ud = JSON.stringify({ embedding: vec });
+        await new Promise(function(resolve, reject) {
+          const ur = https.request({
+            hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+            path: '/rest/v1/aba_memory?id=eq.' + mem.id,
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', 'apikey': key, 'Authorization': 'Bearer ' + key, 'Prefer': 'return=minimal', 'Content-Length': Buffer.byteLength(ud) }
+          }, function(res) { let d = ''; res.on('data', function(c) { d += c; }); res.on('end', function() { resolve(d); }); });
+          ur.on('error', reject); ur.write(ud); ur.end();
+        });
+        count++;
+      }
+    } catch (e) { console.error('[SAGE-EMBED] Error:', e.message); }
+  }
+  if (count > 0) console.log('[AIR*SAGE*LOOP] Embedded ' + count + ' memories');
+  return count;
+}
+
 // IMAN: Check for queued email tasks
 async function loopImanCheck() {
   const tasks = await loopSupaRead('aba_memory',
@@ -6492,6 +6772,10 @@ async function runAutonomousLoop() {
     const hintCount = await loopHunchCheck();
     const dawnRan = await loopDawnBrief();
     const ghostRan = await loopGhostOvernight();
+    const radarCount = await loopRadarScan();
+    const maceRan = await loopMaceScan();
+    const scoutRan = await loopScoutScan();
+    const embedCount = await loopSageEmbed();
 
     // PULSE heartbeat every 6th tick (30 min)
     if (loopCount % 6 === 0) {
@@ -6505,7 +6789,7 @@ async function runAutonomousLoop() {
     }
 
     const elapsed = Date.now() - start;
-    console.log('[AIR-LOOP] Done in ' + elapsed + 'ms | emails:' + emailCount + ' jobs:' + jobCount + ' hints:' + hintCount + ' dawn:' + dawnRan + ' ghost:' + ghostRan);
+    console.log('[AIR-LOOP] Done in ' + elapsed + 'ms | emails:' + emailCount + ' jobs:' + jobCount + ' hints:' + hintCount + ' dawn:' + dawnRan + ' ghost:' + ghostRan + ' radar:' + radarCount + ' mace:' + maceRan + ' scout:' + scoutRan + ' embeds:' + embedCount);
   } catch (e) {
     console.error('[AIR-LOOP] ERROR:', e.message);
   }
@@ -6515,7 +6799,7 @@ async function runAutonomousLoop() {
 console.log('[AIR-LOOP] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 console.log('[AIR-LOOP] ABACIA Autonomous Loop ACTIVE');
 console.log('[AIR-LOOP] Interval: 5 minutes');
-console.log('[AIR-LOOP] Agents: IMAN, HUNTER, HUNCH, DAWN, GHOST, PULSE');
+console.log('[AIR-LOOP] Agents: IMAN, HUNTER, HUNCH, DAWN, GHOST, PULSE, RADAR, MACE, SCOUT, SAGE');
 console.log('[AIR-LOOP] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
 // First tick after 30 seconds (let server finish starting)
