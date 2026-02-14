@@ -5225,27 +5225,15 @@ Phone: (336) 389-8116</p>
     let twiml;
     
     if (mode === 'twoway') {
-      // REAL 2-WAY CONVERSATION using ConversationRelay
-      // User can talk back and have a real conversation with ABA
-      // Using ElevenLabs with Brandon's voice: hAQCIV0cazWEuGzMG5bV
-      // Note: In XML, & must be &amp;
-      const wsUrl = 'wss://' + req.headers.host + '/conversation-relay?trace=' + traceId;
+      // 2-WAY CONVERSATION using Media Streams
+      // Play greeting with ElevenLabs, then stream bidirectional audio
       const safeGreeting = msg.replace(/"/g, "'").replace(/&/g, "and").replace(/</g, "").replace(/>/g, "");
       
       twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
+  <Play>${REACH_URL}/api/voice/tts-stream?text=${encodeURIComponent(safeGreeting)}</Play>
   <Connect>
-    <ConversationRelay 
-      url="${wsUrl}"
-      welcomeGreeting="${safeGreeting}"
-      ttsProvider="ElevenLabs"
-      voice="hAQCIV0cazWEuGzMG5bV"
-      transcriptionProvider="deepgram"
-      speechModel="nova-2-general"
-      interruptible="true"
-      interruptByDtmf="true"
-      elevenlabsTextNormalization="on"
-    />
+    <Stream url="wss://${req.headers.host}/media-stream?trace=${traceId}" />
   </Connect>
 </Response>`;
     } else {
