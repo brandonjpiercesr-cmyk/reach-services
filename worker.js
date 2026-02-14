@@ -332,7 +332,9 @@ const CONTACT_REGISTRY = {
   }
 };
 
-// ⬡B:AIR:REACH.VOICE.LOOKUP:FUNC:contacts.resolver:v2.1.0:20260214⬡
+// ⬡B:AIR:REACH.VOICE.LOOKUP:FUNC:contacts.resolver:v2.4.0:20260214⬡
+// HIERARCHY: L3 Agent-level contact resolution
+// Priority: 1. Brain (authoritative), 2. Hardcoded registry (fallback)
 async function lookupCallerByPhone(phoneNumber) {
   console.log('[CONTACT LOOKUP] Looking up:', phoneNumber);
   
@@ -342,7 +344,50 @@ async function lookupCallerByPhone(phoneNumber) {
   const withPlus1 = '+1' + last10;
   const withPlus = '+' + normalized;
   
-  // Check hardcoded registry (fastest)
+  // FIRST: Check brain for contact (authoritative source)
+  try {
+    const brainResult = await httpsRequest({
+      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+      path: '/rest/v1/aba_memory?memory_type=eq.contact&content=ilike.*' + last10 + '*&limit=1',
+      method: 'GET',
+      headers: {
+        'apikey': SUPABASE_ANON,
+        'Authorization': 'Bearer ' + SUPABASE_ANON
+      }
+    });
+    
+    if (brainResult.status === 200) {
+      const data = JSON.parse(brainResult.data.toString());
+      if (data.length > 0) {
+        const contact = data[0].content;
+        const nameMatch = contact.match(/CONTACT:\s*([^|]+)/);
+        const roleMatch = contact.match(/Role:\s*(\w+)/);
+        const trustMatch = contact.match(/Trust:\s*(\w+)/);
+        
+        const name = nameMatch ? nameMatch[1].trim() : 'Contact';
+        const role = roleMatch ? roleMatch[1] : 'contact';
+        const trust = trustMatch ? trustMatch[1] : 'T5';
+        
+        console.log('[CONTACT LOOKUP] Found in brain:', name, trust);
+        return {
+          name: name.split(' ')[0], // First name only for greeting
+          role: role,
+          trust: trust,
+          access: trust === 'T10' ? 'full' : trust === 'T9' ? 'high' : 'limited',
+          greeting: role === 'owner' ? 'Hey ' + name.split(' ')[0] + '! Good to hear from you.' :
+                   role === 'advisor' ? name + ', wonderful to hear from you.' :
+                   'Hey ' + name.split(' ')[0] + '! Good to hear from you.',
+          phone: phoneNumber,
+          found: true,
+          source: 'brain'
+        };
+      }
+    }
+  } catch (e) {
+    console.log('[CONTACT LOOKUP] Brain error:', e.message);
+  }
+  
+  // FALLBACK: Check hardcoded registry
   for (const [regPhone, contact] of Object.entries(CONTACT_REGISTRY)) {
     const regNorm = regPhone.replace(/[^0-9]/g, '');
     if (regNorm === normalized || regNorm.slice(-10) === last10) {
@@ -2573,6 +2618,104 @@ async function getActiveDevices(userId) {
 
 
 
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:AIR:REACH.ORCHESTRATOR.DISPATCH:FUNC:agent.execution:v2.4.0:20260214⬡
+// DISPATCH - The missing step that actually RUNS agent code
+// L6: AIR routes to L3 agents based on JUDE's findings
+// Hierarchy: AIR → DISPATCH → Agent → External API → Response
+// ═══════════════════════════════════════════════════════════════════════════════
+async function AIR_DISPATCH(lukeAnalysis, judeResult, callerIdentity) {
+  console.log('[AIR DISPATCH] Checking if agents can handle this...');
+  
+  const query = lukeAnalysis.raw.toLowerCase();
+  const intent = lukeAnalysis.intent;
+  
+  // Check JUDE's findings for relevant agents
+  const agentNames = judeResult.agents.map(a => (a.name || '').toLowerCase());
+  console.log('[AIR DISPATCH] JUDE found agents:', agentNames.join(', ') || 'none');
+  
+  // ⬡B:AIR:REACH.DISPATCH.PLAY:ROUTE:sports:v2.4.0:20260214⬡
+  // PLAY Agent - Sports queries (L3: Manager, LIFESTYLE department)
+  if (query.includes('score') || query.includes('laker') || query.includes('game') ||
+      query.includes('win') || query.includes('nba') || query.includes('sports') ||
+      agentNames.includes('play')) {
+    console.log('[AIR DISPATCH] → L3: PLAY (Performance and Live Activity Yielder)');
+    try {
+      const result = await PLAY_getScores(lukeAnalysis.raw);
+      if (result) {
+        return { handled: true, agent: 'PLAY', data: result, type: 'sports' };
+      }
+    } catch (e) {
+      console.log('[AIR DISPATCH] PLAY error:', e.message);
+    }
+  }
+  
+  // ⬡B:AIR:REACH.DISPATCH.IMAN:ROUTE:email:v2.4.0:20260214⬡
+  // IMAN Agent - Email queries (L3: Manager, EMAIL department)
+  if (query.includes('email') || query.includes('inbox') || query.includes('mail') ||
+      agentNames.includes('iman')) {
+    console.log('[AIR DISPATCH] → L3: IMAN (Intelligent Mail Agent Nexus)');
+    try {
+      const result = await IMAN_readEmails(callerIdentity);
+      if (result && result.allowed) {
+        return { handled: true, agent: 'IMAN', data: result.summary, type: 'email', count: result.count };
+      }
+    } catch (e) {
+      console.log('[AIR DISPATCH] IMAN error:', e.message);
+    }
+  }
+  
+  // ⬡B:AIR:REACH.DISPATCH.RADAR:ROUTE:calendar:v2.4.0:20260214⬡
+  // RADAR Agent - Calendar queries (L3: Manager, CALENDAR department)
+  if (query.includes('calendar') || query.includes('schedule') || query.includes('meeting') ||
+      query.includes('appointment') || agentNames.includes('radar')) {
+    console.log('[AIR DISPATCH] → L3: RADAR (Realtime Autonomous Data and Activity Recorder)');
+    try {
+      const result = await RADAR_getCalendar(callerIdentity);
+      if (result && result.allowed) {
+        return { handled: true, agent: 'RADAR', data: result.summary, type: 'calendar', count: result.count };
+      }
+    } catch (e) {
+      console.log('[AIR DISPATCH] RADAR error:', e.message);
+    }
+  }
+  
+  // ⬡B:AIR:REACH.DISPATCH.PRESS:ROUTE:news:v2.4.0:20260214⬡
+  // PRESS Agent - News queries (L3: Manager, NEWS department)
+  if (query.includes('news') || query.includes('headline') || query.includes('happening') ||
+      agentNames.includes('press')) {
+    console.log('[AIR DISPATCH] → L3: PRESS (Proactive Real-time Event and Story Scanner)');
+    try {
+      const result = await PRESS_getNews(lukeAnalysis.raw);
+      if (result) {
+        return { handled: true, agent: 'PRESS', data: result, type: 'news' };
+      }
+    } catch (e) {
+      console.log('[AIR DISPATCH] PRESS error:', e.message);
+    }
+  }
+  
+  // ⬡B:AIR:REACH.DISPATCH.ABACIA:ROUTE:general:v2.4.0:20260214⬡
+  // For complex queries, try ABACIA-SERVICES full AIR (22 agents)
+  if (intent === 'command' || intent === 'complex') {
+    console.log('[AIR DISPATCH] → ABACIA-SERVICES (22 agents)');
+    try {
+      const result = await ABACIA_AIR_process(lukeAnalysis.raw, { caller: callerIdentity });
+      if (result && result.response) {
+        return { handled: true, agent: 'ABACIA_AIR', data: result.response, type: 'complex' };
+      }
+    } catch (e) {
+      console.log('[AIR DISPATCH] ABACIA error:', e.message);
+    }
+  }
+  
+  // No agent handled it - let LLM generate response
+  console.log('[AIR DISPATCH] No agent handled - deferring to LLM');
+  return { handled: false };
+}
+
+
 async function AIR_process(userSaid, history, callerIdentity, demoState) {
   console.log('');
   console.log('═══════════════════════════════════════════════════════════');
@@ -2595,6 +2738,20 @@ async function AIR_process(userSaid, history, callerIdentity, demoState) {
   const judeResult = await JUDE_findAgents(lukeAnalysis);
   
   // ⬡B:AIR:REACH.ORCHESTRATOR.SUMMON_PACK:CODE:routing.agent.assembly:AIR→PACK→AIR:T10:v1.5.0:20260213:s1p2k⬡
+  
+  // ⬡B:AIR:REACH.ORCHESTRATOR.DISPATCH:CODE:agent.execution:v2.4.0:20260214⬡
+  // DISPATCH - Actually run agent code if applicable
+  const dispatchResult = await AIR_DISPATCH(lukeAnalysis, judeResult, callerIdentity);
+  
+  // If an agent handled it, include their real data in PACK
+  if (dispatchResult.handled) {
+    console.log('[AIR] Agent ' + dispatchResult.agent + ' handled query with real data');
+    // Add agent data to cole result so PACK includes it
+    coleResult.agentData = dispatchResult.data;
+    coleResult.agentName = dispatchResult.agent;
+    coleResult.agentType = dispatchResult.type;
+  }
+  
   const missionPackage = PACK_assemble(lukeAnalysis, coleResult, judeResult, history, callerIdentity, demoState);
   
   // ⬡B:AIR:REACH.ORCHESTRATOR.MODEL_SELECT:CODE:routing.model.cascade:AIR→GEMINI|HAIKU|GROQ:T10:v1.5.0:20260213:m1s2l⬡
@@ -4613,70 +4770,9 @@ Phone: (336) 389-8116</p>
       
       console.log('[AIR VOICE TOOL] Caller identified as:', callerIdentity.name, 'Trust:', callerIdentity.trust);
       
-      // ⬡B:AIR:REACH.VOICE.ROUTING:LOGIC:agent.dispatch:v2.1.0:20260214⬡
-      // Smart routing - check if this needs a specific agent
-      const msgLower = userMessage.toLowerCase();
-      let agentResponse = null;
-      
-      // PLAY Agent - Sports queries
-      if (msgLower.includes('score') || msgLower.includes('game') || msgLower.includes('laker') || 
-          msgLower.includes('win') || msgLower.includes('play') || msgLower.includes('nba') ||
-          msgLower.includes('sports') || msgLower.includes('basketball')) {
-        console.log('[AIR] Routing to PLAY agent (sports)');
-        agentResponse = await PLAY_getScores(userMessage);
-      }
-      // IMAN Agent - Email queries
-      else if (msgLower.includes('email') || msgLower.includes('inbox') || msgLower.includes('mail') ||
-               msgLower.includes('message') && msgLower.includes('unread')) {
-        console.log('[AIR] Routing to IMAN agent (email)');
-        const emailResult = await IMAN_readEmails(callerIdentity);
-        agentResponse = emailResult.summary;
-      }
-      // RADAR Agent - Calendar queries
-      else if (msgLower.includes('calendar') || msgLower.includes('schedule') || msgLower.includes('meeting') ||
-               msgLower.includes('appointment') || msgLower.includes('today') && (msgLower.includes('have') || msgLower.includes('what'))) {
-        console.log('[AIR] Routing to RADAR agent (calendar)');
-        const calResult = await RADAR_getCalendar(callerIdentity);
-        agentResponse = calResult.summary;
-      }
-      // PRESS Agent - News queries
-      else if (msgLower.includes('news') || msgLower.includes('headline') || msgLower.includes('happening') ||
-               msgLower.includes('latest') && (msgLower.includes('on') || msgLower.includes('about'))) {
-        console.log('[AIR] Routing to PRESS agent (news)');
-        agentResponse = await PRESS_getNews(userMessage);
-      }
-      
-      // If an agent handled it, return that response
-      if (agentResponse) {
-        console.log('[AIR VOICE TOOL] Agent response:', agentResponse);
-        
-        // Broadcast to Command Center
-        broadcastToCommandCenter({
-          type: 'voice_response',
-          source: 'agent',
-          conversation_id: conversationId,
-          aba_said: agentResponse,
-          timestamp: new Date().toISOString()
-        });
-        
-        // Store in brain
-        storeToBrain({
-          content: 'VOICE CALL [' + conversationId + ']: ' + callerIdentity.name + ' asked "' + userMessage + '" | ABA (via agent) responded "' + agentResponse + '"',
-          memory_type: 'voice_transcript',
-          categories: ['voice', 'elevenlabs', 'agent'],
-          importance: 5,
-          source: 'voice_call_' + conversationId,
-          tags: ['voice', 'transcript']
-        }).catch(e => console.log('[BRAIN] Store error:', e.message));
-        
-        return jsonResponse(res, 200, {
-          response: agentResponse,
-          conversation_id: conversationId,
-          caller: callerIdentity.name
-        });
-      }
-      
-      // No specific agent - route through general AIR_process
+      // ⬡B:AIR:REACH.VOICE.ROUTING:LOGIC:air.central:v2.4.0:20260214⬡
+      // ALL routing goes through AIR_process - AIR dispatches to agents
+      // This is correct hierarchy: L5 (REACH) → L6 (AIR) → L3 (Agents)
       // AIR_process expects: (userSaid, history, callerIdentity, demoState)
       const airResponse = await AIR_process(
         userMessage,           // The actual question/request as STRING
