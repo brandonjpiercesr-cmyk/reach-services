@@ -2896,11 +2896,149 @@ Phone: (336) 389-8116</p>
   }
 
   // ═══════════════════════════════════════════════════════════════════════
+  // ⬡B:reach:HTTP:scrape_job⬡ /api/scrape-job - SCRAPE JOB POSTING
+  // ═══════════════════════════════════════════════════════════════════════
+  if (path === '/api/scrape-job' && method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      const { url } = body;
+      if (!url) return jsonResponse(res, 400, { error: 'url required' });
+      const parsed = new URL(url);
+      const fetchResult = await httpsRequest({
+        hostname: parsed.hostname,
+        path: parsed.pathname + (parsed.search || ''),
+        method: 'GET',
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ABA/1.0)' }
+      });
+      const html = fetchResult.data.toString().substring(0, 15000);
+      if (!ANTHROPIC_KEY) return jsonResponse(res, 503, { error: 'No AI key' });
+      const aiResult = await httpsRequest({
+        hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST',
+        headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' }
+      }, JSON.stringify({
+        model: 'claude-haiku-4-5-20251001', max_tokens: 500,
+        system: 'Extract job posting details from HTML. Return ONLY valid JSON: {title, company, location, salary, description, employment_type}. Empty string if unknown.',
+        messages: [{ role: 'user', content: 'URL: ' + url + '\n\nHTML:\n' + html }]
+      }));
+      const aiData = JSON.parse(aiResult.data.toString());
+      const text = aiData.content?.[0]?.text || '';
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      const jobData = jsonMatch ? JSON.parse(jsonMatch[0]) : { title: '', company: '' };
+      return jsonResponse(res, 200, { ...jobData, source: url, method: 'server_scrape', scrapedAt: new Date().toISOString() });
+    } catch (e) { return jsonResponse(res, 500, { error: e.message }); }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // ⬡B:reach:HTTP:idealist_parse⬡ /api/idealist/parse - PARSE IDEALIST JOB ALERT EMAILS
+  // Claudette forwards Idealist emails here. Extracts URLs, scrapes each, returns structured jobs.
+  // ═══════════════════════════════════════════════════════════════════════
+  if (path === '/api/idealist/parse' && method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      const { emailBody, emailSubject } = body;
+      if (!emailBody) return jsonResponse(res, 400, { error: 'emailBody required' });
+
+      // Step 1: Extract Idealist URLs from email body
+      const urlRegex = /https?:\/\/www\.idealist\.org\/[^\s"'<>)\]]+/g;
+      const rawUrls = emailBody.match(urlRegex) || [];
+      const urls = [...new Set(rawUrls)]
+        .filter(u => u.includes('/job/') || u.includes('/internship/') || u.includes('/position/') || u.includes('/en/'))
+        .slice(0, 10);
+
+      if (urls.length === 0) {
+        return jsonResponse(res, 200, { jobs: [], errors: [], summary: { emailSubject, urlsFound: 0, message: 'No Idealist job URLs found' } });
+      }
+
+      if (!ANTHROPIC_KEY) return jsonResponse(res, 503, { error: 'No AI key for extraction' });
+
+      // Step 2: Scrape each URL with Haiku
+      const jobs = [];
+      const errors = [];
+
+      for (const jobUrl of urls) {
+        try {
+          const parsed = new URL(jobUrl);
+          const fetchResult = await httpsRequest({
+            hostname: parsed.hostname,
+            path: parsed.pathname + (parsed.search || ''),
+            method: 'GET',
+            headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ABA-SCOUT/1.0)' }
+          });
+          const html = fetchResult.data.toString().substring(0, 15000);
+
+          const aiResult = await httpsRequest({
+            hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST',
+            headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' }
+          }, JSON.stringify({
+            model: 'claude-haiku-4-5-20251001', max_tokens: 800,
+            system: 'Parse this job posting. Return ONLY valid JSON, no markdown: {"title":"", "company":"", "location":"", "salary":"", "description":"first 200 chars", "employment_type":"full-time/part-time/contract", "remote":"yes/no/hybrid", "posted_date":"", "deadline":"", "requirements":"first 200 chars"}. Empty string if unknown. Be accurate.',
+            messages: [{ role: 'user', content: 'URL: ' + jobUrl + '\n\nHTML:\n' + html }]
+          }));
+
+          const aiData = JSON.parse(aiResult.data.toString());
+          const text = aiData.content?.[0]?.text || '';
+          const jsonMatch = text.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            const jobData = JSON.parse(jsonMatch[0]);
+            jobs.push({ ...jobData, url: jobUrl, source: 'idealist', parsedAt: new Date().toISOString(), verified: !!(jobData.title && jobData.company) });
+          } else {
+            errors.push({ url: jobUrl, error: 'AI could not extract JSON' });
+          }
+        } catch (scrapeErr) {
+          errors.push({ url: jobUrl, error: scrapeErr.message });
+        }
+      }
+
+      const verified = jobs.filter(j => j.verified).length;
+      return jsonResponse(res, 200, {
+        jobs, errors,
+        summary: { emailSubject, urlsFound: urls.length, jobsParsed: jobs.length, jobsVerified: verified, jobsFailed: errors.length, accuracy: jobs.length > 0 ? Math.round((verified / jobs.length) * 100) + '%' : 'N/A' }
+      });
+    } catch (e) { return jsonResponse(res, 500, { error: e.message }); }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // ⬡B:reach:HTTP:idealist_verify⬡ /api/idealist/verify - VERIFY SINGLE URL
+  // ═══════════════════════════════════════════════════════════════════════
+  if (path === '/api/idealist/verify' && method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      const { url, expectedTitle, expectedCompany } = body;
+      if (!url) return jsonResponse(res, 400, { error: 'url required' });
+      if (!ANTHROPIC_KEY) return jsonResponse(res, 503, { error: 'No AI key' });
+
+      const parsed = new URL(url);
+      const fetchResult = await httpsRequest({
+        hostname: parsed.hostname,
+        path: parsed.pathname + (parsed.search || ''),
+        method: 'GET',
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ABA-SCOUT/1.0)' }
+      });
+      const html = fetchResult.data.toString().substring(0, 15000);
+
+      const aiResult = await httpsRequest({
+        hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST',
+        headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' }
+      }, JSON.stringify({
+        model: 'claude-haiku-4-5-20251001', max_tokens: 300,
+        system: 'Verify this job posting. Return ONLY JSON: {"title":"", "company":"", "still_active": true/false, "verified": true/false, "discrepancies":""}',
+        messages: [{ role: 'user', content: 'Verify URL: ' + url + '\nExpected title: ' + (expectedTitle || 'unknown') + '\nExpected company: ' + (expectedCompany || 'unknown') + '\n\nHTML:\n' + html }]
+      }));
+
+      const aiData = JSON.parse(aiResult.data.toString());
+      const text = aiData.content?.[0]?.text || '';
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      const result = jsonMatch ? JSON.parse(jsonMatch[0]) : { verified: false };
+      return jsonResponse(res, 200, { ...result, url, verifiedAt: new Date().toISOString() });
+    } catch (e) { return jsonResponse(res, 500, { error: e.message }); }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
   // ⬡B:AIR:REACH.API.NOTFOUND:CODE:infrastructure.error.404:USER→REACH→ERROR:T10:v1.5.0:20260213:n1f2d⬡ CATCH-ALL
   // ═══════════════════════════════════════════════════════════════════════
   jsonResponse(res, 404, { 
     error: 'Route not found: ' + method + ' ' + path,
-    available: ['/api/router', '/api/models/claude', '/api/voice/deepgram-token', '/api/voice/tts', '/api/omi/manifest', '/api/omi/webhook', '/api/sms/send', '/api/brain/search', '/api/brain/store'],
+    available: ['/api/router', '/api/models/claude', '/api/voice/deepgram-token', '/api/voice/tts', '/api/omi/manifest', '/api/omi/webhook', '/api/sms/send', '/api/brain/search', '/api/brain/store', '/api/scrape-job', '/api/idealist/parse', '/api/idealist/verify'],
     hint: 'We are all ABA'
   });
 });
