@@ -118,6 +118,122 @@ console.log('══════════════════════�
 console.log('[ABA REACH v1.9.0] FULL HIERARCHY + SIGILS + API ROUTES');
 console.log('[HIERARCHY] L6:AIR > L5:REACH > L4:VOICE,SMS,EMAIL,OMI > L3:VARA,CARA,IMAN,TASTE');
 console.log('[AIR] Hardcoded agents: LUKE, COLE, JUDE, PACK');
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:AIR:REACH.CONFIG.ABACIA:CONFIG:agents.central.routing:AIR→REACH→ABACIA:T10:v1.12.0:20260214:abc1a⬡
+// ABACIA-SERVICES: Central hub for all 80 agents
+// Added: February 14, 2026
+// ═══════════════════════════════════════════════════════════════════════════════
+const ABACIA_URL = process.env.ABACIA_URL || 'https://abacia-services.onrender.com';
+
+/**
+ * ⬡B:AIR:REACH.FUNC.ABACIA:FUNC:agents.dispatch:AIR→REACH→ABACIA→AGENT:T9:v1.12.0:20260214:disp⬡
+ * 
+ * Call any of the 80 agents on ABACIA-SERVICES
+ * 
+ * @param {string} agentId - Agent acronym (SAGE, VARA, GRIT, HUNTER, etc.)
+ * @param {object} intent - What the agent should do
+ * @param {object} request - Request payload
+ * @returns {object} Agent response
+ */
+async function ABACIA_dispatch(agentId, intent, request) {
+  console.log(`[ABACIA] Dispatching to ${agentId}...`);
+  
+  try {
+    const response = await httpsRequest({
+      hostname: 'abacia-services.onrender.com',
+      path: `/api/agents/${agentId}`,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    }, JSON.stringify({ intent, request }));
+    
+    const result = JSON.parse(response.data.toString());
+    console.log(`[ABACIA] ${agentId} responded:`, result.status || 'ok');
+    return result;
+  } catch (e) {
+    console.error(`[ABACIA] ${agentId} error:`, e.message);
+    
+    // GRIT: Try resilience agent if main agent fails
+    if (agentId !== 'GRIT') {
+      console.log('[ABACIA] Calling GRIT for resilience...');
+      return ABACIA_dispatch('GRIT', { type: 'solve' }, {
+        originalAgent: agentId,
+        originalIntent: intent,
+        error: e.message
+      });
+    }
+    
+    return { status: 'error', error: e.message };
+  }
+}
+
+/**
+ * ⬡B:AIR:REACH.FUNC.ABACIA_LIST:FUNC:agents.list:AIR→REACH→ABACIA:T9:v1.12.0:20260214:list⬡
+ * 
+ * Get list of all available agents
+ */
+async function ABACIA_listAgents() {
+  try {
+    const response = await httpsRequest({
+      hostname: 'abacia-services.onrender.com',
+      path: '/api/agents',
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    return JSON.parse(response.data.toString());
+  } catch (e) {
+    console.error('[ABACIA] List agents error:', e.message);
+    return { status: 'error', error: e.message };
+  }
+}
+
+/**
+ * ⬡B:AIR:REACH.FUNC.ABACIA_ROUTE:FUNC:agents.smart.routing:AIR→REACH→ABACIA→AGENT:T9:v1.12.0:20260214:route⬡
+ * 
+ * Smart routing: Detect intent and dispatch to correct agent
+ * 
+ * @param {string} userMessage - What the user said
+ * @param {object} context - Additional context
+ * @returns {object} Agent response
+ */
+async function ABACIA_smartRoute(userMessage, context = {}) {
+  const msgLower = (userMessage || '').toLowerCase();
+  
+  // Intent detection → Agent mapping
+  if (msgLower.includes('search') || msgLower.includes('find') || msgLower.includes('look for')) {
+    return ABACIA_dispatch('SAGE', { type: 'search' }, { query: userMessage, ...context });
+  }
+  
+  if (msgLower.includes('job') || msgLower.includes('career') || msgLower.includes('interview')) {
+    return ABACIA_dispatch('HUNTER', { type: 'search' }, { query: userMessage, ...context });
+  }
+  
+  if (msgLower.includes('email') || msgLower.includes('inbox') || msgLower.includes('mail')) {
+    return ABACIA_dispatch('IMAN', { type: 'check' }, { ...context });
+  }
+  
+  if (msgLower.includes('calendar') || msgLower.includes('meeting') || msgLower.includes('schedule')) {
+    return ABACIA_dispatch('RADAR', { type: 'check' }, { ...context });
+  }
+  
+  if (msgLower.includes('speak') || msgLower.includes('say') || msgLower.includes('voice') || msgLower.includes('call')) {
+    return ABACIA_dispatch('VARA', { type: 'speak' }, { text: userMessage, ...context });
+  }
+  
+  if (msgLower.includes('write') || msgLower.includes('draft') || msgLower.includes('compose')) {
+    return ABACIA_dispatch('QUILL', { type: 'write' }, { content: userMessage, ...context });
+  }
+  
+  if (msgLower.includes('news') || msgLower.includes('headline') || msgLower.includes('breaking')) {
+    return ABACIA_dispatch('PRESS', { type: 'fetch' }, { ...context });
+  }
+  
+  if (msgLower.includes('score') || msgLower.includes('game') || msgLower.includes('sports') || msgLower.includes('nba') || msgLower.includes('nfl')) {
+    return ABACIA_dispatch('PLAY', { type: 'scores' }, { query: userMessage, ...context });
+  }
+  
+  // Default: Use TIM for quick response
+  return ABACIA_dispatch('TIM', { type: 'quick' }, { message: userMessage, ...context });
+}
 console.log('[AIR] PRIMARY: Gemini Flash 2.0 | BACKUP: Claude Haiku');
 console.log('[VARA] Voice: ' + ELEVENLABS_VOICE);
 console.log('[SIGILS] ACL 10X format on every block');
@@ -3854,6 +3970,46 @@ function jsonResponse(res, status, data) {
 // ⬡B:AIR:REACH.API.AIR_TEXT:CODE:routing.text.chat:USER→REACH→AIR→AGENTS→MODEL→USER:T8:v1.5.0:20260213:a1t2x⬡
 // AIR for text chat (higher token limits than voice)
 async function AIR_text(userMessage, history) {
+  // ═══════════════════════════════════════════════════════════════════════
+  // ⬡B:AIR:REACH.ROUTING.ABACIA:CODE:agents.80.routing:AIR→ABACIA→AGENT:T9:v1.12.0:20260214:r80⬡
+  // Check if message should route to one of 80 ABACIA agents
+  // Added: February 14, 2026
+  // ═══════════════════════════════════════════════════════════════════════
+  const msgLower = (userMessage || '').toLowerCase();
+  
+  // Route to ABACIA agents for specific intents
+  const abaciaKeywords = [
+    'search brain', 'find in memory', 'look up', 'semantic search',  // SAGE
+    'job search', 'career', 'interview prep', 'apply to',            // HUNTER, DOD
+    'news', 'headline', 'breaking', "what's happening",              // PRESS
+    'score', 'game', 'sports', 'nba', 'nfl', 'mlb',                  // PLAY
+    'draft email', 'write email', 'compose',                         // QUILL
+    'check calendar', 'my schedule', 'appointments',                 // RADAR
+    'check inbox', 'unread emails',                                  // IMAN
+    'meeting notes', 'meeting summary',                              // MARK
+    'bs check', 'review my writing'                                  // DRAFT
+  ];
+  
+  const shouldUseABACIA = abaciaKeywords.some(kw => msgLower.includes(kw));
+  
+  if (shouldUseABACIA) {
+    console.log('[AIR] Routing to ABACIA agents...');
+    try {
+      const abaciaResult = await ABACIA_smartRoute(userMessage, { history });
+      if (abaciaResult && abaciaResult.status !== 'error') {
+        return {
+          response: abaciaResult.response || abaciaResult.result || JSON.stringify(abaciaResult),
+          isGoodbye: false,
+          source: 'ABACIA',
+          agent: abaciaResult.agent || abaciaResult.acronym
+        };
+      }
+    } catch (e) {
+      console.log('[AIR] ABACIA routing failed, falling back to default:', e.message);
+    }
+  }
+  
+  // Continue with original flow for general chat
   const lukeAnalysis = await LUKE_process(userMessage);
   if (lukeAnalysis.isGoodbye) {
     return { response: "Take care! We are all ABA.", isGoodbye: true };
@@ -4396,6 +4552,63 @@ Phone: (336) 389-8116</p>
   // ⬡B:AIR:REACH.API.CLAUDE:CODE:models.proxy.anthropic:USER→REACH→ANTHROPIC→USER:T8:v1.5.0:20260213:c1l2d⬡ /api/models/claude - CLAUDE PROXY
   // Direct pass-through to Anthropic API for 1A Shell/CCWA
   // ═══════════════════════════════════════════════════════════════════════
+
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // ⬡B:AIR:REACH.API.AGENTS:CODE:agents.proxy.abacia:USER→REACH→ABACIA→AGENTS:T9:v1.12.0:20260214:agnt⬡
+  // /api/agents/* - Proxy to ABACIA-SERVICES (80 agents)
+  // Added: February 14, 2026
+  // ═══════════════════════════════════════════════════════════════════════════════
+  if (path.startsWith('/api/agents')) {
+    try {
+      // Extract agent ID from path: /api/agents/SAGE -> SAGE
+      const agentPath = path.replace('/api/agents', '') || '/';
+      const agentId = agentPath.split('/')[1] || null;
+      
+      if (method === 'GET' && !agentId) {
+        // GET /api/agents - List all agents
+        const result = await ABACIA_listAgents();
+        return jsonResponse(res, 200, result);
+      }
+      
+      if (method === 'GET' && agentId) {
+        // GET /api/agents/:id - Get agent config
+        const result = await ABACIA_dispatch(agentId, { type: 'config' }, {});
+        return jsonResponse(res, 200, result);
+      }
+      
+      if (method === 'POST' && agentId) {
+        // POST /api/agents/:id - Dispatch to agent
+        const body = await parseBody(req);
+        const result = await ABACIA_dispatch(agentId, body.intent || {}, body.request || body);
+        return jsonResponse(res, 200, result);
+      }
+      
+      return jsonResponse(res, 400, { error: 'Invalid agents request' });
+    } catch (e) {
+      console.error('[AGENTS] Error:', e.message);
+      return jsonResponse(res, 500, { error: e.message });
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // ⬡B:AIR:REACH.API.SMARTROUTE:CODE:agents.smart.routing:USER→REACH→ABACIA→AGENT:T9:v1.12.0:20260214:smrt⬡
+  // /api/smart-route - Auto-detect intent and route to best agent
+  // Added: February 14, 2026
+  // ═══════════════════════════════════════════════════════════════════════════════
+  if (path === '/api/smart-route' && method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      if (!body.message) return jsonResponse(res, 400, { error: 'message required' });
+      
+      console.log('[SMART-ROUTE] Routing:', body.message.substring(0, 50) + '...');
+      const result = await ABACIA_smartRoute(body.message, body.context || {});
+      return jsonResponse(res, 200, result);
+    } catch (e) {
+      console.error('[SMART-ROUTE] Error:', e.message);
+      return jsonResponse(res, 500, { error: e.message });
+    }
+  }
+
   if (path === '/api/models/claude' && method === 'POST') {
     try {
       const body = await parseBody(req);
