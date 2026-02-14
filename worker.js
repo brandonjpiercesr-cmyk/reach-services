@@ -1757,6 +1757,192 @@ const httpServer = http.createServer(async (req, res) => {
     });
   }
 
+  
+  // ═══════════════════════════════════════════════════════════════════════
+  // LEGAL PAGES (for Twilio A2P 10DLC compliance)
+  // ═══════════════════════════════════════════════════════════════════════
+  if (path === '/privacy-policy' && method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    return res.end(`<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Privacy Policy | Global Majority Group</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:system-ui,-apple-system,sans-serif;background:#0a0a0a;color:#e0e0e0;line-height:1.8;padding:40px 20px}
+.container{max-width:800px;margin:0 auto}
+h1{font-size:28px;color:#fff;margin-bottom:8px}
+.subtitle{color:#888;margin-bottom:32px;font-size:14px}
+h2{font-size:20px;color:#fff;margin:28px 0 12px;border-bottom:1px solid #222;padding-bottom:8px}
+p{margin-bottom:16px;color:#ccc}
+ul{margin:0 0 16px 24px}
+li{margin-bottom:8px;color:#ccc}
+a{color:#00ff88}
+.footer{margin-top:48px;padding-top:24px;border-top:1px solid #222;color:#666;font-size:13px}
+</style>
+</head>
+<body>
+<div class="container">
+<h1>Privacy Policy</h1>
+<p class="subtitle">Global Majority Group &mdash; Last Updated: February 14, 2026</p>
+
+<h2>1. Introduction</h2>
+<p>Global Majority Group ("we," "us," or "our") operates ABA (A Better AI), an AI-powered assistant platform. This Privacy Policy describes how we collect, use, and protect your personal information when you interact with our services, including phone calls, text messages, emails, and web applications.</p>
+
+<h2>2. Information We Collect</h2>
+<p>We may collect the following types of information:</p>
+<ul>
+<li><strong>Contact Information:</strong> Phone number, name, and email address provided during interactions with ABA.</li>
+<li><strong>Communication Data:</strong> Call logs, text message content, and email correspondence when you interact with our AI assistant.</li>
+<li><strong>Usage Data:</strong> Information about how you use our services, including session duration and feature interactions.</li>
+<li><strong>Device Information:</strong> Browser type, operating system, and device identifiers when accessing our web applications.</li>
+</ul>
+
+<h2>3. How We Use Your Information</h2>
+<p>We use collected information to:</p>
+<ul>
+<li>Provide and improve our AI assistant services</li>
+<li>Send follow-up messages after phone interactions (with your consent)</li>
+<li>Respond to your inquiries and requests</li>
+<li>Personalize your experience with ABA</li>
+<li>Maintain and improve our platform</li>
+<li>Comply with legal obligations</li>
+</ul>
+
+<h2>4. SMS/Text Messaging</h2>
+<p>By verbally consenting during a phone call with ABA or by providing your phone number through our platform, you agree to receive text messages from Global Majority Group. Messages may include follow-up information, service notifications, and updates about our products. Message frequency varies. Message and data rates may apply.</p>
+<p><strong>Opt-Out:</strong> You may opt out of receiving text messages at any time by replying STOP to any message. Reply HELP for assistance. Upon opting out, you will receive one final confirmation message and no further texts will be sent.</p>
+
+<h2>5. Data Sharing</h2>
+<p>We do not sell, trade, or rent your personal information to third parties. We may share information with:</p>
+<ul>
+<li><strong>Service Providers:</strong> Third-party services that help us operate our platform (e.g., cloud hosting, communication APIs), bound by confidentiality agreements.</li>
+<li><strong>Legal Requirements:</strong> When required by law, regulation, or legal process.</li>
+</ul>
+
+<h2>6. Data Security</h2>
+<p>We implement industry-standard security measures to protect your information, including encryption in transit and at rest, access controls, and regular security audits. However, no method of transmission over the Internet is 100% secure.</p>
+
+<h2>7. Data Retention</h2>
+<p>We retain your information only as long as necessary to fulfill the purposes described in this policy or as required by law. You may request deletion of your data at any time by contacting us.</p>
+
+<h2>8. Your Rights</h2>
+<p>You have the right to:</p>
+<ul>
+<li>Access the personal information we hold about you</li>
+<li>Request correction of inaccurate information</li>
+<li>Request deletion of your information</li>
+<li>Opt out of communications at any time</li>
+</ul>
+
+<h2>9. Children's Privacy</h2>
+<p>Our services are not directed to individuals under the age of 13. We do not knowingly collect personal information from children.</p>
+
+<h2>10. Changes to This Policy</h2>
+<p>We may update this Privacy Policy from time to time. We will notify you of any material changes by posting the updated policy on this page with a revised effective date.</p>
+
+<h2>11. Contact Us</h2>
+<p>If you have questions about this Privacy Policy, contact us at:</p>
+<p>Global Majority Group<br>
+Email: <a href="mailto:brandon@globalmajoritygroup.com">brandon@globalmajoritygroup.com</a><br>
+Phone: (336) 389-8116</p>
+
+<div class="footer">
+<p>&copy; 2026 Global Majority Group. All rights reserved.</p>
+</div>
+</div>
+</body>
+</html>
+`);
+  }
+  
+  if ((path === '/terms' || path === '/terms-and-conditions') && method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    return res.end(`<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Terms and Conditions | Global Majority Group</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:system-ui,-apple-system,sans-serif;background:#0a0a0a;color:#e0e0e0;line-height:1.8;padding:40px 20px}
+.container{max-width:800px;margin:0 auto}
+h1{font-size:28px;color:#fff;margin-bottom:8px}
+.subtitle{color:#888;margin-bottom:32px;font-size:14px}
+h2{font-size:20px;color:#fff;margin:28px 0 12px;border-bottom:1px solid #222;padding-bottom:8px}
+p{margin-bottom:16px;color:#ccc}
+ul{margin:0 0 16px 24px}
+li{margin-bottom:8px;color:#ccc}
+a{color:#00ff88}
+.footer{margin-top:48px;padding-top:24px;border-top:1px solid #222;color:#666;font-size:13px}
+</style>
+</head>
+<body>
+<div class="container">
+<h1>Terms and Conditions</h1>
+<p class="subtitle">Global Majority Group &mdash; Last Updated: February 14, 2026</p>
+
+<h2>1. Acceptance of Terms</h2>
+<p>By accessing or using the services provided by Global Majority Group ("Company"), including ABA (A Better AI) and related platforms, you agree to be bound by these Terms and Conditions. If you do not agree, please do not use our services.</p>
+
+<h2>2. Description of Services</h2>
+<p>Global Majority Group provides ABA, an AI-powered assistant platform that offers phone-based interactions, text messaging, email communications, job search assistance, calendar management, budgeting tools, and other productivity features. Our services include the ABA OS portal, ABACUS platform, and related applications.</p>
+
+<h2>3. SMS/Text Messaging Program</h2>
+<p><strong>Program Name:</strong> ABA Notifications<br>
+<strong>Description:</strong> Follow-up messages, service notifications, and updates sent by ABA after phone interactions or platform engagement.<br>
+<strong>Message Frequency:</strong> Message frequency varies based on your interactions. Typically 1-5 messages per interaction.<br>
+<strong>Message and Data Rates:</strong> Standard message and data rates may apply. Contact your wireless carrier for details.<br>
+<strong>Opt-In:</strong> By calling our phone line and verbally consenting, or by providing your phone number through our platform, you consent to receive text messages.<br>
+<strong>Opt-Out:</strong> Text STOP to any message to unsubscribe. You will receive a confirmation and no further messages.<br>
+<strong>Help:</strong> Text HELP to any message for support information.<br>
+<strong>Support:</strong> Email <a href="mailto:brandon@globalmajoritygroup.com">brandon@globalmajoritygroup.com</a> or call (336) 389-8116.</p>
+
+<h2>4. User Responsibilities</h2>
+<p>You agree to:</p>
+<ul>
+<li>Provide accurate information when interacting with our services</li>
+<li>Use our services only for lawful purposes</li>
+<li>Not attempt to disrupt, hack, or reverse-engineer our systems</li>
+<li>Not use our services to harass, spam, or harm others</li>
+</ul>
+
+<h2>5. Intellectual Property</h2>
+<p>All content, software, and technology comprising the ABA platform is the property of Global Majority Group. You may not copy, modify, distribute, or create derivative works without our express written permission.</p>
+
+<h2>6. Limitation of Liability</h2>
+<p>ABA is an AI assistant and may not always provide perfect responses. Global Majority Group is not liable for decisions made based on ABA's output. Our services are provided "as is" without warranties of any kind, express or implied. We are not responsible for any indirect, incidental, or consequential damages arising from your use of our services.</p>
+
+<h2>7. Privacy</h2>
+<p>Your use of our services is also governed by our <a href="/privacy-policy">Privacy Policy</a>, which describes how we collect, use, and protect your information.</p>
+
+<h2>8. Modifications</h2>
+<p>We reserve the right to modify these terms at any time. Continued use of our services after changes constitutes acceptance of the updated terms.</p>
+
+<h2>9. Termination</h2>
+<p>We may suspend or terminate your access to our services at any time for violations of these terms or for any other reason at our discretion.</p>
+
+<h2>10. Governing Law</h2>
+<p>These terms are governed by the laws of the State of North Carolina, without regard to conflict of law principles.</p>
+
+<h2>11. Contact</h2>
+<p>For questions about these Terms and Conditions:</p>
+<p>Global Majority Group<br>
+Email: <a href="mailto:brandon@globalmajoritygroup.com">brandon@globalmajoritygroup.com</a><br>
+Phone: (336) 389-8116</p>
+
+<div class="footer">
+<p>&copy; 2026 Global Majority Group. All rights reserved.</p>
+</div>
+</div>
+</body>
+</html>
+`);
+  }
+
   // ═══════════════════════════════════════════════════════════════════════
   // ⬡B:AIR:REACH.API.ROUTER:CODE:routing.text.chat:USER→REACH→AIR→AGENTS→MODEL→USER:T8:v1.5.0:20260213:r1o2t⬡ /api/router - MAIN AIR CHAT
   // 1A Shell sends { message, history } and gets back { response }
