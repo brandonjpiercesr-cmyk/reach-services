@@ -11,7 +11,7 @@
  * ╚══════════════════════════════════════════════════════════════════════════════╝
  *
  * FILE: worker.js
- * VERSION: v1.5.0-REACH-CHARLIE
+ * VERSION: v1.9.1-REACH-DELTA (OMI auth + heartbeat + logger)
  * ABCD: BOTH
  * CREATED: Feb 13, 2026
  * UPDATED: Feb 13, 2026
@@ -2222,6 +2222,20 @@ Phone: (336) 389-8116</p>
   // ⬡B:AIR:REACH.API.OMI_MANIFEST:CODE:senses.omi.registration:OMI→REACH→OMI:T7:v1.5.0:20260213:o1m2m⬡ /api/omi/manifest
   // Returns the manifest JSON so OMI recognizes ABA as an app
   // ═══════════════════════════════════════════════════════════════════════
+  
+  // ████████████████████████████████████████████████████████████████████████████
+  // ██ /api/omi/auth — OMI HEALTH CHECK (DO NOT REMOVE - BREAKS OMI)          ██
+  // ████████████████████████████████████████████████████████████████████████████
+  if (path === '/api/omi/auth') {
+    console.log('[OMI AUTH] Health check at ' + new Date().toISOString());
+    return jsonResponse(res, 200, {
+      authenticated: true,
+      app_id: OMI_APP_ID || 'aba-intelligence-layer',
+      status: 'active',
+      timestamp: new Date().toISOString()
+    });
+  }
+
   if (path === '/api/omi/manifest' || path === '/api/omi/manifest.json') {
     return jsonResponse(res, 200, {
       id: OMI_APP_ID,
@@ -2246,6 +2260,36 @@ Phone: (336) 389-8116</p>
     try {
       const body = await parseBody(req);
       console.log('[OMI] Webhook received:', JSON.stringify(body).substring(0, 200));
+
+      // ═══ REQUEST LOGGER - stores every incoming OMI request for debugging ═══
+      const logEntry = {
+        ts: new Date().toISOString(),
+        url: req.url || 'unknown',
+        body_preview: JSON.stringify(body).slice(0, 1000),
+        headers: { 'user-agent': req.headers?.get?.('user-agent') || 'n/a' }
+      };
+      try {
+        await httpsRequest({
+          hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+          path: '/rest/v1/aba_memory',
+          method: 'POST',
+          headers: {
+            'apikey': SUPABASE_KEY || SUPABASE_ANON,
+            'Authorization': 'Bearer ' + (SUPABASE_KEY || SUPABASE_ANON),
+            'Content-Type': 'application/json',
+            'Prefer': 'return=minimal'
+          }
+        }, JSON.stringify({
+          content: 'OMI REQUEST LOG: ' + JSON.stringify(logEntry),
+          memory_type: 'system',
+          source: 'omi_request_log',
+          importance: 2,
+          is_system: true,
+          tags: ['omi', 'request_log', 'debug']
+        }));
+        console.log('[LOG] Stored OMI request');
+      } catch(le) { console.log('[LOG] Failed:', le.message); }
+
 
       const transcript = body.transcript || body.text || body.segments?.map(s => s.text).join(' ') || JSON.stringify(body);
       const timestamp = body.timestamp || new Date().toISOString();
@@ -2991,3 +3035,15 @@ httpServer.listen(PORT, '0.0.0.0', () => {
 });
 
 // ⬡B:AIR:REACH.SERVER.EOF:CODE:infrastructure.end.file:REACH:T10:v1.5.0:20260213:e1o2f⬡ END OF REACH v1.5.0
+
+// ████████████████████████████████████████████████████████████████████████████
+// ██ HEARTBEAT - DO NOT REMOVE (Render free tier sleeps without this)        ██
+// ████████████████████████████████████████████████████████████████████████████
+setInterval(async () => {
+  try {
+    const https = require('https');
+    https.get('https://aba-reach.onrender.com/', () => {});
+    console.log('[♥] Heartbeat at ' + new Date().toISOString());
+  } catch (e) {}
+}, 60000);
+console.log('[♥] 60s heartbeat initialized');
