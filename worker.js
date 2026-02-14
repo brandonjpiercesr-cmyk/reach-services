@@ -259,7 +259,7 @@ const REACH_URL = process.env.REACH_URL || 'https://aba-reach.onrender.com';
 
 // ⬡B:AIR:REACH.SERVER.STARTUP:CODE:infrastructure.logging.boot:AIR→REACH:T10:v1.5.0:20260213:b0o1t⬡
 console.log('═══════════════════════════════════════════════════════════');
-console.log('[ABA REACH v2.5.1] FULL HIERARCHY + SIGILS + API ROUTES');
+console.log('[ABA REACH v2.6.0] FULL HIERARCHY + SIGILS + API ROUTES');
 console.log('[HIERARCHY] L6:AIR > L5:REACH > L4:VOICE,SMS,EMAIL,OMI > L3:VARA,CARA,IMAN,TASTE');
 console.log('[AIR] Hardcoded agents: LUKE, COLE, JUDE, PACK');
 console.log('[AIR] PRIMARY: Gemini Flash 2.0 | BACKUP: Claude Haiku');
@@ -594,59 +594,158 @@ async function storeToBrain(data) {
 // ⬡B:ABCD:ABAOS:MEMORY.STORE⬡
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// ⬡B:ABCD:BOTH:OMI.AIR.ROUTER:v2.5.0:20260214⬡
-// OMI transcripts now route through AIR for processing
-// Pattern: OMI → AIR → Agent → Action
+// ⬡B:ABCD:ABAOS:OMI.PROACTIVE.PROCESSOR:v2.6.0:20260214⬡
+// PROACTIVE OMI PROCESSING - ABA analyzes EVERYTHING and decides what to do
+// No keyword required - ABA just KNOWS
 // ═══════════════════════════════════════════════════════════════════════════════
 async function processOMIThroughAIR(transcript, userId) {
-  console.log('[OMI→AIR] Processing transcript through AIR...');
+  console.log('[OMI→AIR] PROACTIVE processing - analyzing transcript...');
   
-  // Check if transcript contains ABA command
-  const lowerTranscript = transcript.toLowerCase();
-  
-  if (lowerTranscript.includes('aba') || lowerTranscript.includes('hey aba') || 
-      lowerTranscript.includes('aba,') || lowerTranscript.includes('aba send')) {
-    console.log('[OMI→AIR] ABA command detected, routing to AIR_process');
-    
-    // Extract the command after "ABA"
-    const abaIndex = lowerTranscript.indexOf('aba');
-    const command = transcript.substring(abaIndex + 4).trim();
-    
-    if (command.length > 5) {
-      // Create a pseudo caller identity for OMI commands
-      const omiCaller = {
-        name: 'Brandon',
-        role: 'owner',
-        trust: 'T10',
-        source: 'omi',
-        phone: 'omi-' + userId
-      };
-      
-      // Route through AIR
-      try {
-        const result = await AIR_process(command, [], omiCaller, null);
-        
-        // Log the AIR response
-        await storeToBrain({
-          content: 'OMI→AIR COMMAND: "' + command + '" | AIR Response: "' + (result.response || '').substring(0, 200) + '"',
-          memory_type: 'omi_air_command',
-          categories: ['omi', 'air', 'command'],
-          importance: 7,
-          source: 'omi_air_' + Date.now(),
-          tags: ['omi', 'air', 'command']
-        });
-        
-        console.log('[OMI→AIR] Command processed:', result.response?.substring(0, 100));
-        return result;
-      } catch (e) {
-        console.log('[OMI→AIR] Error:', e.message);
-      }
-    }
+  // Skip very short or meaningless transcripts
+  if (!transcript || transcript.length < 20) {
+    console.log('[OMI→AIR] Transcript too short, skipping');
+    return null;
   }
   
-  return null;
+  // Skip common noise patterns
+  const lowerTranscript = transcript.toLowerCase();
+  const noisePatterns = ['yeah', 'okay', 'mhmm', 'uh huh', 'alright', 'hi', 'hello', 'bye', 'see you'];
+  if (noisePatterns.some(p => lowerTranscript.trim() === p)) {
+    console.log('[OMI→AIR] Noise pattern, skipping');
+    return null;
+  }
+  
+  // Brandon's caller identity for OMI commands
+  const omiCaller = {
+    name: 'Brandon',
+    role: 'owner',
+    trust: 'T10',
+    source: 'omi_proactive',
+    phone: 'omi-' + userId
+  };
+  
+  try {
+    // ═══════════════════════════════════════════════════════════════════════════
+    // STEP 1: Send to LLM to analyze what action (if any) should be taken
+    // ═══════════════════════════════════════════════════════════════════════════
+    const analysisPrompt = `You are ABA's proactive ear. Brandon is wearing an OMI pendant that captures ambient audio.
+You just heard this transcript:
+
+"${transcript}"
+
+Analyze this and decide:
+1. Is this a COMMAND for ABA to execute? (send email, check calendar, call someone, etc.)
+2. Is this IMPORTANT CONTEXT ABA should remember? (decisions, names, dates, ideas)
+3. Is this just casual conversation with no action needed?
+
+Respond in JSON format:
+{
+  "action_type": "execute|remember|ignore",
+  "confidence": 0.0-1.0,
+  "command": "the specific command to execute (if action_type=execute)",
+  "context_to_remember": "important info to store (if action_type=remember)",
+  "reasoning": "brief explanation"
 }
 
+Be AGGRESSIVE about detecting commands. If Brandon says ANYTHING like:
+- "send", "email", "text", "call", "remind", "schedule", "check", "look up"
+- "ABA" followed by anything
+- imperatives directed at an assistant
+
+Then action_type should be "execute".`;
+
+    const analysisResult = await httpsRequest({
+      hostname: 'generativelanguage.googleapis.com',
+      path: '/v1beta/models/gemini-2.0-flash:generateContent?key=' + GEMINI_KEY,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    }, JSON.stringify({
+      contents: [{ parts: [{ text: analysisPrompt }] }],
+      generationConfig: { temperature: 0.3, maxOutputTokens: 500 }
+    }));
+    
+    if (analysisResult.status !== 200) {
+      console.log('[OMI→AIR] Analysis failed:', analysisResult.status);
+      return null;
+    }
+    
+    const analysisData = JSON.parse(analysisResult.data.toString());
+    const analysisText = analysisData.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    
+    // Parse JSON from response
+    let analysis;
+    try {
+      const jsonMatch = analysisText.match(/\{[\s\S]*\}/);
+      analysis = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
+    } catch (e) {
+      console.log('[OMI→AIR] Could not parse analysis:', e.message);
+      return null;
+    }
+    
+    if (!analysis) {
+      console.log('[OMI→AIR] No valid analysis returned');
+      return null;
+    }
+    
+    console.log('[OMI→AIR] Analysis:', analysis.action_type, '| Confidence:', analysis.confidence);
+    
+    // ═══════════════════════════════════════════════════════════════════════════
+    // STEP 2: Take action based on analysis
+    // ═══════════════════════════════════════════════════════════════════════════
+    
+    if (analysis.action_type === 'execute' && analysis.confidence >= 0.6) {
+      // This is a command - route through AIR for execution
+      console.log('[OMI→AIR] EXECUTING COMMAND:', analysis.command);
+      
+      const result = await AIR_process(analysis.command || transcript, [], omiCaller, null);
+      
+      // Log the execution
+      await storeToBrain({
+        content: 'OMI PROACTIVE EXECUTION: Heard "' + transcript.substring(0, 200) + '" | Command: "' + (analysis.command || 'direct') + '" | Result: "' + (result.response || '').substring(0, 150) + '"',
+        memory_type: 'omi_proactive_execution',
+        categories: ['omi', 'proactive', 'execution'],
+        importance: 8,
+        source: 'omi_proactive_' + Date.now(),
+        tags: ['omi', 'proactive', 'executed', 'action']
+      });
+      
+      // Broadcast to Command Center
+      broadcastToCommandCenter({
+        type: 'omi_proactive_execution',
+        heard: transcript.substring(0, 100),
+        command: analysis.command,
+        result: result.response?.substring(0, 100),
+        timestamp: new Date().toISOString()
+      });
+      
+      return result;
+      
+    } else if (analysis.action_type === 'remember' && analysis.confidence >= 0.5) {
+      // Important context - store with high importance
+      console.log('[OMI→AIR] REMEMBERING:', analysis.context_to_remember?.substring(0, 50));
+      
+      await storeToBrain({
+        content: 'OMI PROACTIVE MEMORY: ' + (analysis.context_to_remember || transcript.substring(0, 500)),
+        memory_type: 'omi_proactive_context',
+        categories: ['omi', 'proactive', 'context', 'important'],
+        importance: 6,
+        source: 'omi_proactive_' + Date.now(),
+        tags: ['omi', 'proactive', 'context', 'remember']
+      });
+      
+      return { action: 'remembered', context: analysis.context_to_remember };
+      
+    } else {
+      // Ignore - just casual conversation
+      console.log('[OMI→AIR] Ignoring - casual conversation');
+      return null;
+    }
+    
+  } catch (e) {
+    console.log('[OMI→AIR] Proactive processing error:', e.message);
+    return null;
+  }
+}
 
 async function STORE_conversation(callerIdentity, userSaid, abaResponse, conversationId) {
   console.log('[STORE] Saving conversation to brain');
@@ -3699,7 +3798,7 @@ async function postCallAutomation(session) {
     '<h3>Conversation Summary</h3>' +
     '<p>' + topicsDiscussed.replace(/\|/g, '<br>') + '</p>' +
     '<hr style="border:1px solid #e5e7eb">' +
-    '<p style="color:#9ca3af;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v2.5.1</p>' +
+    '<p style="color:#9ca3af;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v2.6.0</p>' +
     '</div>';
   
   const emailResult = await sendEmailFromCall(
@@ -3721,7 +3820,7 @@ async function postCallAutomation(session) {
   const notifyResult = await sendSMSFromCall('+13363898116', brandonNotify);
   
   // ALSO email Brandon
-  const brandonEmailHtml = '<div style="font-family:system-ui;max-width:600px;margin:0 auto"><h2>ABA Call Report</h2><p><strong>Caller:</strong> ' + callerName + '</p><p><strong>Phone:</strong> ' + callerNumber + '</p><p><strong>Duration:</strong> ' + turnCount + ' turns</p><p><strong>Topics:</strong> ' + topicsDiscussed.substring(0, 300) + '</p><p style="color:#888;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v2.5.1</p></div>';
+  const brandonEmailHtml = '<div style="font-family:system-ui;max-width:600px;margin:0 auto"><h2>ABA Call Report</h2><p><strong>Caller:</strong> ' + callerName + '</p><p><strong>Phone:</strong> ' + callerNumber + '</p><p><strong>Duration:</strong> ' + turnCount + ' turns</p><p><strong>Topics:</strong> ' + topicsDiscussed.substring(0, 300) + '</p><p style="color:#888;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v2.6.0</p></div>';
   const brandonEmail = await sendEmailFromCall('brandonjpiercesr@gmail.com', 'Brandon', 'ABA Call Report: ' + callerName + ' called', brandonEmailHtml);
   if (brandonEmail.success) console.log('[POST-CALL] Brandon email report sent');
   if (notifyResult.success) {
@@ -4825,7 +4924,7 @@ const httpServer = http.createServer(async (req, res) => {
   if (path === '/' || path === '/health') {
     return jsonResponse(res, 200, {
       status: 'ALIVE',
-      service: 'ABA REACH v2.5.1',
+      service: 'ABA REACH v2.6.0',
       mode: 'FULL API + VOICE + OMI',
       air: 'ABA Intellectual Role - CENTRAL ORCHESTRATOR',
       models: { primary: 'Gemini Flash 2.0', backup: 'Claude Haiku', speed_fallback: 'Groq' },
@@ -7485,7 +7584,7 @@ ccWss.on('connection', (ws, req) => {
   // Send welcome message with system status
   ws.send(JSON.stringify({
     type: 'connected',
-    service: 'ABA REACH v2.5.1 - AUTONOMY LAYER ACTIVE',
+    service: 'ABA REACH v2.6.0 - AUTONOMY LAYER ACTIVE',
     timestamp: new Date().toISOString(),
     agents: ['AIR', 'VARA', 'LUKE', 'COLE', 'JUDE', 'PACK', 'IMAN', 'TASTE', 'DIAL', 'PULSE', 'SAGE'],
     features: ['proactive_email', 'deadline_alerts', 'auto_escalation', 'device_sync']
@@ -7892,7 +7991,7 @@ function getHeartbeatStatus() {
 httpServer.listen(PORT, '0.0.0.0', () => {
   console.log('');
   console.log('═══════════════════════════════════════════════════════════');
-  console.log('[ABA REACH v2.5.1] LIVE on port ' + PORT);
+  console.log('[ABA REACH v2.6.0] LIVE on port ' + PORT);
   console.log('═══════════════════════════════════════════════════════════');
   console.log('[AIR] ABA Intellectual Role - ONLINE');
   console.log('[AIR] PRIMARY: Gemini Flash 2.0');
