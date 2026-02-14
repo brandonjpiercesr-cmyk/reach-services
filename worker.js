@@ -2866,11 +2866,11 @@ async function getActiveDevices(userId) {
 async function AIR_DISPATCH(lukeAnalysis, judeResult, callerIdentity) {
   console.log('[AIR DISPATCH] Checking if agents can handle this...');
   
-  const query = lukeAnalysis.raw.toLowerCase();
+  const query = (lukeAnalysis?.raw || '').toLowerCase();
   const intent = lukeAnalysis.intent;
   
   // Check JUDE's findings for relevant agents
-  const agentNames = judeResult.agents.map(a => (a.name || '').toLowerCase());
+  const agentNames = (judeResult?.agents || []).map(a => (a.name || '').toLowerCase());
   console.log('[AIR DISPATCH] JUDE found agents:', agentNames.join(', ') || 'none');
   
     // ⬡B:AIR:REACH.DISPATCH.CLIMATE:ROUTE:weather:v2.4.1:20260214⬡
