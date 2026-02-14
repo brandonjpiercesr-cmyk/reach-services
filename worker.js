@@ -2378,11 +2378,47 @@ Phone: (336) 389-8116</p>
     try {
       const urlObj = new URL('http://localhost' + req.url);
       const code = urlObj.searchParams.get('code');
+      const grantIdDirect = urlObj.searchParams.get('grant_id');
       const state = urlObj.searchParams.get('state');
+      const success = urlObj.searchParams.get('success');
       
-      if (!code) {
+      // Nylas may return grant_id directly (hosted auth) or code (custom auth)
+      if (grantIdDirect && success === 'true') {
+        // Direct grant - store it immediately
+        const email = urlObj.searchParams.get('email') || 'claudette@globalmajoritygroup.com';
+        const provider = urlObj.searchParams.get('provider') || 'google';
+        console.log('[NYLAS] Direct grant received: ' + grantIdDirect + ' for ' + email);
+        
+        if (SUPABASE_KEY) {
+          await httpsRequest({
+            hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+            path: '/rest/v1/aba_memory',
+            method: 'POST',
+            headers: {
+              'apikey': SUPABASE_KEY,
+              'Authorization': 'Bearer ' + SUPABASE_KEY,
+              'Content-Type': 'application/json',
+              'Prefer': 'return=minimal'
+            }
+          }, JSON.stringify({
+            content: 'NYLAS GRANT: ' + grantIdDirect + ' | Email: ' + email + ' | Provider: ' + provider + ' | Connected: ' + new Date().toISOString(),
+            memory_type: 'system',
+            categories: ['nylas', 'grant', 'email'],
+            importance: 10,
+            is_system: true,
+            source: 'nylas_grant_' + grantIdDirect,
+            tags: ['nylas', 'grant', 'email', 'iman', email.replace('@','_at_')]
+          }));
+        }
+        
+        _cachedGrantId = grantIdDirect;
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        return res.end('<html><body style="font-family:system-ui;text-align:center;padding:60px;background:#0a0a0a;color:#fff"><h1 style="color:#00ff88">ABA Email Connected!</h1><p style="font-size:20px">Grant ID: ' + grantIdDirect + '</p><p>Email: ' + email + '</p><p style="color:#888">IMAN (Intelligent Mail Agent Nexus) is now active. You can close this window.</p></body></html>');
+      }
+      
+      if (!code && !grantIdDirect) {
         res.writeHead(400, { 'Content-Type': 'text/html' });
-        return res.end('<h1>Error: No authorization code received</h1>');
+        return res.end('<h1>Error: No authorization code or grant received</h1>');
       }
       
       // Exchange code for grant
