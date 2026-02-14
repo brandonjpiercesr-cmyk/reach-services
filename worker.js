@@ -161,17 +161,75 @@ function httpsRequest(options, postData) {
 
 // ⬡B:AIR:REACH.VOICE.CALLER_LOOKUP:CODE:voice.identity.resolver:PHONE→BRAIN→IDENTITY:T10:v2.0.2:20260214:c1l2k⬡
 // Look up caller identity from phone number
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:AIR:REACH.VOICE.CONTACTS:CONFIG:contacts.registry:v2.1.0:20260214⬡
+// CONTACT REGISTRY - Known callers with trust levels
+// L3: Agent-level configuration
+// ═══════════════════════════════════════════════════════════════════════════════
+const CONTACT_REGISTRY = {
+  // Brandon Pierce - THE CREATOR
+  '+13363898116': {
+    name: 'Brandon',
+    role: 'owner',
+    trust: 'T10',
+    access: 'full',
+    greeting: "Hey Brandon! Good to hear from you.",
+    promptAddon: 'You are speaking with Brandon Pierce, your creator. FULL access to everything. Be direct, warm, efficient. He values his time.'
+  },
+  // Dr. Eric Lane Sr. - Senior Advisor
+  '+13236007676': {
+    name: 'Dr. Eric',
+    role: 'advisor', 
+    trust: 'T9',
+    access: 'high',
+    greeting: "Dr. Eric, wonderful to hear from you.",
+    promptAddon: 'You are speaking with Dr. Eric Lane Sr., senior advisor and co-founder of Global Majority Group. Treat with respect and deference.'
+  },
+  // BJ Pierce - Team
+  '+19803958662': {
+    name: 'BJ',
+    role: 'team',
+    trust: 'T8',
+    access: 'limited',
+    greeting: "Hey BJ! Good to hear from you.",
+    promptAddon: 'This is BJ Pierce, Brandon\'s brother and team member. Be warm and helpful. Share general updates but NOT financial details or passwords.'
+  },
+  // CJ Moore - Team
+  '+19199170686': {
+    name: 'CJ',
+    role: 'team',
+    trust: 'T7',
+    access: 'limited',
+    greeting: "Hey CJ! Great to hear from you.",
+    promptAddon: 'This is CJ Moore, team member. Be warm and helpful. Share general updates but NOT financial details or passwords.'
+  }
+};
+
+// ⬡B:AIR:REACH.VOICE.LOOKUP:FUNC:contacts.resolver:v2.1.0:20260214⬡
 async function lookupCallerByPhone(phoneNumber) {
-  console.log('[CALLER LOOKUP] Looking up:', phoneNumber);
+  console.log('[CONTACT LOOKUP] Looking up:', phoneNumber);
   
-  // Normalize phone number (remove +1, spaces, dashes)
-  const normalized = phoneNumber.replace(/[^0-9]/g, '').slice(-10);
+  // Normalize phone number
+  const normalized = (phoneNumber || '').replace(/[^0-9]/g, '');
+  const last10 = normalized.slice(-10);
+  const withPlus1 = '+1' + last10;
+  const withPlus = '+' + normalized;
   
+  // Check hardcoded registry (fastest)
+  for (const [regPhone, contact] of Object.entries(CONTACT_REGISTRY)) {
+    const regNorm = regPhone.replace(/[^0-9]/g, '');
+    if (regNorm === normalized || regNorm.slice(-10) === last10) {
+      console.log('[CONTACT LOOKUP] Found in registry:', contact.name);
+      return { ...contact, phone: phoneNumber, found: true };
+    }
+  }
+  
+  // Search brain for contact by phone
   try {
-    // Search brain for contact with this phone number
     const result = await httpsRequest({
       hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-      path: '/rest/v1/aba_memory?content=ilike.*' + normalized + '*&memory_type=eq.contact&limit=1',
+      path: '/rest/v1/aba_memory?memory_type=eq.contact&content=ilike.*' + last10 + '*&limit=1',
       method: 'GET',
       headers: {
         'apikey': SUPABASE_ANON,
@@ -182,35 +240,273 @@ async function lookupCallerByPhone(phoneNumber) {
     if (result.status === 200) {
       const data = JSON.parse(result.data.toString());
       if (data.length > 0) {
-        const contact = data[0];
-        // Try to extract name from content
-        const contentStr = contact.content || '';
-        let name = 'Contact';
-        let role = 'team_member';
+        const contact = data[0].content;
+        const nameMatch = contact.match(/CONTACT:\s*([^|]+)/);
+        const roleMatch = contact.match(/Role:\s*(\w+)/);
+        const trustMatch = contact.match(/Trust:\s*(\w+)/);
         
-        // Simple parsing - look for name patterns
-        if (contentStr.toLowerCase().includes('brandon')) {
-          name = 'Brandon';
-          role = 'owner';
-        } else if (contentStr.toLowerCase().includes('eric')) {
-          name = 'Dr. Eric Lane Sr.';
-          role = 'advisor';
-        } else if (contentStr.toLowerCase().includes('bj')) {
-          name = 'BJ Pierce';
-          role = 'team';
-        } else if (contentStr.toLowerCase().includes('cj')) {
-          name = 'CJ Moore';
-          role = 'team';
-        }
-        
-        return { name, role, phone: phoneNumber, found: true };
+        return {
+          name: nameMatch ? nameMatch[1].trim() : 'Contact',
+          role: roleMatch ? roleMatch[1] : 'contact',
+          trust: trustMatch ? trustMatch[1] : 'T5',
+          access: 'limited',
+          greeting: 'Hello! Good to hear from you.',
+          promptAddon: 'This is a known contact from the brain. Be friendly and helpful.',
+          phone: phoneNumber,
+          found: true
+        };
       }
     }
   } catch (e) {
-    console.log('[CALLER LOOKUP] Error:', e.message);
+    console.log('[CONTACT LOOKUP] Brain error:', e.message);
   }
   
-  return { name: 'Caller', role: 'unknown', phone: phoneNumber, found: false };
+  // Unknown caller
+  return {
+    name: 'Caller',
+    role: 'unknown',
+    trust: 'T2',
+    access: 'guarded',
+    greeting: "Hello, this is ABA. May I ask who I have the pleasure of speaking with?",
+    promptAddon: 'This is an UNKNOWN caller. Be friendly but guarded. Do NOT share sensitive information until identity is confirmed.',
+    phone: phoneNumber,
+    found: false
+  };
+}
+
+
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:AIR:REACH.AGENTS.PLAY:FUNC:sports.espn:v2.1.0:20260214⬡
+// PLAY Agent - Performance and Live Activity Yielder
+// L3: Manager-level agent for sports scores
+// Uses ESPN API (no auth required)
+// ═══════════════════════════════════════════════════════════════════════════════
+async function PLAY_getScores(query) {
+  console.log('[PLAY] Sports query:', query);
+  
+  const now = new Date();
+  const dateStr = now.toISOString().split('T')[0].replace(/-/g, '');
+  
+  // Determine sport and team from query
+  const queryLower = query.toLowerCase();
+  let sport = 'basketball/nba';
+  let teamSearch = '';
+  
+  if (queryLower.includes('laker')) { teamSearch = 'lakers'; sport = 'basketball/nba'; }
+  else if (queryLower.includes('celtics')) { teamSearch = 'celtics'; sport = 'basketball/nba'; }
+  else if (queryLower.includes('warrior')) { teamSearch = 'warriors'; sport = 'basketball/nba'; }
+  else if (queryLower.includes('heat')) { teamSearch = 'heat'; sport = 'basketball/nba'; }
+  else if (queryLower.includes('nfl') || queryLower.includes('football')) { sport = 'football/nfl'; }
+  else if (queryLower.includes('baseball') || queryLower.includes('mlb')) { sport = 'baseball/mlb'; }
+  
+  try {
+    const result = await httpsRequest({
+      hostname: 'site.api.espn.com',
+      path: '/apis/site/v2/sports/' + sport + '/scoreboard?dates=' + dateStr,
+      method: 'GET',
+      headers: { 'Accept': 'application/json' }
+    });
+    
+    if (result.status === 200) {
+      const data = JSON.parse(result.data.toString());
+      const events = data.events || [];
+      
+      // Find team-specific game
+      for (const event of events) {
+        const name = (event.name || '').toLowerCase();
+        if (teamSearch && name.includes(teamSearch)) {
+          const comp = event.competitions?.[0];
+          const status = comp?.status?.type?.description || 'Unknown';
+          const teams = comp?.competitors || [];
+          
+          const home = teams.find(t => t.homeAway === 'home');
+          const away = teams.find(t => t.homeAway === 'away');
+          
+          if (home && away) {
+            const homeName = home.team?.shortDisplayName || home.team?.name;
+            const awayName = away.team?.shortDisplayName || away.team?.name;
+            const homeScore = home.score || '0';
+            const awayScore = away.score || '0';
+            
+            // VARA-style warm response
+            if (status === 'Final') {
+              const winner = parseInt(homeScore) > parseInt(awayScore) ? homeName : awayName;
+              const loser = parseInt(homeScore) > parseInt(awayScore) ? awayName : homeName;
+              const winScore = Math.max(parseInt(homeScore), parseInt(awayScore));
+              const loseScore = Math.min(parseInt(homeScore), parseInt(awayScore));
+              return `The ${winner} took it! Final score was ${winScore} to ${loseScore} against the ${loser}.`;
+            } else if (status === 'In Progress') {
+              return 'The game is live right now! ' + homeName + ' ' + homeScore + ', ' + awayName + ' ' + awayScore + '. Want me to keep you posted?';
+            } else {
+              return 'The ' + homeName + ' are scheduled to play the ' + awayName + ' ' + status.toLowerCase() + '. I can remind you when it starts if you like.';
+            }
+          }
+        }
+      }
+      
+      // No specific game found
+      if (events.length > 0) {
+        return 'I found ' + events.length + ' games today but I did not see your team playing. Would you like me to check a different team?';
+      }
+      return 'It looks like there are no games scheduled right now. Would you like me to check a specific team or date?';
+    }
+    
+    return 'I had a little trouble reaching the sports data. Let me try again in a moment.';
+    
+  } catch (e) {
+    console.log('[PLAY] Error:', e.message);
+    return 'I could not get the scores right now, but I will keep trying. What else can I help you with?';
+  }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:AIR:REACH.AGENTS.IMAN:FUNC:email.read:v2.1.0:20260214⬡
+// IMAN Agent - Inbox Management Agent Navigator (READ capability)
+// L3: Manager-level agent for email
+// Uses Gmail API with stored OAuth tokens
+// ═══════════════════════════════════════════════════════════════════════════════
+async function IMAN_readEmails(callerIdentity) {
+  console.log('[IMAN] Reading emails for:', callerIdentity?.name || 'unknown');
+  
+  // Only allow for high-trust callers
+  if (!callerIdentity || !['T10', 'T9', 'T8'].includes(callerIdentity.trust)) {
+    return { allowed: false, summary: "I would be happy to share email updates once I know who I am speaking with. May I ask your name?" };
+  }
+  
+  try {
+    // Get Gmail tokens from brain
+    const tokenResult = await httpsRequest({
+      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+      path: '/rest/v1/aba_memory?memory_type=eq.gmail_credentials&limit=1&order=created_at.desc',
+      method: 'GET',
+      headers: {
+        'apikey': SUPABASE_ANON,
+        'Authorization': 'Bearer ' + SUPABASE_ANON
+      }
+    });
+    
+    if (tokenResult.status === 200) {
+      const tokens = JSON.parse(tokenResult.data.toString());
+      if (tokens.length > 0 && tokens[0].content) {
+        let tokenData;
+        try {
+          tokenData = JSON.parse(tokens[0].content);
+        } catch (e) {
+          // Content might be the token directly
+          tokenData = { access_token: tokens[0].content };
+        }
+        
+        const accessToken = tokenData.access_token;
+        if (!accessToken) {
+          return { allowed: true, summary: "I need to reconnect to email. Could you authorize Gmail access when you get a chance?" };
+        }
+        
+        // Fetch unread emails
+        const gmailResult = await httpsRequest({
+          hostname: 'gmail.googleapis.com',
+          path: '/gmail/v1/users/me/messages?maxResults=5&q=is:unread',
+          method: 'GET',
+          headers: {
+            'Authorization': 'Bearer ' + accessToken,
+            'Accept': 'application/json'
+          }
+        });
+        
+        if (gmailResult.status === 200) {
+          const gmailData = JSON.parse(gmailResult.data.toString());
+          const messages = gmailData.messages || [];
+          
+          if (messages.length === 0) {
+            return { allowed: true, count: 0, summary: "Good news - your inbox is clear. No unread emails waiting for you." };
+          }
+          
+          // Get first email details
+          const msgResult = await httpsRequest({
+            hostname: 'gmail.googleapis.com',
+            path: '/gmail/v1/users/me/messages/' + messages[0].id + '?format=metadata&metadataHeaders=From&metadataHeaders=Subject',
+            method: 'GET',
+            headers: {
+              'Authorization': 'Bearer ' + accessToken,
+              'Accept': 'application/json'
+            }
+          });
+          
+          if (msgResult.status === 200) {
+            const msgData = JSON.parse(msgResult.data.toString());
+            const headers = msgData.payload?.headers || [];
+            const from = headers.find(h => h.name === 'From')?.value || 'Someone';
+            const subject = headers.find(h => h.name === 'Subject')?.value || 'No subject';
+            
+            // Extract just the name from email address
+            const senderMatch = from.match(/^([^<]+)/);
+            const senderName = senderMatch ? senderMatch[1].trim().replace(/"/g, '') : from.split('@')[0];
+            
+            // VARA-style warm response
+            if (messages.length === 1) {
+              return { allowed: true, count: 1, summary: 'You have one unread email - it is from ' + senderName + ' about "' + subject + '". Would you like me to read it or take care of it for you?' };
+            } else {
+              return { allowed: true, count: messages.length, summary: 'You have ' + messages.length + ' unread emails. The most recent one is from ' + senderName + ' regarding "' + subject + '". Want me to go through them with you?' };
+            }
+          }
+        } else if (gmailResult.status === 401) {
+          return { allowed: true, needsReauth: true, summary: "My email connection needs to be refreshed. Could you reauthorize Gmail when you have a moment?" };
+        }
+      }
+    }
+    
+    return { allowed: true, summary: "I do not have email access set up yet. Would you like me to walk you through connecting your Gmail?" };
+    
+  } catch (e) {
+    console.log('[IMAN] Error:', e.message);
+    return { allowed: true, summary: "I had a brief hiccup checking email. Let me try that again." };
+  }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:AIR:REACH.VOICE.PROACTIVE:FUNC:greeting.smart:v2.1.0:20260214⬡
+// Build proactive greeting based on caller and context
+// VARA-style: Warm, butler-like, genuinely caring
+// ═══════════════════════════════════════════════════════════════════════════════
+async function buildProactiveGreeting(callerIdentity) {
+  console.log('[PROACTIVE] Building greeting for:', callerIdentity?.name || 'unknown');
+  
+  // Unknown callers get simple warm greeting
+  if (!callerIdentity || !callerIdentity.found || callerIdentity.role === 'unknown') {
+    return "Hello, this is ABA. How may I help you today?";
+  }
+  
+  // Start with personalized greeting
+  let greeting = callerIdentity.greeting || ('Hello ' + callerIdentity.name + '!');
+  let contextParts = [];
+  
+  // Try to get context for high-trust callers
+  if (['T10', 'T9'].includes(callerIdentity.trust)) {
+    try {
+      const emailResult = await IMAN_readEmails(callerIdentity);
+      if (emailResult.allowed && emailResult.count > 0) {
+        if (emailResult.count === 1) {
+          contextParts.push('you have one email waiting');
+        } else {
+          contextParts.push('you have ' + emailResult.count + ' emails waiting');
+        }
+      }
+    } catch (e) {
+      console.log('[PROACTIVE] Email check skipped:', e.message);
+    }
+  }
+  
+  // Build final greeting in VARA warm butler style
+  if (contextParts.length > 0) {
+    greeting += ' Just so you know - ' + contextParts.join(', and ') + '. But first, what can I help you with today?';
+  } else {
+    greeting += ' What can I help you with?';
+  }
+  
+  return greeting;
 }
 
 async function LUKE_process(userSaid) {
@@ -2108,21 +2404,7 @@ async function LOG_call(session, event, data) {
  * ╚══════════════════════════════════════════════════════════════════════════════╝
  */
 // ⬡B:AIR:REACH.VOICE.CONTACTS:CODE:identity.registry.lookup:TWILIO→REACH→AIR:T9:v1.6.0:20260213:c1r2g⬡
-const CONTACT_REGISTRY = {
-  // ⬡B:AIR:REACH.VOICE.REGISTRY:CONFIG:voice.contacts.known:REACH:T10:v1.9.0:20260214:r1e2g⬡
-  // Brandon Pierce - THE HUMAN. Full access.
-  '+13363898116': { name: 'Brandon', role: 'owner', trust: 'T10', access: 'full',
-    greeting: "Hey Brandon! What's on your mind?",
-    promptAddon: 'You are speaking with Brandon Pierce, your creator. FULL access to everything. Be direct, warm, efficient.' },
-  // BJ Pierce - Brandon's brother, team member
-  '+19803958662': { name: 'BJ', role: 'contact', trust: 'T8', access: 'limited',
-    greeting: "Hey BJ! Good to hear from you. What can I help you with?",
-    promptAddon: 'This is BJ PIERCE, Brandon\'s brother and team member. He has FIVE children. Be warm and helpful. Share general project updates but NEVER share financial details, passwords, API keys, or client information.' },
-  // CJ Moore - Team member
-  '+19199170686': { name: 'CJ', role: 'contact', trust: 'T7', access: 'limited',
-    greeting: "Hey CJ! Great to hear from you. How can I help?",
-    promptAddon: 'This is CJ MOORE, team member. Brandon uses GID + Brand-ON, never Envolve - that is reserved for CJ. Be warm and helpful. Share general project updates but NEVER share financial details, passwords, API keys, or client information.' },
-};
+
 
 // ⬡B:AIR:REACH.VOICE.DEMO:CODE:voice.demo.touchpoints:AIR→VARA→USER:T9:v1.6.0:20260213:d1e2m⬡
 // GUIDED DEMO CALL - Touchpoints that must be hit on every demo call
@@ -3909,13 +4191,64 @@ Phone: (336) 389-8116</p>
       
       // Route through AIR - the central brain
       // Look up caller identity from phone number
-      let callerIdentity = { name: 'Caller', role: 'unknown' };
+      let callerIdentity = { name: 'Caller', role: 'unknown', trust: 'T2' };
       if (callerNumber && callerNumber !== 'unknown') {
         callerIdentity = await lookupCallerByPhone(callerNumber);
       }
       
-      console.log('[AIR VOICE TOOL] Caller identified as:', callerIdentity.name);
+      console.log('[AIR VOICE TOOL] Caller identified as:', callerIdentity.name, 'Trust:', callerIdentity.trust);
       
+      // ⬡B:AIR:REACH.VOICE.ROUTING:LOGIC:agent.dispatch:v2.1.0:20260214⬡
+      // Smart routing - check if this needs a specific agent
+      const msgLower = userMessage.toLowerCase();
+      let agentResponse = null;
+      
+      // PLAY Agent - Sports queries
+      if (msgLower.includes('score') || msgLower.includes('game') || msgLower.includes('laker') || 
+          msgLower.includes('win') || msgLower.includes('play') || msgLower.includes('nba') ||
+          msgLower.includes('sports') || msgLower.includes('basketball')) {
+        console.log('[AIR] Routing to PLAY agent (sports)');
+        agentResponse = await PLAY_getScores(userMessage);
+      }
+      // IMAN Agent - Email queries
+      else if (msgLower.includes('email') || msgLower.includes('inbox') || msgLower.includes('mail') ||
+               msgLower.includes('message') && msgLower.includes('unread')) {
+        console.log('[AIR] Routing to IMAN agent (email)');
+        const emailResult = await IMAN_readEmails(callerIdentity);
+        agentResponse = emailResult.summary;
+      }
+      
+      // If an agent handled it, return that response
+      if (agentResponse) {
+        console.log('[AIR VOICE TOOL] Agent response:', agentResponse);
+        
+        // Broadcast to Command Center
+        broadcastToCommandCenter({
+          type: 'voice_response',
+          source: 'agent',
+          conversation_id: conversationId,
+          aba_said: agentResponse,
+          timestamp: new Date().toISOString()
+        });
+        
+        // Store in brain
+        storeToBrain({
+          content: 'VOICE CALL [' + conversationId + ']: ' + callerIdentity.name + ' asked "' + userMessage + '" | ABA (via agent) responded "' + agentResponse + '"',
+          memory_type: 'voice_transcript',
+          categories: ['voice', 'elevenlabs', 'agent'],
+          importance: 5,
+          source: 'voice_call_' + conversationId,
+          tags: ['voice', 'transcript']
+        }).catch(e => console.log('[BRAIN] Store error:', e.message));
+        
+        return jsonResponse(res, 200, {
+          response: agentResponse,
+          conversation_id: conversationId,
+          caller: callerIdentity.name
+        });
+      }
+      
+      // No specific agent - route through general AIR_process
       // AIR_process expects: (userSaid, history, callerIdentity, demoState)
       const airResponse = await AIR_process(
         userMessage,           // The actual question/request as STRING
