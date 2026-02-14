@@ -3650,13 +3650,13 @@ Phone: (336) 389-8116</p>
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Pause length="1"/>
-  <Say voice="Polly.Matthew" language="en-US">${msg}</Say>
+  <Say voice="Polly.Joanna" language="en-US">${msg}</Say>
   <Pause length="1"/>
-  <Say voice="Polly.Matthew" language="en-US">Press any key to confirm you received this message, or stay on the line to speak with ABA.</Say>
+  <Say voice="Polly.Joanna" language="en-US">Press any key to confirm you received this message, or stay on the line to speak with ABA.</Say>
   <Gather numDigits="1" timeout="10" action="${REACH_URL}/api/escalate/confirm?trace=${traceId}">
-    <Say voice="Polly.Matthew">Waiting for your response.</Say>
+    <Say voice="Polly.Joanna">Waiting for your response.</Say>
   </Gather>
-  <Say voice="Polly.Matthew">No response received. ABA will try again shortly. Goodbye.</Say>
+  <Say voice="Polly.Joanna">No response received. ABA will try again shortly. Goodbye.</Say>
 </Response>`;
     
     res.writeHead(200, { 'Content-Type': 'text/xml' });
@@ -3694,7 +3694,7 @@ Phone: (336) 389-8116</p>
     
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Say voice="Polly.Matthew">Thank you. Your confirmation has been logged. ABA will follow up as needed. Goodbye.</Say>
+  <Say voice="Polly.Joanna">Thank you. Your confirmation has been logged. ABA will follow up as needed. Goodbye.</Say>
 </Response>`;
     
     res.writeHead(200, { 'Content-Type': 'text/xml' });
