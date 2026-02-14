@@ -2371,12 +2371,49 @@ Phone: (336) 389-8116</p>
     try {
       const urlObj = new URL(req.url, 'https://' + req.headers.host);
       const code = urlObj.searchParams.get('code');
+      const grantId = urlObj.searchParams.get('grant_id');
+      const email = urlObj.searchParams.get('email') || 'unknown';
+      const provider = urlObj.searchParams.get('provider') || 'google';
+      const success = urlObj.searchParams.get('success');
       
-      if (!code) {
-        res.writeHead(400, { 'Content-Type': 'text/html' });
-        return res.end('<h1>Missing code parameter</h1>');
+      // FLOW 1: Nylas returned grant_id directly (already authorized)
+      if (grantId && success === 'true') {
+        console.log('[NYLAS] Direct grant callback - grant_id: ' + grantId + ' | email: ' + email);
+        
+        // Store grant in brain
+        if (SUPABASE_KEY) {
+          await httpsRequest({
+            hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+            path: '/rest/v1/aba_memory',
+            method: 'POST',
+            headers: {
+              'apikey': SUPABASE_KEY,
+              'Authorization': 'Bearer ' + SUPABASE_KEY,
+              'Content-Type': 'application/json',
+              'Prefer': 'return=minimal'
+            }
+          }, JSON.stringify({
+            content: 'NYLAS GRANT: ' + grantId + ' | Email: ' + email + ' | Provider: ' + provider + ' | Connected: ' + new Date().toISOString(),
+            memory_type: 'system',
+            categories: ['nylas', 'email', 'grant', 'iman'],
+            importance: 10,
+            is_system: true,
+            source: 'nylas_grant_' + grantId,
+            tags: ['nylas', 'grant', 'email', 'iman', 'active']
+          }));
+        }
+        
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        return res.end('<html><body style="background:#1a1a2e;color:#e0e0ff;font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><div style="text-align:center"><h1 style="color:#4ade80">✅ ABA Email Connected!</h1><p>Grant ID: ' + grantId + '</p><p>Email: ' + email + '</p><p>IMAN (Intelligent Mail Agent Nexus) is now authorized.</p><p style="color:#4ade80;margin-top:20px">You can close this window.</p></div></body></html>');
       }
       
+      // FLOW 2: Nylas returned code for token exchange
+      if (!code && !grantId) {
+        res.writeHead(400, { 'Content-Type': 'text/html' });
+        return res.end('<h1>Missing code or grant_id parameter</h1><p>The OAuth flow did not return expected parameters.</p>');
+      }
+      
+      if (code) {
       // Exchange code for grant
       const tokenResult = await httpsRequest({
         hostname: 'api.us.nylas.com',
@@ -2426,6 +2463,7 @@ Phone: (336) 389-8116</p>
         res.writeHead(400, { 'Content-Type': 'text/html' });
         return res.end('<h1>Auth Failed</h1><pre>' + JSON.stringify(tokenData, null, 2) + '</pre>');
       }
+      } // close if(code)
     } catch (e) {
       console.log('[NYLAS] Callback error: ' + e.message);
       res.writeHead(500, { 'Content-Type': 'text/html' });
