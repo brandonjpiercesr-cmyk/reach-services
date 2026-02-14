@@ -2219,6 +2219,50 @@ Phone: (336) 389-8116</p>
   }
 
   // ═══════════════════════════════════════════════════════════════════════
+  // ⬡B:VARA:REACH.API.TTS_STREAM:CODE:voice.tts.twilio:TWILIO→REACH→ELEVENLABS:T8:v1.0.0:20260214:t1s2t⬡
+  // TTS endpoint for Twilio <Play> - returns audio/mpeg from ElevenLabs
+  // Used by escalation calls to speak with VARA's voice
+  // ═══════════════════════════════════════════════════════════════════════
+  if (path === '/api/voice/tts-stream' && (method === 'GET' || method === 'POST')) {
+    try {
+      const url = new URL(req.url, `http://${req.headers.host}`);
+      const text = url.searchParams.get('text') || 'Hello';
+      
+      if (!ELEVENLABS_KEY) {
+        // Fallback to empty response if no ElevenLabs
+        res.writeHead(200, { 'Content-Type': 'audio/mpeg' });
+        return res.end();
+      }
+
+      const voiceId = ELEVENLABS_VOICE || 'hAQCIV0cazWEuGzMG5bV';
+      const result = await httpsRequest({
+        hostname: 'api.elevenlabs.io',
+        path: '/v1/text-to-speech/' + voiceId,
+        method: 'POST',
+        headers: {
+          'xi-api-key': ELEVENLABS_KEY,
+          'Content-Type': 'application/json',
+          'Accept': 'audio/mpeg'
+        }
+      }, JSON.stringify({
+        text,
+        model_id: ELEVENLABS_MODEL || 'eleven_flash_v2_5',
+        voice_settings: { stability: 0.5, similarity_boost: 0.75 }
+      }));
+
+      res.writeHead(200, { 
+        'Content-Type': 'audio/mpeg',
+        'Cache-Control': 'public, max-age=3600'
+      });
+      return res.end(result.data);
+    } catch (e) {
+      console.error('[TTS-STREAM] Error:', e.message);
+      res.writeHead(200, { 'Content-Type': 'audio/mpeg' });
+      return res.end();
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
   // ⬡B:AIR:REACH.API.OMI_MANIFEST:CODE:senses.omi.registration:OMI→REACH→OMI:T7:v1.5.0:20260213:o1m2m⬡ /api/omi/manifest
   // Returns the manifest JSON so OMI recognizes ABA as an app
   // ═══════════════════════════════════════════════════════════════════════
@@ -3640,23 +3684,24 @@ Phone: (336) 389-8116</p>
     });
   }
   
-  // /api/escalate/twiml - TwiML for escalation calls
+  // /api/escalate/twiml - TwiML for escalation calls (uses ElevenLabs VARA voice)
   if (path === '/api/escalate/twiml' && (method === 'GET' || method === 'POST')) {
     const url = new URL(req.url, `http://${req.headers.host}`);
     const msg = url.searchParams.get('msg') || 'This is an urgent message from ABA.';
     const traceId = url.searchParams.get('trace') || 'unknown';
     
-    // Use VARA voice personality (warm, butler-like)
+    // Use ElevenLabs VARA voice via <Play> URLs
+    // Each audio segment is generated dynamically
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Pause length="1"/>
-  <Say voice="Polly.Joanna" language="en-US">${msg}</Say>
+  <Play>${REACH_URL}/api/voice/tts-stream?text=${encodeURIComponent(msg)}</Play>
   <Pause length="1"/>
-  <Say voice="Polly.Joanna" language="en-US">Press any key to confirm you received this message, or stay on the line to speak with ABA.</Say>
+  <Play>${REACH_URL}/api/voice/tts-stream?text=${encodeURIComponent('Press any key to confirm you received this message, or stay on the line to speak with me.')}</Play>
   <Gather numDigits="1" timeout="10" action="${REACH_URL}/api/escalate/confirm?trace=${traceId}">
-    <Say voice="Polly.Joanna">Waiting for your response.</Say>
+    <Play>${REACH_URL}/api/voice/tts-stream?text=${encodeURIComponent('Waiting for your response.')}</Play>
   </Gather>
-  <Say voice="Polly.Joanna">No response received. ABA will try again shortly. Goodbye.</Say>
+  <Play>${REACH_URL}/api/voice/tts-stream?text=${encodeURIComponent('No response received. I will try again shortly. Goodbye.')}</Play>
 </Response>`;
     
     res.writeHead(200, { 'Content-Type': 'text/xml' });
@@ -3694,7 +3739,7 @@ Phone: (336) 389-8116</p>
     
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Say voice="Polly.Joanna">Thank you. Your confirmation has been logged. ABA will follow up as needed. Goodbye.</Say>
+  <Play>${REACH_URL}/api/voice/tts-stream?text=${encodeURIComponent('Thank you. Your confirmation has been logged. I will follow up as needed. Goodbye.')}</Play>
 </Response>`;
     
     res.writeHead(200, { 'Content-Type': 'text/xml' });
