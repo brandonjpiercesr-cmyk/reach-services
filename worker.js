@@ -5092,9 +5092,14 @@ Phone: (336) 389-8116</p>
       });
       
     } catch (e) {
-      console.error('[AIR VOICE TOOL] Error:', e.message);
+      console.error('[AIR VOICE TOOL] FULL ERROR:', e);
+      console.error('[AIR VOICE TOOL] Error name:', e.name);
+      console.error('[AIR VOICE TOOL] Error message:', e.message);
+      console.error('[AIR VOICE TOOL] Error stack:', e.stack);
       return jsonResponse(res, 200, {
-        response: "I apologize, I had a brief moment of confusion. Could you repeat that?"
+        response: "I apologize, I had a brief moment of confusion. Could you repeat that?",
+        debug_error: e.message,
+        debug_stack: e.stack?.split('\n')[0]
       });
     }
   }
