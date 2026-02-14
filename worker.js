@@ -108,7 +108,7 @@ const REACH_URL = process.env.REACH_URL || 'https://aba-reach.onrender.com';
 
 // ⬡B:AIR:REACH.SERVER.STARTUP:CODE:infrastructure.logging.boot:AIR→REACH:T10:v1.5.0:20260213:b0o1t⬡
 console.log('═══════════════════════════════════════════════════════════');
-console.log('[ABA REACH v1.8.0] FULL HIERARCHY + SIGILS + API ROUTES');
+console.log('[ABA REACH v1.9.0] FULL HIERARCHY + SIGILS + API ROUTES');
 console.log('[HIERARCHY] L6:AIR > L5:REACH > L4:VOICE,SMS,EMAIL,OMI > L3:VARA,CARA,IMAN,TASTE');
 console.log('[AIR] Hardcoded agents: LUKE, COLE, JUDE, PACK');
 console.log('[AIR] PRIMARY: Gemini Flash 2.0 | BACKUP: Claude Haiku');
@@ -375,6 +375,9 @@ Be conversational, natural, like talking to a friend.`;
     prompt += '\nPREVIOUS CALL HISTORY WITH THIS CALLER:\n' + callerIdentity.callHistory.substring(0, 500);
     prompt += '\nUse this to reference past conversations naturally. Do NOT say "my records show" - just bring it up like you remember.';
   }
+  // v1.9.0 - EAR: Bystander awareness in system prompt
+  prompt += '\nSPEAKER AWARENESS: You have diarization enabled. The system filters out bystander speech automatically. If you detect the caller is distracted or talking to someone else, say something like "Take your time, I will be right here when you are ready."';
+  
   if (callerIdentity) {
     prompt += '\n\nCALLER IDENTITY: ' + callerIdentity.name + ' (Trust: ' + callerIdentity.trust + ', Access: ' + callerIdentity.access + ')';
     prompt += '\n' + callerIdentity.promptAddon;
@@ -682,10 +685,19 @@ async function LOG_call(session, event, data) {
  */
 // ⬡B:AIR:REACH.VOICE.CONTACTS:CODE:identity.registry.lookup:TWILIO→REACH→AIR:T9:v1.6.0:20260213:c1r2g⬡
 const CONTACT_REGISTRY = {
+  // ⬡B:AIR:REACH.VOICE.REGISTRY:CONFIG:voice.contacts.known:REACH:T10:v1.9.0:20260214:r1e2g⬡
   // Brandon Pierce - THE HUMAN. Full access.
   '+13363898116': { name: 'Brandon', role: 'owner', trust: 'T10', access: 'full',
     greeting: "Hey Brandon! What's on your mind?",
     promptAddon: 'You are speaking with Brandon Pierce, your creator. FULL access to everything. Be direct, warm, efficient.' },
+  // BJ Pierce - Brandon's brother, team member
+  '+19803958662': { name: 'BJ', role: 'contact', trust: 'T8', access: 'limited',
+    greeting: "Hey BJ! Good to hear from you. What can I help you with?",
+    promptAddon: 'This is BJ PIERCE, Brandon\'s brother and team member. He has FIVE children. Be warm and helpful. Share general project updates but NEVER share financial details, passwords, API keys, or client information.' },
+  // CJ Moore - Team member
+  '+19199170686': { name: 'CJ', role: 'contact', trust: 'T7', access: 'limited',
+    greeting: "Hey CJ! Great to hear from you. How can I help?",
+    promptAddon: 'This is CJ MOORE, team member. Brandon uses GID + Brand-ON, never Envolve - that is reserved for CJ. Be warm and helpful. Share general project updates but NEVER share financial details, passwords, API keys, or client information.' },
 };
 
 // ⬡B:AIR:REACH.VOICE.DEMO:CODE:voice.demo.touchpoints:AIR→VARA→USER:T9:v1.6.0:20260213:d1e2m⬡
@@ -965,7 +977,7 @@ async function postCallAutomation(session) {
     '<h3>Conversation Summary</h3>' +
     '<p>' + topicsDiscussed.replace(/\|/g, '<br>') + '</p>' +
     '<hr style="border:1px solid #e5e7eb">' +
-    '<p style="color:#9ca3af;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v1.8.0</p>' +
+    '<p style="color:#9ca3af;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v1.9.0</p>' +
     '</div>';
   
   const emailResult = await sendEmailFromCall(
@@ -987,7 +999,7 @@ async function postCallAutomation(session) {
   const notifyResult = await sendSMSFromCall('+13363898116', brandonNotify);
   
   // ALSO email Brandon
-  const brandonEmailHtml = '<div style="font-family:system-ui;max-width:600px;margin:0 auto"><h2>ABA Call Report</h2><p><strong>Caller:</strong> ' + callerName + '</p><p><strong>Phone:</strong> ' + callerNumber + '</p><p><strong>Duration:</strong> ' + turnCount + ' turns</p><p><strong>Topics:</strong> ' + topicsDiscussed.substring(0, 300) + '</p><p style="color:#888;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v1.8.0</p></div>';
+  const brandonEmailHtml = '<div style="font-family:system-ui;max-width:600px;margin:0 auto"><h2>ABA Call Report</h2><p><strong>Caller:</strong> ' + callerName + '</p><p><strong>Phone:</strong> ' + callerNumber + '</p><p><strong>Duration:</strong> ' + turnCount + ' turns</p><p><strong>Topics:</strong> ' + topicsDiscussed.substring(0, 300) + '</p><p style="color:#888;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v1.9.0</p></div>';
   const brandonEmail = await sendEmailFromCall('brandonjpiercesr@gmail.com', 'Brandon', 'ABA Call Report: ' + callerName + ' called', brandonEmailHtml);
   if (brandonEmail.success) console.log('[POST-CALL] Brandon email report sent');
   if (notifyResult.success) {
@@ -1237,6 +1249,139 @@ async function sendEmailFromCall(toEmail, toName, subject, htmlBody) {
 }
 
 
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SPURT A: CALL RECORDING + TRANSCRIPT STORAGE
+// ┌─────────────────────────────────────────────────────────────────────────┐
+// │ L6: AIR (ABA Intelligence Router)                                      │
+// │  └─ L5: REACH (Real-time Engagement and Action Channel Hub)            │
+// │      └─ L4: VOICE                                                      │
+// │          └─ L3: SCRIBE (Session Capture and Recording Intelligence)    │
+// │              └─ L2: TranscriptBuilder (real-time transcript assembly)  │
+// │                  └─ L1: addUtterance(), buildFullTranscript()          │
+// └─────────────────────────────────────────────────────────────────────────┘
+// ⬡B:AIR:REACH.VOICE.SCRIBE:CODE:voice.recording.dual:TWILIO→REACH→SCRIBE→BRAIN:T9:v1.9.0:20260214:s1c2r⬡
+// ROUTING TRACE: USER*TWILIO*REACH*SCRIBE*BRAIN
+// REPORTS TO: AIR (L6) via REACH (L5) VOICE department (L4)
+// SERVES: Brandon (call review), DAWN (daily reports), analytics
+// ═══════════════════════════════════════════════════════════════════════════
+
+function createTranscriptBuilder() {
+  return {
+    entries: [],
+    startTime: Date.now(),
+    addUtterance(text, role, speaker) {
+      const elapsed = Math.round((Date.now() - this.startTime) / 1000);
+      const mins = Math.floor(elapsed / 60);
+      const secs = String(elapsed % 60).padStart(2, '0');
+      this.entries.push({ timestamp: mins + ':' + secs, speaker: speaker, role: role, text: text });
+    },
+    buildFullTranscript() {
+      return this.entries.map(e => {
+        const label = e.role === 'aba' ? 'ABA' : (e.speaker !== null && e.speaker !== undefined ? 'SPEAKER_' + e.speaker : 'CALLER');
+        return '[' + e.timestamp + '] ' + label + ': ' + e.text;
+      }).join('\n');
+    },
+    getStats() {
+      const callerTurns = this.entries.filter(e => e.role === 'caller').length;
+      const abaTurns = this.entries.filter(e => e.role === 'aba').length;
+      const speakers = new Set(this.entries.filter(e => e.speaker !== null && e.speaker !== undefined).map(e => e.speaker));
+      return { callerTurns, abaTurns, uniqueSpeakers: speakers.size, duration: Math.round((Date.now() - this.startTime) / 1000) };
+    }
+  };
+}
+
+async function storeRecordingUrl(callSid, recordingUrl, recordingSid) {
+  if (!SUPABASE_KEY) return;
+  try {
+    await httpsRequest({
+      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co', path: '/rest/v1/aba_memory', method: 'POST',
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' }
+    }, JSON.stringify({
+      content: 'CALL RECORDING | CallSID: ' + callSid + ' | RecordingSID: ' + recordingSid + ' | URL: ' + recordingUrl + '.mp3 | Date: ' + new Date().toISOString(),
+      memory_type: 'call_recording', categories: ['call', 'recording', 'scribe'], importance: 7, is_system: true,
+      source: 'scribe_recording_' + callSid, tags: ['call', 'recording', 'scribe', callSid]
+    }));
+    console.log('[SCRIBE] Recording stored: ' + recordingSid);
+  } catch (e) { console.log('[SCRIBE] Recording store error: ' + e.message); }
+}
+
+async function storeFullTranscript(session) {
+  if (!SUPABASE_KEY || !session.transcriptBuilder) return;
+  const transcript = session.transcriptBuilder.buildFullTranscript();
+  const stats = session.transcriptBuilder.getStats();
+  if (transcript.length < 10) return;
+  const callerName = session.touchpoints?.callerName || session.callerIdentity?.name || 'Unknown';
+  try {
+    await httpsRequest({
+      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co', path: '/rest/v1/aba_memory', method: 'POST',
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' }
+    }, JSON.stringify({
+      content: 'CALL TRANSCRIPT | ' + callerName + ' (' + (session.callerNumber || 'unknown') + ') | ' + new Date().toISOString().split('T')[0] + ' | Duration: ' + stats.duration + 's | Caller: ' + stats.callerTurns + ' turns | ABA: ' + stats.abaTurns + ' turns | Speakers: ' + stats.uniqueSpeakers + '\n---\n' + transcript.substring(0, 4000),
+      memory_type: 'call_transcript', categories: ['call', 'transcript', 'scribe', callerName.toLowerCase()], importance: 8, is_system: true,
+      source: 'scribe_transcript_' + (session.callSid || Date.now()),
+      tags: ['call', 'transcript', 'scribe', (session.callerNumber || '').replace('+',''), callerName.toLowerCase()]
+    }));
+    console.log('[SCRIBE] Transcript stored: ' + stats.callerTurns + ' caller/' + stats.abaTurns + ' ABA turns, ' + stats.duration + 's');
+  } catch (e) { console.log('[SCRIBE] Transcript store error: ' + e.message); }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SPURT B: VOICE FINGERPRINTING (DEEPGRAM DIARIZE)
+// ┌─────────────────────────────────────────────────────────────────────────┐
+// │ L6: AIR (ABA Intelligence Router)                                      │
+// │  └─ L5: REACH (Real-time Engagement and Action Channel Hub)            │
+// │      └─ L4: VOICE                                                      │
+// │          └─ L3: EAR (Environment Awareness Recognition)                │
+// │              └─ L2: SpeakerTracker (diarize speaker identification)    │
+// │                  └─ L1: registerSpeaker(), isBystander()               │
+// └─────────────────────────────────────────────────────────────────────────┘
+// ⬡B:AIR:REACH.VOICE.EAR:CODE:voice.diarize.fingerprint:DEEPGRAM→EAR→AIR:T9:v1.9.0:20260214:e1a2r⬡
+// ROUTING TRACE: AUDIO*DEEPGRAM*EAR*AIR*VARA
+// REPORTS TO: AIR (L6) via REACH (L5) VOICE department (L4)
+// SERVES: VARA (knows who is speaking), session (multi-speaker awareness)
+// ═══════════════════════════════════════════════════════════════════════════
+
+function createSpeakerTracker() {
+  return {
+    primarySpeaker: null,
+    speakerHistory: [],
+    bystanderDetected: false,
+    lastSpeaker: null,
+    registerSpeaker(speakerId, wordCount) {
+      if (this.primarySpeaker === null) {
+        this.primarySpeaker = speakerId;
+        console.log('[EAR] Primary speaker identified: Speaker ' + speakerId);
+      }
+      this.speakerHistory.push({ speaker: speakerId, timestamp: Date.now(), wordCount: wordCount });
+      if (speakerId !== this.primarySpeaker && !this.bystanderDetected) {
+        this.bystanderDetected = true;
+        console.log('[EAR] BYSTANDER DETECTED: Speaker ' + speakerId + ' (primary is Speaker ' + this.primarySpeaker + ')');
+      }
+      this.lastSpeaker = speakerId;
+      return speakerId === this.primarySpeaker;
+    },
+    isBystander(speakerId) {
+      return this.primarySpeaker !== null && speakerId !== this.primarySpeaker;
+    }
+  };
+}
+
+function extractSpeakerFromDiarize(msg) {
+  const words = msg.channel?.alternatives?.[0]?.words || [];
+  if (words.length === 0) return null;
+  const counts = {};
+  for (const w of words) {
+    if (w.speaker !== undefined) counts[w.speaker] = (counts[w.speaker] || 0) + 1;
+  }
+  let max = 0, dominant = null;
+  for (const [s, c] of Object.entries(counts)) {
+    if (c > max) { max = c; dominant = parseInt(s); }
+  }
+  return dominant;
+}
+
+
 class CallSession {
   constructor(streamSid, callSid) {
     this.streamSid = streamSid;
@@ -1252,8 +1397,12 @@ class CallSession {
     this.callerNumber = null;
     this.callerIdentity = null;
     // v1.8.0 - Adaptive touchpoints (replaces demo/regular split)
-    this.touchpoints = null; // Set by getTouchpointsForCaller after identifyCaller
-    this.callHistory = null; // Cross-call memory from previous calls
+    this.touchpoints = null;
+    this.callHistory = null;
+    // v1.9.0 - SCRIBE: Real-time transcript builder
+    this.transcriptBuilder = createTranscriptBuilder();
+    // v1.9.0 - EAR: Speaker diarization tracker
+    this.speakerTracker = createSpeakerTracker();
   }
 }
 
@@ -1275,7 +1424,8 @@ function connectDeepgram(session) {
     interim_results: 'true',
     endpointing: '300',
     vad_events: 'true',
-    utterance_end_ms: '1000'
+    utterance_end_ms: '1000',
+    diarize: 'true'
   }).toString();
   
   const ws = new WebSocket(dgUrl, {
@@ -1303,7 +1453,20 @@ function connectDeepgram(session) {
         const isFinal = msg.is_final;
         
         if (transcript.trim() && isFinal) {
-          console.log('[DEEPGRAM] FINAL: "' + transcript + '"');
+          // v1.9.0 - EAR: Extract speaker from diarized result
+          const speakerId = extractSpeakerFromDiarize(msg);
+          const isPrimary = speakerId !== null ? session.speakerTracker.registerSpeaker(speakerId, transcript.split(' ').length) : true;
+          
+          // v1.9.0 - SCRIBE: Log to transcript builder
+          session.transcriptBuilder.addUtterance(transcript, 'caller', speakerId);
+          
+          // v1.9.0 - EAR: If bystander is talking, don't process as caller input
+          if (!isPrimary && speakerId !== null) {
+            console.log('[EAR] Bystander speaking (Speaker ' + speakerId + '): "' + transcript + '" - IGNORING');
+            return; // Don't feed bystander speech to AIR
+          }
+          
+          console.log('[DEEPGRAM] FINAL (Speaker ' + (speakerId !== null ? speakerId : '?') + '): "' + transcript + '"');
           session.currentTranscript += ' ' + transcript;
           session.lastSpeechTime = Date.now();
           
@@ -1390,6 +1553,11 @@ async function processUtterance(session, text) {
   
   session.history.push({ role: 'user', content: text });
   session.history.push({ role: 'assistant', content: result.response });
+  
+  // v1.9.0 - SCRIBE: Log ABA response to transcript
+  if (session.transcriptBuilder) {
+    session.transcriptBuilder.addUtterance(result.response, 'aba', null);
+  }
   
   // v1.8.0 - Natural pacing delay before speaking
   const delay = getResponseDelay(text, result.intent || 'general');
@@ -1745,7 +1913,7 @@ const httpServer = http.createServer(async (req, res) => {
   if (path === '/' || path === '/health') {
     return jsonResponse(res, 200, {
       status: 'ALIVE',
-      service: 'ABA REACH v1.8.0',
+      service: 'ABA REACH v1.9.0',
       mode: 'FULL API + VOICE + OMI',
       air: 'ABA Intellectual Role - CENTRAL ORCHESTRATOR',
       models: { primary: 'Gemini Flash 2.0', backup: 'Claude Haiku', speed_fallback: 'Groq' },
@@ -2060,7 +2228,7 @@ Phone: (336) 389-8116</p>
       name: 'ABA Intelligence Layer',
       description: 'ABA (A Better AI) processes ambient conversations through TASTE (Transcript Analysis and Semantic Tagging Engine) and stores insights in the ABA Brain.',
       author: 'Brandon Pierce / Global Majority Group',
-      version: '1.8.0',
+      version: '1.9.0',
       capabilities: ['transcript_processing', 'memory_integration', 'real_time_analysis'],
       webhook_url: REACH_URL + '/api/omi/webhook',
       setup_instructions: 'ABA automatically processes your conversations. No setup needed.',
@@ -2600,7 +2768,35 @@ Phone: (336) 389-8116</p>
   }
 
   // ═══════════════════════════════════════════════════════════════════════
-  // ⬡B:AIR:REACH.WEBHOOK.VOICE:CODE:voice.inbound.twilio:TWILIO→REACH→AIR:T8:v1.5.0:20260213:w1v2c⬡ /webhook/voice
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // ⬡B:AIR:REACH.WEBHOOK.RECORDING:CODE:voice.recording.callback:TWILIO→REACH→SCRIBE→BRAIN:T8:v1.9.0:20260214:r1w2h⬡
+  // ┌─────────────────────────────────────────────────────────────────────┐
+  // │ L6: AIR → L5: REACH → L4: VOICE → L3: SCRIBE → L2: webhook → L1  │
+  // └─────────────────────────────────────────────────────────────────────┘
+  // ROUTING TRACE: TWILIO*REACH*SCRIBE*BRAIN
+  // ═══════════════════════════════════════════════════════════════════════
+  if (path === '/webhook/recording' && method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      const recordingUrl = body.RecordingUrl || '';
+      const recordingSid = body.RecordingSid || '';
+      const callSid = body.CallSid || '';
+      const duration = body.RecordingDuration || '0';
+      
+      console.log('[SCRIBE] Recording complete: ' + recordingSid + ' (' + duration + 's)');
+      await storeRecordingUrl(callSid, recordingUrl, recordingSid);
+      
+      res.writeHead(204);
+      return res.end();
+    } catch (e) {
+      console.log('[SCRIBE] Recording webhook error: ' + e.message);
+      res.writeHead(204);
+      return res.end();
+    }
+  }
+
+    // ⬡B:AIR:REACH.WEBHOOK.VOICE:CODE:voice.inbound.twilio:TWILIO→REACH→AIR:T8:v1.5.0:20260213:w1v2c⬡ /webhook/voice
   // Existing Twilio voice handler (phone calls)
   // ═══════════════════════════════════════════════════════════════════════
   if (path === '/webhook/voice' && method === 'POST') {
@@ -2611,7 +2807,8 @@ Phone: (336) 389-8116</p>
     
     // ⬡B:AIR:REACH.VOICE.CALLER_ID:CODE:voice.identity.lookup:TWILIO→REACH→AIR:T9:v1.6.0:20260213:c1i2d⬡
     // Pass caller number to WebSocket so AIR knows WHO is calling
-    const twiml = '<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n  <Connect>\n    <Stream url="wss://' + host + '/media-stream">\n      <Parameter name="greeting" value="true"/>\n      <Parameter name="callerNumber" value="' + callerNumber + '"/>\n    </Stream>\n  </Connect>\n</Response>';
+    // v1.9.0 - SCRIBE: Record=record-from-answer-dual for full recording
+    const twiml = '<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n  <Start>\n    <Stream url="wss://' + host + '/media-stream">\n      <Parameter name="greeting" value="true"/>\n      <Parameter name="callerNumber" value="' + callerNumber + '"/>\n    </Stream>\n  </Start>\n  <Record recordingStatusCallback="https://' + host + '/webhook/recording" recordingStatusCallbackEvent="completed" maxLength="3600" trim="trim-silence"/>\n  <Pause length="3600"/>\n</Response>';
     res.writeHead(200, { 'Content-Type': 'text/xml' });
     return res.end(twiml);
   }
@@ -2740,6 +2937,9 @@ wss.on('connection', (ws) => {
       if (msg.event === 'stop' && session) {
         await LOG_call(session, 'call_end', { duration: session.history.length, caller: session.callerIdentity?.name });
         
+        // v1.9.0 - SCRIBE: Store full transcript
+        await storeFullTranscript(session);
+        
         // v1.8.0 - Cross-call memory: store summary
         await storeCallSummary(session);
         
@@ -2772,7 +2972,7 @@ wss.on('connection', (ws) => {
 httpServer.listen(PORT, '0.0.0.0', () => {
   console.log('');
   console.log('═══════════════════════════════════════════════════════════');
-  console.log('[ABA REACH v1.8.0] LIVE on port ' + PORT);
+  console.log('[ABA REACH v1.9.0] LIVE on port ' + PORT);
   console.log('═══════════════════════════════════════════════════════════');
   console.log('[AIR] ABA Intellectual Role - ONLINE');
   console.log('[AIR] PRIMARY: Gemini Flash 2.0');
