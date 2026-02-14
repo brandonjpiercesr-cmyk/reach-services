@@ -1,4 +1,22 @@
 /**
+ * ═══════════════════════════════════════════════════════════════════════════════
+ * ABA REACH - Voice & Communication Gateway
+ * ═══════════════════════════════════════════════════════════════════════════════
+ * 
+ * ABCD TAGGING LEGEND:
+ *   ABAOS  = ABA Operating System (shell, kernel, core)
+ *   ABACUS = ABA Calculator/Portal (client tools, dashboards)
+ *   BOTH   = Shared between ABAOS and ABACUS
+ *   CCWA   = Command Center Web App
+ *   REACH  = Real-time Engagement and Action Channel Hub (this file)
+ * 
+ * This file is: BOTH (used by ABAOS for voice, used by ABACUS for client calls)
+ * 
+ * ⬡B:ABCD:BOTH:REACH.WORKER:v2.5.0:20260214⬡
+ * ═══════════════════════════════════════════════════════════════════════════════
+ */
+
+/**
  * ╔══════════════════════════════════════════════════════════════════════════════╗
  * ║                         AGENT HIERARCHY PLACEMENT                            ║
  * ╠══════════════════════════════════════════════════════════════════════════════╣
@@ -192,7 +210,7 @@ async function ABACIA_SAGE_search(query) {
 const TWILIO_PHONE = process.env.TWILIO_PHONE_NUMBER;
 
 // ⬡B:AIR:REACH.CONFIG.ELEVENLABS:CONFIG:voice.tts.personality:AIR→REACH→VARA:T8:v1.5.0:20260213:e1l2v⬡
-const ELEVENLABS_KEY = process.env.ELEVENLABS_API_KEY || 'sk_e0b48157805968dbb370f299b60e22001189bd85c3864040';
+const ELEVENLABS_KEY = process.env.ELEVENLABS_API_KEY; // ⬡B:ENV:ELEVENLABS⬡
 // ⬡B:VARA:VOICE_ID:CONFIG:voice.identity:VARA→ELEVENLABS:T10:v2.0.1:20260214:vid⬡
 // OFFICIAL ABA VOICE ID: LD658Mupr7vNwTTJSPsk (ABA v1)
 // Updated: February 14, 2026
@@ -335,6 +353,7 @@ const CONTACT_REGISTRY = {
 // ⬡B:AIR:REACH.VOICE.LOOKUP:FUNC:contacts.resolver:v2.4.0:20260214⬡
 // HIERARCHY: L3 Agent-level contact resolution
 // Priority: 1. Brain (authoritative), 2. Hardcoded registry (fallback)
+// ⬡B:ABCD:BOTH:CONTACTS.LOOKUP⬡
 async function lookupCallerByPhone(phoneNumber) {
   console.log('[CONTACT LOOKUP] Looking up:', phoneNumber);
   
@@ -457,6 +476,7 @@ async function lookupCallerByPhone(phoneNumber) {
 // RECALL - Get last conversation with this caller
 // Cross-call memory - remember what we talked about
 // ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:ABCD:ABAOS:MEMORY.RECALL⬡
 async function RECALL_lastConversation(callerIdentity) {
   console.log('[RECALL] Getting last conversation for:', callerIdentity?.name || 'unknown');
   
@@ -526,6 +546,7 @@ async function RECALL_lastConversation(callerIdentity) {
 // ⬡B:AIR:REACH.BRAIN.STORE:FUNC:memory.write:v2.4.2:20260214⬡
 // Store data to brain (Supabase aba_memory)
 // ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:ABCD:BOTH:BRAIN.STORE⬡
 async function storeToBrain(data) {
   try {
     const payload = {
@@ -570,6 +591,63 @@ async function storeToBrain(data) {
 // ⬡B:AIR:REACH.MEMORY.STORE:FUNC:conversation.save:v2.4.1:20260214⬡
 // Store conversation to brain for future recall
 // ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:ABCD:ABAOS:MEMORY.STORE⬡
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:ABCD:BOTH:OMI.AIR.ROUTER:v2.5.0:20260214⬡
+// OMI transcripts now route through AIR for processing
+// Pattern: OMI → AIR → Agent → Action
+// ═══════════════════════════════════════════════════════════════════════════════
+async function processOMIThroughAIR(transcript, userId) {
+  console.log('[OMI→AIR] Processing transcript through AIR...');
+  
+  // Check if transcript contains ABA command
+  const lowerTranscript = transcript.toLowerCase();
+  
+  if (lowerTranscript.includes('aba') || lowerTranscript.includes('hey aba') || 
+      lowerTranscript.includes('aba,') || lowerTranscript.includes('aba send')) {
+    console.log('[OMI→AIR] ABA command detected, routing to AIR_process');
+    
+    // Extract the command after "ABA"
+    const abaIndex = lowerTranscript.indexOf('aba');
+    const command = transcript.substring(abaIndex + 4).trim();
+    
+    if (command.length > 5) {
+      // Create a pseudo caller identity for OMI commands
+      const omiCaller = {
+        name: 'Brandon',
+        role: 'owner',
+        trust: 'T10',
+        source: 'omi',
+        phone: 'omi-' + userId
+      };
+      
+      // Route through AIR
+      try {
+        const result = await AIR_process(command, [], omiCaller, null);
+        
+        // Log the AIR response
+        await storeToBrain({
+          content: 'OMI→AIR COMMAND: "' + command + '" | AIR Response: "' + (result.response || '').substring(0, 200) + '"',
+          memory_type: 'omi_air_command',
+          categories: ['omi', 'air', 'command'],
+          importance: 7,
+          source: 'omi_air_' + Date.now(),
+          tags: ['omi', 'air', 'command']
+        });
+        
+        console.log('[OMI→AIR] Command processed:', result.response?.substring(0, 100));
+        return result;
+      } catch (e) {
+        console.log('[OMI→AIR] Error:', e.message);
+      }
+    }
+  }
+  
+  return null;
+}
+
+
 async function STORE_conversation(callerIdentity, userSaid, abaResponse, conversationId) {
   console.log('[STORE] Saving conversation to brain');
   
@@ -597,6 +675,7 @@ async function STORE_conversation(callerIdentity, userSaid, abaResponse, convers
 // L3: Manager-level agent for weather
 // Uses Open-Meteo API (free, no key required)
 // ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:ABCD:BOTH:AGENT.CLIMATE⬡
 async function CLIMATE_getWeather(location) {
   console.log('[CLIMATE] Weather query for:', location);
   
@@ -655,6 +734,7 @@ async function CLIMATE_getWeather(location) {
 // L3: Manager-level agent for sports scores
 // Uses ESPN API (no auth required)
 // ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:ABCD:BOTH:AGENT.PLAY⬡
 async function PLAY_getScores(query) {
   console.log('[PLAY] Sports query:', query);
   
@@ -740,6 +820,7 @@ async function PLAY_getScores(query) {
 // L3: Manager-level agent for email
 // Uses Gmail API with stored OAuth tokens
 // ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:ABCD:BOTH:AGENT.IMAN⬡
 async function IMAN_readEmails(callerIdentity) {
   console.log('[IMAN] Reading emails for:', callerIdentity?.name || 'unknown');
   
@@ -908,6 +989,7 @@ async function buildProactiveGreeting(callerIdentity) {
 // L3: Manager-level agent for calendar
 // Uses Google Calendar API
 // ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:ABCD:BOTH:AGENT.RADAR⬡
 async function RADAR_getCalendar(callerIdentity) {
   console.log('[RADAR] Getting calendar for:', callerIdentity?.name || 'unknown');
   
@@ -1012,6 +1094,7 @@ async function RADAR_getCalendar(callerIdentity) {
 // L3: Manager-level agent for news
 // Uses Perplexity API for real-time news
 // ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:ABCD:BOTH:AGENT.PRESS⬡
 async function PRESS_getNews(query) {
   console.log('[PRESS] News query:', query);
   
@@ -1058,10 +1141,11 @@ async function PRESS_getNews(query) {
 // L3: Manager-level agent for outbound voice
 // Uses ElevenLabs Conversational AI for full 2-way calls
 // ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:ABCD:ABAOS:AGENT.DIAL⬡
 async function DIAL_callWithElevenLabs(phoneNumber, purpose, callerContext) {
   console.log('[DIAL] 2-way outbound call to:', phoneNumber);
   
-  const ELEVENLABS_KEY = process.env.ELEVENLABS_API_KEY || 'sk_e0b48157805968dbb370f299b60e22001189bd85c3864040';
+  const ELEVENLABS_KEY = process.env.ELEVENLABS_API_KEY; // ⬡B:ENV:ELEVENLABS⬡
   const AGENT_ID = 'agent_0601khe2q0gben08ws34bzf7a0sa'; // ABA agent
   const TWILIO_FROM = '+13362037510';
   
@@ -1170,6 +1254,7 @@ async function DIAL_callWithTwiML(phoneNumber, message) {
   }
 }
 
+// ⬡B:ABCD:ABAOS:AGENT.LUKE⬡
 async function LUKE_process(userSaid) {
   console.log('[LUKE] Processing query: "' + userSaid + '"');
   
@@ -1222,6 +1307,7 @@ async function LUKE_process(userSaid) {
  * ╚══════════════════════════════════════════════════════════════════════════════╝
  */
 // ⬡B:AIR:REACH.AGENT.COLE:CODE:intelligence.brain.search:AIR→COLE→BRAIN→COLE→AIR:T8:v1.5.0:20260213:c1o2l⬡
+// ⬡B:ABCD:ABAOS:AGENT.COLE⬡
 async function COLE_scour(analysis) {
   console.log('[COLE] Scouring brain for context...');
   
@@ -1286,6 +1372,7 @@ async function COLE_scour(analysis) {
  * ╚══════════════════════════════════════════════════════════════════════════════╝
  */
 // ⬡B:AIR:REACH.AGENT.JUDE:CODE:intelligence.agent.discovery:AIR→JUDE→BRAIN→JUDE→AIR:T8:v1.5.0:20260213:j1u2d⬡
+// ⬡B:ABCD:ABAOS:AGENT.JUDE⬡
 async function JUDE_findAgents(analysis) {
   console.log('[JUDE] Finding relevant agents...');
   
@@ -1350,6 +1437,7 @@ async function JUDE_findAgents(analysis) {
  * ╚══════════════════════════════════════════════════════════════════════════════╝
  */
 // ⬡B:AIR:REACH.AGENT.PACK:CODE:intelligence.prompt.assembly:AIR→PACK→MODEL→AIR:T8:v1.5.0:20260213:p1a2k⬡
+// ⬡B:ABCD:ABAOS:AGENT.PACK⬡
 function PACK_assemble(analysis, coleResult, judeResult, history, callerIdentity, demoState) {
   console.log('[PACK] Assembling mission package...');
   
@@ -2521,24 +2609,53 @@ function handleCommandCenterMessage(ws, msg) {
   }
 }
 
-function broadcastToCommandCenter(message) {
-  const payload = JSON.stringify(message);
+// ⬡B:ABCD:CCWA:BROADCAST⬡
+function broadcastToCommandCenter(data) {
+  console.log('[COMMAND CENTER] Broadcasting:', data.type);
   
-  for (const client of COMMAND_CENTER_CLIENTS) {
-    try {
-      if (client.readyState === 1) { // OPEN
-        client.send(payload);
+  // 1. Store to brain (for persistence)
+  storeToBrain({
+    content: 'ACTIVITY: ' + data.type + ' | ' + JSON.stringify(data),
+    memory_type: 'command_center_activity',
+    categories: ['command_center', 'activity', data.type],
+    importance: 4,
+    source: 'command_center_' + Date.now(),
+    tags: ['command_center', data.type]
+  }).catch(e => console.log('[COMMAND CENTER] Store error:', e.message));
+  
+  // 2. Broadcast to connected WebSocket clients
+  if (global.commandCenterClients && global.commandCenterClients.size > 0) {
+    const message = JSON.stringify({
+      type: 'broadcast',
+      data: data,
+      timestamp: new Date().toISOString()
+    });
+    
+    let sent = 0;
+    global.commandCenterClients.forEach(client => {
+      try {
+        if (client.readyState === 1) { // WebSocket.OPEN
+          client.send(message);
+          sent++;
+        }
+      } catch (e) {
+        console.log('[COMMAND CENTER] Send error:', e.message);
       }
-    } catch (e) {
-      COMMAND_CENTER_CLIENTS.delete(client);
+    });
+    
+    if (sent > 0) {
+      console.log('[COMMAND CENTER] Broadcast sent to', sent, 'clients');
     }
   }
-  
-  // Also log activity to brain
-  if (message.type !== 'pulse' && message.type !== 'health_check') {
-    logActivityToBrain(message);
-  }
 }
+
+// ⬡B:ABCD:CCWA:WEBSOCKET.INIT⬡
+// Initialize Command Center WebSocket clients set
+if (!global.commandCenterClients) {
+  global.commandCenterClients = new Set();
+}
+
+
 
 async function logActivityToBrain(activity) {
   try {
@@ -2908,6 +3025,7 @@ async function getActiveDevices(userId) {
 // L6: AIR routes to L3 agents based on JUDE's findings
 // Hierarchy: AIR → DISPATCH → Agent → External API → Response
 // ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:ABCD:BOTH:AIR.DISPATCH⬡
 async function AIR_DISPATCH(lukeAnalysis, judeResult, callerIdentity) {
   console.log('[AIR DISPATCH] Checking if agents can handle this...');
   
@@ -3019,6 +3137,7 @@ async function AIR_DISPATCH(lukeAnalysis, judeResult, callerIdentity) {
 }
 
 
+// ⬡B:ABCD:BOTH:AIR.ORCHESTRATOR⬡
 async function AIR_process(userSaid, history, callerIdentity, demoState) {
   console.log('');
   console.log('═══════════════════════════════════════════════════════════');
