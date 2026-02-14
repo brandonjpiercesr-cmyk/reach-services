@@ -1,0 +1,78 @@
+name: Protect Critical Routes
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate-critical-routes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Check for Critical OMI Routes
+        run: |
+          echo "═══════════════════════════════════════════════════════════"
+          echo "CRITICAL ROUTE VALIDATION"
+          echo "═══════════════════════════════════════════════════════════"
+          
+          ERRORS=0
+          
+          # Check 1: /api/omi/auth route
+          if ! grep -q "path === '/api/omi/auth'" worker.js; then
+            echo "❌ FATAL: /api/omi/auth route MISSING"
+            echo "   This route is REQUIRED for OMI integration."
+            echo "   Without it, the OMI app disappears and webhooks die."
+            ERRORS=$((ERRORS + 1))
+          else
+            echo "✅ /api/omi/auth route present"
+          fi
+          
+          # Check 2: Heartbeat
+          if ! grep -q "HEARTBEAT\|Self-ping\|setInterval" worker.js; then
+            echo "❌ FATAL: Heartbeat/keep-alive MISSING"
+            echo "   Render free tier sleeps without this."
+            echo "   OMI webhooks will time out."
+            ERRORS=$((ERRORS + 1))
+          else
+            echo "✅ Heartbeat present"
+          fi
+          
+          # Check 3: /api/omi/manifest route
+          if ! grep -q "path === '/api/omi/manifest'" worker.js; then
+            echo "❌ FATAL: /api/omi/manifest route MISSING"
+            ERRORS=$((ERRORS + 1))
+          else
+            echo "✅ /api/omi/manifest route present"
+          fi
+          
+          # Check 4: /api/omi/webhook route
+          if ! grep -q "path === '/api/omi/webhook'" worker.js; then
+            echo "❌ FATAL: /api/omi/webhook route MISSING"
+            ERRORS=$((ERRORS + 1))
+          else
+            echo "✅ /api/omi/webhook route present"
+          fi
+          
+          echo "═══════════════════════════════════════════════════════════"
+          
+          if [ $ERRORS -gt 0 ]; then
+            echo ""
+            echo "🚨 DEPLOY BLOCKED: $ERRORS critical routes missing"
+            echo ""
+            echo "DO NOT remove these routes. They are required for:"
+            echo "  - OMI app to stay installed"
+            echo "  - OMI webhooks to be received"
+            echo "  - REACH to stay awake on Render free tier"
+            echo ""
+            echo "If you need to refactor, ensure these routes exist:"
+            echo "  1. /api/omi/auth (returns {authenticated: true})"
+            echo "  2. /api/omi/manifest (returns app manifest)"
+            echo "  3. /api/omi/webhook (processes transcripts)"
+            echo "  4. Heartbeat setInterval (60s self-ping)"
+            exit 1
+          fi
+          
+          echo "✅ All critical routes validated"
