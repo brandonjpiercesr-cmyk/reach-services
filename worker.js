@@ -2929,6 +2929,187 @@ Phone: (336) 389-8116</p>
   }
 
   // ═══════════════════════════════════════════════════════════════════════
+  // ⬡B:reach:HTTP:nylas_webhook⬡ /api/nylas/webhook - AUTOMATED EMAIL PIPELINE
+  // L6: AIR | L4: EMAIL | L3: IMAN | L2: worker.js | L1: nylasWebhook
+  // Nylas sends message.created events here. If from Idealist → auto-parse jobs.
+  // ═══════════════════════════════════════════════════════════════════════
+  if (path === '/api/nylas/webhook' && method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      
+      // Nylas webhook verification (challenge response)
+      if (body.challenge) {
+        return jsonResponse(res, 200, { challenge: body.challenge });
+      }
+      
+      // Process webhook events
+      const events = Array.isArray(body) ? body : body.data ? [body.data] : [body];
+      const results = [];
+      
+      for (const event of events) {
+        const eventType = event.type || body.type || '';
+        
+        // Only process new messages
+        if (!eventType.includes('message.created') && !eventType.includes('message')) continue;
+        
+        const messageData = event.object || event.data || event;
+        const from = (messageData.from || []).map(f => f.email || f).join(', ').toLowerCase();
+        const subject = messageData.subject || '';
+        const emailBody = messageData.body || messageData.snippet || '';
+        
+        // Check if it's from Idealist
+        const isIdealist = from.includes('idealist.org') || 
+                          subject.toLowerCase().includes('idealist') ||
+                          emailBody.includes('idealist.org');
+        
+        if (isIdealist && emailBody) {
+          // ═══════ AUTO-PARSE IDEALIST EMAIL ═══════
+          // Extract URLs
+          const urlRegex = /https?:\/\/www\.idealist\.org\/[^\s"'<>)\]]+/g;
+          const rawUrls = emailBody.match(urlRegex) || [];
+          const urls = [...new Set(rawUrls)]
+            .filter(u => u.includes('/job/') || u.includes('/internship/') || u.includes('/position/') || u.includes('/en/'))
+            .slice(0, 10);
+          
+          const aiKey = ANTHROPIC_KEY;
+          const jobs = [];
+          
+          for (const jobUrl of urls) {
+            try {
+              const parsed = new URL(jobUrl);
+              const fetchResult = await httpsRequest({
+                hostname: parsed.hostname,
+                path: parsed.pathname + (parsed.search || ''),
+                method: 'GET',
+                headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ABA-SCOUT/1.0)' }
+              });
+              const html = fetchResult.data.toString().substring(0, 15000);
+              
+              if (aiKey) {
+                const aiResult = await httpsRequest({
+                  hostname: 'api.anthropic.com',
+                  path: '/v1/messages',
+                  method: 'POST',
+                  headers: { 'x-api-key': aiKey, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' }
+                }, JSON.stringify({
+                  model: 'claude-haiku-4-5-20251001',
+                  max_tokens: 800,
+                  system: 'Extract job details from HTML. Return ONLY valid JSON: {"title":"","company":"","location":"","salary":"","description":"first 200 chars","employment_type":"","remote":"yes/no/hybrid","deadline":"","requirements":"first 200 chars"}. Empty string if unknown. Be accurate.',
+                  messages: [{ role: 'user', content: 'URL: ' + jobUrl + '\n\nHTML:\n' + html }]
+                }));
+                
+                const aiData = JSON.parse(aiResult.data.toString());
+                const text = aiData.content?.[0]?.text || '';
+                const jsonMatch = text.match(/\{[\s\S]*\}/);
+                if (jsonMatch) {
+                  const jobData = JSON.parse(jsonMatch[0]);
+                  jobs.push({ ...jobData, url: jobUrl, source: 'idealist', verified: !!(jobData.title && jobData.company) });
+                }
+              }
+            } catch (scrapeErr) {
+              console.error('[Nylas Webhook] Scrape error for', jobUrl, scrapeErr.message);
+            }
+          }
+          
+          // ═══════ STORE IN SUPABASE BRAIN ═══════
+          if (SUPABASE_KEY && jobs.length > 0) {
+            for (const job of jobs) {
+              try {
+                await httpsRequest({
+                  hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+                  path: '/rest/v1/aba_memory',
+                  method: 'POST',
+                  headers: {
+                    'apikey': SUPABASE_KEY,
+                    'Authorization': 'Bearer ' + SUPABASE_KEY,
+                    'Content-Type': 'application/json',
+                    'Prefer': 'return=minimal'
+                  }
+                }, JSON.stringify({
+                  content: JSON.stringify(job),
+                  memory_type: 'parsed_job',
+                  categories: ['jobs', 'idealist', 'claudette', 'automated'],
+                  importance: 6,
+                  tags: ['parsed_job', 'idealist', 'scout', 'new', 'automated'],
+                  source: 'nylas_webhook_' + new Date().toISOString().split('T')[0]
+                }));
+              } catch (storeErr) {
+                console.error('[Nylas Webhook] Store error:', storeErr.message);
+              }
+            }
+            
+            // ═══════ LOG ACTIVITY FOR VARA ═══════
+            try {
+              await httpsRequest({
+                hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+                path: '/rest/v1/aba_memory',
+                method: 'POST',
+                headers: {
+                  'apikey': SUPABASE_KEY,
+                  'Authorization': 'Bearer ' + SUPABASE_KEY,
+                  'Content-Type': 'application/json',
+                  'Prefer': 'return=minimal'
+                }
+              }, JSON.stringify({
+                content: `CLAUDETTE found ${jobs.length} new jobs from Idealist. Subject: "${subject}". Companies: ${jobs.map(j=>j.company).filter(Boolean).join(', ')}. ${jobs.filter(j=>j.verified).length} verified.`,
+                memory_type: 'system',
+                categories: ['vara', 'notification', 'jobs'],
+                importance: 7,
+                tags: ['vara_speak', 'claudette', 'jobs', 'idealist'],
+                source: 'nylas_webhook_vara_' + Date.now()
+              }));
+            } catch (varaErr) { /* non-critical */ }
+          }
+          
+          results.push({ subject, urlsFound: urls.length, jobsParsed: jobs.length, jobsVerified: jobs.filter(j=>j.verified).length });
+        } else {
+          results.push({ subject, skipped: true, reason: isIdealist ? 'no body' : 'not idealist' });
+        }
+      }
+      
+      return jsonResponse(res, 200, { processed: results.length, results });
+    } catch (e) {
+      console.error('[Nylas Webhook] Error:', e.message);
+      return jsonResponse(res, 200, { error: e.message }); // 200 so Nylas doesn't retry forever
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // ⬡B:reach:HTTP:parsed_jobs⬡ /api/jobs/parsed - READ PARSED JOBS FROM BRAIN
+  // L6: AIR | L4: JOBS | L3: SCOUT | L2: worker.js | L1: getParsedJobs
+  // 1A Shell Jobs panel reads from this. Returns all parsed_job entries.
+  // ═══════════════════════════════════════════════════════════════════════
+  if (path === '/api/jobs/parsed' && method === 'GET') {
+    try {
+      const status = url.searchParams.get('status') || 'new';
+      const limit = parseInt(url.searchParams.get('limit') || '50');
+      
+      const supaUrl = `https://htlxjkbrstpwwtzsbyvb.supabase.co/rest/v1/aba_memory?memory_type=eq.parsed_job&order=created_at.desc&limit=${limit}`;
+      const supaKey = SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0bHhqa2Jyc3Rwd3d0enNieXZiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA1MzI4MjEsImV4cCI6MjA4NjEwODgyMX0.MOgNYkezWpgxTO3ZHd0omZ0WLJOOR-tL7hONXWG9eBw';
+      
+      const result = await httpsRequest({
+        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+        path: '/rest/v1/aba_memory?memory_type=eq.parsed_job&order=created_at.desc&limit=' + limit,
+        method: 'GET',
+        headers: {
+          'apikey': supaKey,
+          'Authorization': 'Bearer ' + supaKey
+        }
+      });
+      
+      const memories = JSON.parse(result.data.toString());
+      const jobs = memories.map(m => {
+        try { return { id: m.id, ...JSON.parse(m.content), storedAt: m.created_at, tags: m.tags }; }
+        catch { return { id: m.id, raw: m.content, storedAt: m.created_at }; }
+      });
+      
+      return jsonResponse(res, 200, { jobs, total: jobs.length });
+    } catch (e) {
+      return jsonResponse(res, 500, { error: e.message });
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
   // ⬡B:reach:HTTP:idealist_parse⬡ /api/idealist/parse - PARSE IDEALIST JOB ALERT EMAILS
   // Claudette forwards Idealist emails here. Extracts URLs, scrapes each, returns structured jobs.
   // ═══════════════════════════════════════════════════════════════════════
