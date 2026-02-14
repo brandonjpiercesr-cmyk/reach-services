@@ -2493,7 +2493,7 @@ async function warmTransferToBrandon(session) {
     // Create outbound call to Brandon
     const callData = 'To=' + encodeURIComponent('+13363898116') + 
       '&From=' + encodeURIComponent(TWILIO_PHONE) + 
-      '&Twiml=' + encodeURIComponent('<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="Polly.Joanna">Brandon, you have a caller on the line. Connecting you now.</Say><Dial><Conference>aba-live-transfer</Conference></Dial></Response>');
+      '&Url=' + encodeURIComponent(REACH_URL + '/api/transfer/twiml');
     
     const result = await httpsRequest({
       hostname: 'api.twilio.com',
@@ -4856,9 +4856,10 @@ Phone: (336) 389-8116</p>
       ? 'ABA is taking meeting minutes for this call. No audio recording is being made. Proceed if you consent to AI assisted note taking.'
       : 'Connecting your call now.';
     
+    // Use ElevenLabs for ABA voice (not Polly browser TTS!)
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Say voice="Polly.Joanna">${disclaimer}</Say>
+  <Play>${REACH_URL}/api/voice/tts-stream?text=${encodeURIComponent(disclaimer)}</Play>
   <Pause length="1"/>
   <Start>
     <Stream url="wss://${req.headers.host}/api/call/stream?trace=${traceId}" track="both_tracks"/>
