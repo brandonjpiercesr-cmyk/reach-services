@@ -5381,7 +5381,7 @@ Phone: (336) 389-8116</p>
       const safeGreeting = msg.replace(/"/g, "'").replace(/&/g, "and").replace(/</g, "").replace(/>/g, "");
       
       // Build WebSocket URL - use &amp; for XML encoding
-      const wsUrl = 'wss://' + req.headers.host + '/media-stream?trace=' + traceId + '&amp;outbound=true';
+      const wsUrl = 'wss://' + req.headers.host + '/media-stream?trace=' + traceId + '-outbound';
       
       twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
