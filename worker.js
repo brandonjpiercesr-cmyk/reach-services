@@ -66,8 +66,8 @@ const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFz
 const TWILIO_PHONE = process.env.TWILIO_PHONE_NUMBER;
 
 // ⬡B:AIR:REACH.CONFIG.ELEVENLABS:CONFIG:voice.tts.personality:AIR→REACH→VARA:T8:v1.5.0:20260213:e1l2v⬡
-const ELEVENLABS_KEY = process.env.ELEVENLABS_API_KEY;
-const ELEVENLABS_VOICE = process.env.ELEVENLABS_VOICE_ID || 'LD658Mupr7vNwTTJSPsk'; // VARA voice from Brandon config
+const ELEVENLABS_KEY = process.env.ELEVENLABS_API_KEY || 'sk_e0b48157805968dbb370f299b60e22001189bd85c3864040';
+const ELEVENLABS_VOICE = process.env.ELEVENLABS_VOICE_ID || 'bcbkbYJpNzQGHml4XFrp'; // ABA's Nigerian-American JARVIS voice
 const ELEVENLABS_MODEL = 'eleven_flash_v2_5';
 
 // ⬡B:AIR:REACH.CONFIG.DEEPGRAM:CONFIG:voice.stt.transcription:AIR→REACH→TASTE:T8:v1.5.0:20260213:d1g2m⬡
@@ -614,6 +614,12 @@ async function JUDE_decideEscalation(lukeAnalysis, coleContext) {
       phone: '+19803958662', 
       priority: 2,
       categories: ['interview', 'school', 'family']
+    },
+    eric: {
+      name: 'Dr. Eric Lane Sr.',
+      phone: '+13369266857', // TODO: Get Eric's real number
+      priority: 2,
+      categories: ['academic', 'research', 'mentorship', 'advisory']
     }
   };
   
@@ -628,11 +634,10 @@ async function JUDE_decideEscalation(lukeAnalysis, coleContext) {
   
   // Decide action based on urgency
   let action = 'log_only';
-  // CALLS DISABLED - Brandon was getting spammed
-  // ALL escalations go to SMS or email only until we fix the triggers
-  // To re-enable calls, change 'sms_only' back to 'call_emergency' for urgency 6
-  if (urgency >= 6) action = 'sms_only'; // DISABLED: was call_emergency
-  else if (urgency >= 5) action = 'sms_only'; // was sms_then_call
+  // THROTTLED CALLS - Only TRUE emergencies (urgency 6) get calls
+  // Everything else goes to SMS to avoid blowing up Brandon's phone
+  if (urgency >= 6) action = 'call_emergency'; // RE-ENABLED
+  else if (urgency >= 5) action = 'sms_only';
   else if (urgency >= 4) action = 'sms_only';
   else if (urgency >= 3) action = 'sms_only';
   else if (urgency >= 2) action = 'email_only';
