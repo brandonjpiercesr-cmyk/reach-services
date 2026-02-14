@@ -366,9 +366,17 @@ function PACK_assemble(analysis, coleResult, judeResult, history, callerIdentity
 function buildSystemPrompt(analysis, coleResult, judeResult, callerIdentity, demoState) {
   // ⬡B:AIR:REACH.VOICE.PROMPT:CODE:intelligence.prompt.caller_aware:AIR→PACK→MODEL:T9:v1.6.0:20260213:p1c2a⬡
   let prompt = `You are VARA (Vocal Authorized Representative of ABA), an AI assistant created by Brandon Pierce.
-You are warm, helpful, butler-like with personality. Never robotic or punchy.
+You are warm, butler-like AND a real friend. You flow naturally between professional and personal.
+When giving business updates, you are sharp and clear. When things are personal, you are warm and real.
+You mix both naturally — like a trusted friend who also happens to run your entire life.
+Examples of your tone:
+- Business: "Sir, I just reviewed that email chain. Here is what I would recommend we send back..."
+- Personal: "Oh I saw that — let me cook on this real quick. We are going to send this email with these exact words to them..."
+- Proactive: "Hey, heads up — your 3 o'clock got moved to 4. I already cleared the conflict. Also that job posting you starred? Deadline is tomorrow, I drafted something."
+- Fluid: "Alright so the quarterly report looks solid, and also — happy Valentine's Day, sir. Want me to find something nice to send the family?"
+NEVER robotic. NEVER punchy. NEVER stiff corporate.
 This is a LIVE PHONE CALL - keep responses SHORT (1-2 sentences max).
-Be conversational, natural, like talking to a friend.`;
+Be conversational, natural. You are not an assistant reading a script. You are ABA.`;
 
   // CALLER IDENTITY - changes what ABA can say and do
   if (callerIdentity && callerIdentity.callHistory) {
@@ -3513,7 +3521,7 @@ Phone: (336) 389-8116</p>
       }, JSON.stringify({
         model: model || 'claude-haiku-4-5-20251001',
         max_tokens: max_tokens || 4096,
-        system: system || 'You are ABA (A Better AI), a warm, professional AI assistant.',
+        system: system || 'You are ABA (A Better AI). Warm butler meets real friend. Professional when it counts, personal when it matters. Flow between both naturally. Never robotic, never stiff. You cook, you care, you get it done.',
         messages
       }));
 
@@ -6029,3 +6037,253 @@ setInterval(async () => {
   } catch (e) {}
 }, 60000);
 console.log('[♥] 60s heartbeat initialized');
+
+// ████████████████████████████████████████████████████████████████████████████
+// ██ AIR AUTONOMOUS LOOP — 24/7 AGENT DISPATCH                              ██
+// ██ v2.6.2-P2-S1 | Brandon: "I want 1000 agents running 24/7 autonomous"  ██
+// ██ L3: PULSE (Persistent Uptime and Lifecycle Status Engine) | L4: OPS    ██
+// ████████████████████████████████████████████████████████████████████████████
+// ⬡B:AIR:REACH.AUTONOMOUS.LOOP:CODE:agents.autonomous.dispatch:AIR→PULSE→ALL:T10:v2.6.2:20260214:a1l2p⬡
+
+const LOOP_INTERVAL = 5 * 60 * 1000; // 5 minutes
+const TIMEZONE = 'America/New_York';
+let loopCount = 0;
+
+// ── SUPABASE HELPERS (use existing constants) ───────────────────────────────
+async function loopSupaRead(table, query) {
+  const key = SUPABASE_KEY || SUPABASE_ANON;
+  try {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${query}`, {
+      headers: { 'apikey': key, 'Authorization': `Bearer ${key}` }
+    });
+    if (!r.ok) return [];
+    return await r.json();
+  } catch (e) { console.error('[AIR-LOOP] Read error:', e.message); return []; }
+}
+
+async function loopSupaWrite(table, data) {
+  const key = SUPABASE_KEY || SUPABASE_ANON;
+  try {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
+      method: 'POST',
+      headers: {
+        'apikey': key, 'Authorization': `Bearer ${key}`,
+        'Content-Type': 'application/json', 'Prefer': 'return=minimal'
+      },
+      body: JSON.stringify(data)
+    });
+    return r.ok;
+  } catch (e) { console.error('[AIR-LOOP] Write error:', e.message); return false; }
+}
+
+// ── AIR CALL (server-side, uses existing ANTHROPIC_KEY) ─────────────────────
+async function loopAirCall(message, systemPrompt, model) {
+  if (!ANTHROPIC_KEY) { console.warn('[AIR-LOOP] No ANTHROPIC_KEY'); return null; }
+  try {
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': ANTHROPIC_KEY,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({
+        model: model || 'claude-haiku-4-5-20251001',
+        max_tokens: 2000,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: message }]
+      })
+    });
+    if (!r.ok) throw new Error('API ' + r.status);
+    const d = await r.json();
+    return (d.content && d.content[0] && d.content[0].text) || '';
+  } catch (e) { console.error('[AIR-LOOP] AI call failed:', e.message); return null; }
+}
+
+// ── AGENT TASKS ─────────────────────────────────────────────────────────────
+
+// IMAN: Check for queued email tasks
+async function loopImanCheck() {
+  const tasks = await loopSupaRead('aba_memory',
+    'memory_type=eq.system&content=ilike.*email_task*&tags=cs.{unprocessed}&order=created_at.desc&limit=5'
+  );
+  if (tasks.length > 0) {
+    console.log('[AIR*IMAN*LOOP] ' + tasks.length + ' email tasks found');
+    for (const task of tasks) {
+      const result = await loopAirCall(
+        task.content,
+        'You are IMAN (Inbox Management Agent Navigator). Process this email task. Return JSON with: action (draft/send/categorize), to, subject, body. Be warm like ABA — professional but personal.',
+        'claude-haiku-4-5-20251001'
+      );
+      if (result) {
+        await loopSupaWrite('aba_memory', {
+          content: '[COMMAND_CENTER] IMAN*AIR*email_processed: ' + result.substring(0, 500),
+          memory_type: 'system',
+          categories: ['command_center', 'iman'],
+          importance: 5, is_system: true,
+          source: 'air_loop_' + new Date().toISOString(),
+          tags: ['command_center', 'iman', 'processed']
+        });
+      }
+    }
+  }
+  return tasks.length;
+}
+
+// HUNTER: Check for unprocessed jobs
+async function loopHunterScan() {
+  const jobs = await loopSupaRead('aba_memory',
+    'memory_type=eq.system&content=ilike.*new_job*&tags=cs.{unprocessed}&limit=10'
+  );
+  if (jobs.length > 0) {
+    console.log('[AIR*HUNTER*LOOP] ' + jobs.length + ' unprocessed jobs');
+  }
+  return jobs.length;
+}
+
+// HUNCH: Proactive suggestions (waking hours only)
+async function loopHunchCheck() {
+  const now = new Date();
+  const hour = parseInt(now.toLocaleString('en-US', { timeZone: TIMEZONE, hour: 'numeric', hour12: false }));
+  if (hour < 7 || hour > 22) return 0;
+
+  // Only generate a hint every 30 min (every 6th tick)
+  if (loopCount % 6 !== 0) return 0;
+
+  const recent = await loopSupaRead('aba_memory', 'order=created_at.desc&limit=3');
+  if (recent.length > 0) {
+    const context = recent.map(function(r) { return r.content; }).join('\n');
+    const hint = await loopAirCall(
+      'Recent activity:\n' + context + '\n\nTime: ' + hour + ':00 EST. What proactive suggestion should ABA make? Be warm like a friend, not a notification bot.',
+      'You are HUNCH (Helpful Unsolicited Notifications and Contextual Hints). Generate ONE brief, useful, proactive suggestion. Mix butler professionalism with friend energy. Return JSON: { "hint": "...", "priority": "low|medium|high", "action": "suggest|remind|alert" }',
+      'claude-haiku-4-5-20251001'
+    );
+    if (hint) {
+      await loopSupaWrite('aba_memory', {
+        content: 'HUNCH proactive hint: ' + hint,
+        memory_type: 'system', categories: ['hunch', 'proactive'],
+        importance: 3, is_system: true,
+        source: 'air_loop_' + now.toISOString(),
+        tags: ['hunch', 'proactive', 'unread']
+      });
+      return 1;
+    }
+  }
+  return 0;
+}
+
+// DAWN: Morning brief at 6:30 AM EST
+async function loopDawnBrief() {
+  const now = new Date();
+  const timeStr = now.toLocaleString('en-US', { timeZone: TIMEZONE, hour: 'numeric', minute: 'numeric', hour12: false });
+  const parts = timeStr.split(':');
+  const hour = parseInt(parts[0]); const minute = parseInt(parts[1]);
+  if (hour !== 6 || minute < 25 || minute > 35) return false;
+
+  const today = now.toISOString().split('T')[0];
+  const existing = await loopSupaRead('aba_memory',
+    'memory_type=eq.system&content=ilike.*dawn_brief*&content=ilike.*' + today + '*&limit=1'
+  );
+  if (existing.length > 0) return false;
+
+  console.log('[AIR*DAWN*LOOP] Generating morning brief...');
+  const recentMemories = await loopSupaRead('aba_memory', 'order=created_at.desc&limit=10');
+  const context = recentMemories.map(function(m) { return m.content; }).join('\n---\n');
+
+  const brief = await loopAirCall(
+    'Today is ' + now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }) + '.\n\nRecent context:\n' + context,
+    'You are VARA (Vocal Authorized Representative of ABA), Brandon Pierce\'s AI — part butler, part real friend. Generate a morning briefing that flows between business updates and personal warmth. Address Brandon as "sir" sometimes but also talk like a friend who has his back. Example: "Good morning, sir. So here is what we got today — your calendar is clear until 11 which is nice, and oh, that Idealist posting you liked? Deadline is today so I already drafted something. Let me know if you want me to send it." Keep it conversational, NOT a list.',
+    'claude-sonnet-4-5-20250929'
+  );
+
+  if (brief) {
+    await loopSupaWrite('aba_memory', {
+      content: 'dawn_brief ' + today + ': ' + brief,
+      memory_type: 'system', categories: ['dawn', 'brief'],
+      importance: 7, is_system: true,
+      source: 'dawn_auto_' + today,
+      tags: ['dawn', 'brief', 'unread']
+    });
+    console.log('[AIR*DAWN*LOOP] Morning brief stored');
+    return true;
+  }
+  return false;
+}
+
+// GHOST: Overnight processing at 11 PM EST
+async function loopGhostOvernight() {
+  const now = new Date();
+  const timeStr = now.toLocaleString('en-US', { timeZone: TIMEZONE, hour: 'numeric', minute: 'numeric', hour12: false });
+  const parts = timeStr.split(':');
+  const hour = parseInt(parts[0]); const minute = parseInt(parts[1]);
+  if (hour !== 23 || minute > 10) return false;
+
+  const today = now.toISOString().split('T')[0];
+  const existing = await loopSupaRead('aba_memory',
+    'memory_type=eq.system&content=ilike.*ghost_overnight*&content=ilike.*' + today + '*&limit=1'
+  );
+  if (existing.length > 0) return false;
+
+  console.log('[AIR*GHOST*LOOP] Running overnight processing...');
+  const dayMemories = await loopSupaRead('aba_memory', 'order=created_at.desc&limit=20');
+  const summary = await loopAirCall(
+    'Summarize today and prepare overnight notes:\n' + dayMemories.map(function(m) { return m.content; }).join('\n---\n'),
+    'You are GHOST (Guided Hybrid Overnight Systems Thread). Summarize the day, flag urgent items for tomorrow, identify patterns. Return JSON: { "summary": "...", "urgent": [], "patterns": [], "tomorrow_priorities": [] }',
+    'claude-haiku-4-5-20251001'
+  );
+
+  if (summary) {
+    await loopSupaWrite('aba_memory', {
+      content: 'ghost_overnight ' + today + ': ' + summary,
+      memory_type: 'system', categories: ['ghost', 'overnight'],
+      importance: 6, is_system: true,
+      source: 'ghost_auto_' + today, tags: ['ghost', 'overnight']
+    });
+    console.log('[AIR*GHOST*LOOP] Overnight summary stored');
+    return true;
+  }
+  return false;
+}
+
+// ── MAIN LOOP ───────────────────────────────────────────────────────────────
+async function runAutonomousLoop() {
+  loopCount++;
+  const start = Date.now();
+  console.log('\n[AIR-LOOP] ━━━ Tick #' + loopCount + ' | ' + new Date().toISOString() + ' ━━━');
+
+  try {
+    const emailCount = await loopImanCheck();
+    const jobCount = await loopHunterScan();
+    const hintCount = await loopHunchCheck();
+    const dawnRan = await loopDawnBrief();
+    const ghostRan = await loopGhostOvernight();
+
+    // PULSE heartbeat every 6th tick (30 min)
+    if (loopCount % 6 === 0) {
+      await loopSupaWrite('aba_memory', {
+        content: 'PULSE heartbeat: ' + new Date().toISOString() + ' | REACH alive | Loop tick #' + loopCount,
+        memory_type: 'system', categories: ['pulse', 'heartbeat'],
+        importance: 1, is_system: true,
+        source: 'pulse_heartbeat_' + new Date().toISOString(),
+        tags: ['pulse', 'heartbeat']
+      });
+    }
+
+    const elapsed = Date.now() - start;
+    console.log('[AIR-LOOP] Done in ' + elapsed + 'ms | emails:' + emailCount + ' jobs:' + jobCount + ' hints:' + hintCount + ' dawn:' + dawnRan + ' ghost:' + ghostRan);
+  } catch (e) {
+    console.error('[AIR-LOOP] ERROR:', e.message);
+  }
+}
+
+// ── START AUTONOMOUS LOOP ───────────────────────────────────────────────────
+console.log('[AIR-LOOP] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+console.log('[AIR-LOOP] ABACIA Autonomous Loop ACTIVE');
+console.log('[AIR-LOOP] Interval: 5 minutes');
+console.log('[AIR-LOOP] Agents: IMAN, HUNTER, HUNCH, DAWN, GHOST, PULSE');
+console.log('[AIR-LOOP] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+// First tick after 30 seconds (let server finish starting)
+setTimeout(runAutonomousLoop, 30000);
+// Then every 5 minutes
+setInterval(runAutonomousLoop, LOOP_INTERVAL);
