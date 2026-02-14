@@ -521,6 +521,51 @@ async function RECALL_lastConversation(callerIdentity) {
   }
 }
 
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:AIR:REACH.BRAIN.STORE:FUNC:memory.write:v2.4.2:20260214⬡
+// Store data to brain (Supabase aba_memory)
+// ═══════════════════════════════════════════════════════════════════════════════
+async function storeToBrain(data) {
+  try {
+    const payload = {
+      content: data.content || '',
+      memory_type: data.memory_type || 'system',
+      categories: data.categories || [],
+      importance: data.importance || 5,
+      is_system: data.is_system || false,
+      source: data.source || 'aba-reach',
+      tags: data.tags || []
+    };
+    
+    const SRK = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0bHhqa2Jyc3Rwd3d0enNieXZiIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MDUzMjgyMSwiZXhwIjoyMDg2MTA4ODIxfQ.G55zXnfanoUxRAoaYz-tD9FDJ53xHH-pRgDrKss_Iqo';
+    
+    const result = await httpsRequest({
+      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+      path: '/rest/v1/aba_memory',
+      method: 'POST',
+      headers: {
+        'apikey': SRK,
+        'Authorization': 'Bearer ' + SRK,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal'
+      }
+    }, JSON.stringify(payload));
+    
+    if (result.status === 201 || result.status === 200) {
+      console.log('[BRAIN STORE] Saved:', data.memory_type);
+      return true;
+    }
+    console.log('[BRAIN STORE] Failed:', result.status);
+    return false;
+    
+  } catch (e) {
+    console.log('[BRAIN STORE] Error:', e.message);
+    return false;
+  }
+}
+
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // ⬡B:AIR:REACH.MEMORY.STORE:FUNC:conversation.save:v2.4.1:20260214⬡
 // Store conversation to brain for future recall
