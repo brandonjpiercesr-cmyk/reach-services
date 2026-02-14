@@ -158,6 +158,61 @@ function httpsRequest(options, postData) {
  * TRUST LEVEL: T8 (standard agent, pre-approved by AIR)
  */
 // ⬡B:AIR:REACH.AGENT.LUKE:CODE:intelligence.query.understanding:USER→AIR→LUKE→AIR:T8:v1.5.0:20260213:l1u2k⬡
+
+// ⬡B:AIR:REACH.VOICE.CALLER_LOOKUP:CODE:voice.identity.resolver:PHONE→BRAIN→IDENTITY:T10:v2.0.2:20260214:c1l2k⬡
+// Look up caller identity from phone number
+async function lookupCallerByPhone(phoneNumber) {
+  console.log('[CALLER LOOKUP] Looking up:', phoneNumber);
+  
+  // Normalize phone number (remove +1, spaces, dashes)
+  const normalized = phoneNumber.replace(/[^0-9]/g, '').slice(-10);
+  
+  try {
+    // Search brain for contact with this phone number
+    const result = await httpsRequest({
+      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+      path: '/rest/v1/aba_memory?content=ilike.*' + normalized + '*&memory_type=eq.contact&limit=1',
+      method: 'GET',
+      headers: {
+        'apikey': SUPABASE_ANON,
+        'Authorization': 'Bearer ' + SUPABASE_ANON
+      }
+    });
+    
+    if (result.status === 200) {
+      const data = JSON.parse(result.data.toString());
+      if (data.length > 0) {
+        const contact = data[0];
+        // Try to extract name from content
+        const contentStr = contact.content || '';
+        let name = 'Contact';
+        let role = 'team_member';
+        
+        // Simple parsing - look for name patterns
+        if (contentStr.toLowerCase().includes('brandon')) {
+          name = 'Brandon';
+          role = 'owner';
+        } else if (contentStr.toLowerCase().includes('eric')) {
+          name = 'Dr. Eric Lane Sr.';
+          role = 'advisor';
+        } else if (contentStr.toLowerCase().includes('bj')) {
+          name = 'BJ Pierce';
+          role = 'team';
+        } else if (contentStr.toLowerCase().includes('cj')) {
+          name = 'CJ Moore';
+          role = 'team';
+        }
+        
+        return { name, role, phone: phoneNumber, found: true };
+      }
+    }
+  } catch (e) {
+    console.log('[CALLER LOOKUP] Error:', e.message);
+  }
+  
+  return { name: 'Caller', role: 'unknown', phone: phoneNumber, found: false };
+}
+
 async function LUKE_process(userSaid) {
   console.log('[LUKE] Processing query: "' + userSaid + '"');
   
@@ -3853,16 +3908,21 @@ Phone: (336) 389-8116</p>
       });
       
       // Route through AIR - the central brain
-      const airResponse = await AIR_process({
-        type: 'voice_conversation',
-        source: 'elevenlabs_tool',
-        content: userMessage,
-        metadata: {
-          conversation_id: conversationId,
-          caller_number: callerNumber,
-          channel: 'phone'
-        }
-      });
+      // Look up caller identity from phone number
+      let callerIdentity = { name: 'Caller', role: 'unknown' };
+      if (callerNumber && callerNumber !== 'unknown') {
+        callerIdentity = await lookupCallerByPhone(callerNumber);
+      }
+      
+      console.log('[AIR VOICE TOOL] Caller identified as:', callerIdentity.name);
+      
+      // AIR_process expects: (userSaid, history, callerIdentity, demoState)
+      const airResponse = await AIR_process(
+        userMessage,           // The actual question/request as STRING
+        [],                    // No history for now (each tool call is fresh)
+        callerIdentity,        // Who is calling
+        {}                     // No demo state
+      );
       
       // Extract the response text
       const responseText = airResponse?.response || airResponse?.message || 
