@@ -3342,7 +3342,7 @@ Phone: (336) 389-8116</p>
   }
   
   // /api/call/twiml - TwiML response for call setup with Media Stream
-  if (path === '/api/call/twiml' && method === 'GET') {
+  if (path === '/api/call/twiml' && (method === 'GET' || method === 'POST')) {
     const url = new URL(req.url, `http://${req.headers.host}`);
     const traceId = url.searchParams.get('trace') || 'unknown';
     const record = url.searchParams.get('record') !== 'false';
@@ -3641,7 +3641,7 @@ Phone: (336) 389-8116</p>
   }
   
   // /api/escalate/twiml - TwiML for escalation calls
-  if (path === '/api/escalate/twiml' && method === 'GET') {
+  if (path === '/api/escalate/twiml' && (method === 'GET' || method === 'POST')) {
     const url = new URL(req.url, `http://${req.headers.host}`);
     const msg = url.searchParams.get('msg') || 'This is an urgent message from ABA.';
     const traceId = url.searchParams.get('trace') || 'unknown';
