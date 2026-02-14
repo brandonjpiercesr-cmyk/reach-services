@@ -62,6 +62,132 @@ const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://htlxjkbrst
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0bHhqa2Jyc3Rwd3d0enNieXZiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA1MzI4MjEsImV4cCI6MjA4NjEwODgyMX0.MOgNYkezWpgxTO3ZHd0omZ0WLJOOR-tL7hONXWG9eBw';
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:AIR:REACH.BRIDGE:CONST:abacia.services:v2.3.0:20260214⬡
+// BRIDGE TO ABACIA-SERVICES
+// This is where the 22+ agents actually live and run
+// ABA-REACH (voice) → ABACIA-SERVICES (agents) → Response
+// ═══════════════════════════════════════════════════════════════════════════════
+const ABACIA_SERVICES_URL = 'https://abacia-services.onrender.com';
+
+// ⬡B:AIR:REACH.BRIDGE.AIR:FUNC:abacia.air.process:v2.3.0:20260214⬡
+// Route queries through ABACIA's AIR (which has all 22+ agents)
+async function ABACIA_AIR_process(query, context) {
+  console.log('[ABACIA BRIDGE] Routing to ABACIA-SERVICES AIR...');
+  
+  try {
+    const result = await httpsRequest({
+      hostname: 'abacia-services.onrender.com',
+      path: '/api/air/process',
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    }, JSON.stringify({
+      query: query,
+      context: context || {},
+      source: 'aba-reach-voice'
+    }));
+    
+    if (result.status === 200) {
+      const data = JSON.parse(result.data.toString());
+      console.log('[ABACIA BRIDGE] Response from AIR:', data.response?.substring(0, 100));
+      return data;
+    }
+    
+    console.log('[ABACIA BRIDGE] AIR returned:', result.status);
+    return null;
+    
+  } catch (e) {
+    console.log('[ABACIA BRIDGE] Error:', e.message);
+    return null;
+  }
+}
+
+// ⬡B:AIR:REACH.BRIDGE.EMAIL:FUNC:abacia.email.inbox:v2.3.0:20260214⬡
+// Get emails via ABACIA's IMAN agent (connected to Nylas)
+async function ABACIA_IMAN_getInbox() {
+  console.log('[ABACIA BRIDGE] Getting inbox via IMAN...');
+  
+  try {
+    const result = await httpsRequest({
+      hostname: 'abacia-services.onrender.com',
+      path: '/api/email/inbox',
+      method: 'GET',
+      headers: { 'Accept': 'application/json' }
+    });
+    
+    if (result.status === 200) {
+      const data = JSON.parse(result.data.toString());
+      if (data.success && data.emails) {
+        console.log('[ABACIA BRIDGE] Found', data.emails.length, 'emails');
+        return data;
+      }
+    }
+    
+    return { success: false, emails: [] };
+    
+  } catch (e) {
+    console.log('[ABACIA BRIDGE] Email error:', e.message);
+    return { success: false, emails: [] };
+  }
+}
+
+// ⬡B:AIR:REACH.BRIDGE.CALENDAR:FUNC:abacia.calendar.upcoming:v2.3.0:20260214⬡
+// Get calendar via ABACIA's calendar agent
+async function ABACIA_getCalendar() {
+  console.log('[ABACIA BRIDGE] Getting calendar...');
+  
+  try {
+    const result = await httpsRequest({
+      hostname: 'abacia-services.onrender.com',
+      path: '/api/calendar/upcoming',
+      method: 'GET',
+      headers: { 'Accept': 'application/json' }
+    });
+    
+    if (result.status === 200) {
+      const data = JSON.parse(result.data.toString());
+      if (data.success && data.events) {
+        console.log('[ABACIA BRIDGE] Found', data.events.length, 'events');
+        return data;
+      }
+    }
+    
+    return { success: false, events: [] };
+    
+  } catch (e) {
+    console.log('[ABACIA BRIDGE] Calendar error:', e.message);
+    return { success: false, events: [] };
+  }
+}
+
+// ⬡B:AIR:REACH.BRIDGE.SAGE:FUNC:abacia.sage.search:v2.3.0:20260214⬡
+// Search via ABACIA's SAGE agent
+async function ABACIA_SAGE_search(query) {
+  console.log('[ABACIA BRIDGE] SAGE search:', query);
+  
+  try {
+    const result = await httpsRequest({
+      hostname: 'abacia-services.onrender.com',
+      path: '/api/sage/search?q=' + encodeURIComponent(query),
+      method: 'GET',
+      headers: { 'Accept': 'application/json' }
+    });
+    
+    if (result.status === 200) {
+      const data = JSON.parse(result.data.toString());
+      return data;
+    }
+    
+    return { results: [] };
+    
+  } catch (e) {
+    console.log('[ABACIA BRIDGE] SAGE error:', e.message);
+    return { results: [] };
+  }
+}
+
+
+
 // ⬡B:AIR:REACH.CONFIG.TWILIO:CONFIG:voice.phone.outreach:AIR→REACH→VARA,CARA:T8:v1.5.0:20260213:t2w3l⬡
 const TWILIO_PHONE = process.env.TWILIO_PHONE_NUMBER;
 
@@ -118,122 +244,6 @@ console.log('══════════════════════�
 console.log('[ABA REACH v1.9.0] FULL HIERARCHY + SIGILS + API ROUTES');
 console.log('[HIERARCHY] L6:AIR > L5:REACH > L4:VOICE,SMS,EMAIL,OMI > L3:VARA,CARA,IMAN,TASTE');
 console.log('[AIR] Hardcoded agents: LUKE, COLE, JUDE, PACK');
-// ═══════════════════════════════════════════════════════════════════════════════
-// ⬡B:AIR:REACH.CONFIG.ABACIA:CONFIG:agents.central.routing:AIR→REACH→ABACIA:T10:v1.12.0:20260214:abc1a⬡
-// ABACIA-SERVICES: Central hub for all 80 agents
-// Added: February 14, 2026
-// ═══════════════════════════════════════════════════════════════════════════════
-const ABACIA_URL = process.env.ABACIA_URL || 'https://abacia-services.onrender.com';
-
-/**
- * ⬡B:AIR:REACH.FUNC.ABACIA:FUNC:agents.dispatch:AIR→REACH→ABACIA→AGENT:T9:v1.12.0:20260214:disp⬡
- * 
- * Call any of the 80 agents on ABACIA-SERVICES
- * 
- * @param {string} agentId - Agent acronym (SAGE, VARA, GRIT, HUNTER, etc.)
- * @param {object} intent - What the agent should do
- * @param {object} request - Request payload
- * @returns {object} Agent response
- */
-async function ABACIA_dispatch(agentId, intent, request) {
-  console.log(`[ABACIA] Dispatching to ${agentId}...`);
-  
-  try {
-    const response = await httpsRequest({
-      hostname: 'abacia-services.onrender.com',
-      path: `/api/agents/${agentId}`,
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' }
-    }, JSON.stringify({ intent, request }));
-    
-    const result = JSON.parse(response.data.toString());
-    console.log(`[ABACIA] ${agentId} responded:`, result.status || 'ok');
-    return result;
-  } catch (e) {
-    console.error(`[ABACIA] ${agentId} error:`, e.message);
-    
-    // GRIT: Try resilience agent if main agent fails
-    if (agentId !== 'GRIT') {
-      console.log('[ABACIA] Calling GRIT for resilience...');
-      return ABACIA_dispatch('GRIT', { type: 'solve' }, {
-        originalAgent: agentId,
-        originalIntent: intent,
-        error: e.message
-      });
-    }
-    
-    return { status: 'error', error: e.message };
-  }
-}
-
-/**
- * ⬡B:AIR:REACH.FUNC.ABACIA_LIST:FUNC:agents.list:AIR→REACH→ABACIA:T9:v1.12.0:20260214:list⬡
- * 
- * Get list of all available agents
- */
-async function ABACIA_listAgents() {
-  try {
-    const response = await httpsRequest({
-      hostname: 'abacia-services.onrender.com',
-      path: '/api/agents',
-      method: 'GET',
-      headers: { 'Content-Type': 'application/json' }
-    });
-    return JSON.parse(response.data.toString());
-  } catch (e) {
-    console.error('[ABACIA] List agents error:', e.message);
-    return { status: 'error', error: e.message };
-  }
-}
-
-/**
- * ⬡B:AIR:REACH.FUNC.ABACIA_ROUTE:FUNC:agents.smart.routing:AIR→REACH→ABACIA→AGENT:T9:v1.12.0:20260214:route⬡
- * 
- * Smart routing: Detect intent and dispatch to correct agent
- * 
- * @param {string} userMessage - What the user said
- * @param {object} context - Additional context
- * @returns {object} Agent response
- */
-async function ABACIA_smartRoute(userMessage, context = {}) {
-  const msgLower = (userMessage || '').toLowerCase();
-  
-  // Intent detection → Agent mapping
-  if (msgLower.includes('search') || msgLower.includes('find') || msgLower.includes('look for')) {
-    return ABACIA_dispatch('SAGE', { type: 'search' }, { query: userMessage, ...context });
-  }
-  
-  if (msgLower.includes('job') || msgLower.includes('career') || msgLower.includes('interview')) {
-    return ABACIA_dispatch('HUNTER', { type: 'search' }, { query: userMessage, ...context });
-  }
-  
-  if (msgLower.includes('email') || msgLower.includes('inbox') || msgLower.includes('mail')) {
-    return ABACIA_dispatch('IMAN', { type: 'check' }, { ...context });
-  }
-  
-  if (msgLower.includes('calendar') || msgLower.includes('meeting') || msgLower.includes('schedule')) {
-    return ABACIA_dispatch('RADAR', { type: 'check' }, { ...context });
-  }
-  
-  if (msgLower.includes('speak') || msgLower.includes('say') || msgLower.includes('voice') || msgLower.includes('call')) {
-    return ABACIA_dispatch('VARA', { type: 'speak' }, { text: userMessage, ...context });
-  }
-  
-  if (msgLower.includes('write') || msgLower.includes('draft') || msgLower.includes('compose')) {
-    return ABACIA_dispatch('QUILL', { type: 'write' }, { content: userMessage, ...context });
-  }
-  
-  if (msgLower.includes('news') || msgLower.includes('headline') || msgLower.includes('breaking')) {
-    return ABACIA_dispatch('PRESS', { type: 'fetch' }, { ...context });
-  }
-  
-  if (msgLower.includes('score') || msgLower.includes('game') || msgLower.includes('sports') || msgLower.includes('nba') || msgLower.includes('nfl')) {
-    return ABACIA_dispatch('PLAY', { type: 'scores' }, { query: userMessage, ...context });
-  }
-  
-  // Default: Use TIM for quick response
-  return ABACIA_dispatch('TIM', { type: 'quick' }, { message: userMessage, ...context });
-}
 console.log('[AIR] PRIMARY: Gemini Flash 2.0 | BACKUP: Claude Haiku');
 console.log('[VARA] Voice: ' + ELEVENLABS_VOICE);
 console.log('[SIGILS] ACL 10X format on every block');
@@ -492,8 +502,28 @@ async function IMAN_readEmails(callerIdentity) {
     return { allowed: false, summary: "I would be happy to share email updates once I know who I am speaking with. May I ask your name?" };
   }
   
+  // TRY ABACIA-SERVICES FIRST (has Nylas connected)
   try {
-    // Get Gmail tokens from brain
+    console.log('[IMAN] Trying ABACIA-SERVICES for email...');
+    const abaciaResult = await ABACIA_IMAN_getInbox();
+    if (abaciaResult.success && abaciaResult.emails && abaciaResult.emails.length > 0) {
+      const emails = abaciaResult.emails;
+      const latest = emails[0];
+      const sender = latest.from?.[0]?.name || latest.from?.[0]?.email || 'Someone';
+      const subject = latest.subject || 'No subject';
+      
+      if (emails.length === 1) {
+        return { allowed: true, count: 1, summary: 'You have one email - it is from ' + sender + ' about "' + subject + '". Would you like me to read it?' };
+      } else {
+        return { allowed: true, count: emails.length, summary: 'You have ' + emails.length + ' emails. The most recent one is from ' + sender + ' regarding "' + subject + '". Want me to go through them?' };
+      }
+    }
+  } catch (e) {
+    console.log('[IMAN] ABACIA-SERVICES email failed, trying fallback:', e.message);
+  }
+  
+  // FALLBACK: Try Gmail tokens from brain
+  try {
     const tokenResult = await httpsRequest({
       hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
       path: '/rest/v1/aba_memory?memory_type=eq.gmail_credentials&limit=1&order=created_at.desc',
@@ -640,6 +670,23 @@ async function RADAR_getCalendar(callerIdentity) {
     return { allowed: false, summary: "I can share your schedule once I know who I am speaking with." };
   }
   
+  // TRY ABACIA-SERVICES FIRST (has calendar connected)
+  try {
+    console.log('[RADAR] Trying ABACIA-SERVICES for calendar...');
+    const abaciaResult = await ABACIA_getCalendar();
+    if (abaciaResult.success && abaciaResult.events) {
+      const events = abaciaResult.events;
+      if (events.length === 0) {
+        return { allowed: true, count: 0, summary: "Your calendar is clear today. Nothing scheduled - a good day to focus on what matters most." };
+      }
+      const eventNames = events.slice(0, 3).map(e => e.title || e.summary || 'Event').join(', ');
+      return { allowed: true, count: events.length, summary: 'You have ' + events.length + ' things on your calendar today, including ' + eventNames + '. Want me to walk you through them?' };
+    }
+  } catch (e) {
+    console.log('[RADAR] ABACIA-SERVICES calendar failed, trying fallback:', e.message);
+  }
+  
+  // FALLBACK: Try Google Calendar token from brain
   try {
     // Check for Google Calendar token in brain
     const tokenResult = await httpsRequest({
@@ -1882,114 +1929,6 @@ async function checkEmails(pulseId) {
           from,
           timestamp: new Date().toISOString()
         });
-      }
-      
-      // ⬡B:AIR:REACH.PULSE.IDEALIST_SCAN:CODE:email.idealist.auto_parse:PULSE→IMAN→HUNTER→BRAIN:T9:v2.6.7:20260214:i1d2e⬡
-      // L6: AIR | L4: EMAIL | L3: IMAN | L2: worker.js | L1: idealist_auto_scan
-      // Brandon: IMAN reads Claudette's inbox, finds Idealist emails, auto-seeds jobs
-      const isIdealist = from.includes('idealist.org') || combined.includes('idealist');
-      if (isIdealist) {
-        const idealistKey = `idealist_${msg.id}`;
-        if (CALL_COOLDOWN.has(idealistKey)) continue;
-        CALL_COOLDOWN.set(idealistKey, Date.now());
-        
-        console.log(`[PULSE:IMAN] 📧 Idealist email detected: "${subject}" - fetching full body...`);
-        
-        try {
-          // Get full email body (snippet doesn't have URLs)
-          const fullMsg = await httpsRequest({
-            hostname: 'api.us.nylas.com',
-            path: '/v3/grants/' + grantId + '/messages/' + msg.id,
-            method: 'GET',
-            headers: { 'Authorization': 'Bearer ' + NYLAS_API_KEY, 'Accept': 'application/json' }
-          });
-          const fullData = JSON.parse(fullMsg.data.toString()).data || JSON.parse(fullMsg.data.toString());
-          const emailBody = fullData.body || fullData.snippet || '';
-          
-          // Decode Postmark tracking URLs to get real Idealist URLs
-          const trackingUrls = emailBody.match(/https?:\/\/track\.pstmrk\.it\/3s\/(www\.idealist\.org[^\s"<>]+)/g) || [];
-          const directUrls = emailBody.match(/https?:\/\/(?:www\.)?idealist\.org\/(?:en\/)?(?:nonprofit-job|job|consultant-job|internship|volunteer-opportunity)\/[^\s"<>)&\]]+/g) || [];
-          
-          const allRaw = [];
-          // Decode tracking URLs
-          for (const tu of trackingUrls) {
-            const match = tu.match(/\/3s\/(www\.idealist\.org[^\s"<>]+)/);
-            if (match) {
-              const decoded = decodeURIComponent(match[1]).replace(/\?.*$/, '');
-              if (decoded.includes('/job/') || decoded.includes('/nonprofit-job/') || decoded.includes('/consultant-job/') || decoded.includes('/internship/')) {
-                allRaw.push('https://' + decoded);
-              }
-            }
-          }
-          // Add direct URLs
-          for (const du of directUrls) {
-            allRaw.push(du.replace(/\?.*$/, ''));
-          }
-          
-          // Deduplicate
-          const jobUrls = [...new Set(allRaw)];
-          console.log(`[PULSE:IMAN] Found ${jobUrls.length} Idealist job URLs`);
-          
-          let seededCount = 0;
-          for (const jobUrl of jobUrls) {
-            // Dedup: check if already in brain
-            const existing = await httpsRequest({
-              hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-              path: '/rest/v1/aba_memory?memory_type=eq.parsed_job&content=ilike.*' + encodeURIComponent(jobUrl.split('/').pop().substring(0, 30)) + '*&limit=1',
-              method: 'GET',
-              headers: { 'apikey': SUPABASE_KEY || SUPABASE_ANON, 'Authorization': 'Bearer ' + (SUPABASE_KEY || SUPABASE_ANON) }
-            });
-            const existingJobs = JSON.parse(existing.data.toString());
-            if (existingJobs.length > 0) continue; // Already seeded
-            
-            // Extract title from URL slug
-            const slug = jobUrl.split('/').pop();
-            const titleClean = slug.replace(/^[a-f0-9]{20,}-/, '').replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-            
-            const jobData = {
-              title: titleClean,
-              url: jobUrl,
-              source: 'idealist',
-              source_email: 'claudette@globalmajoritygroup.com',
-              status: 'new',
-              seeded_at: new Date().toISOString().split('T')[0],
-              auto_seeded: true
-            };
-            
-            await httpsRequest({
-              hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-              path: '/rest/v1/aba_memory',
-              method: 'POST',
-              headers: {
-                'apikey': SUPABASE_KEY,
-                'Authorization': 'Bearer ' + SUPABASE_KEY,
-                'Content-Type': 'application/json',
-                'Prefer': 'return=minimal'
-              }
-            }, JSON.stringify({
-              content: JSON.stringify(jobData),
-              memory_type: 'parsed_job',
-              categories: ['jobs', 'idealist', 'claudette', 'automated'],
-              importance: 6, is_system: true,
-              source: 'iman_auto_scan_' + new Date().toISOString().split('T')[0],
-              tags: ['parsed_job', 'idealist', 'claudette', 'new', 'automated']
-            }));
-            seededCount++;
-          }
-          
-          if (seededCount > 0) {
-            console.log(`[PULSE:IMAN] ✅ Auto-seeded ${seededCount} new jobs from Idealist`);
-            broadcastToCommandCenter({
-              type: 'idealist_jobs_seeded',
-              pulseId,
-              count: seededCount,
-              email: subject,
-              timestamp: new Date().toISOString()
-            });
-          }
-        } catch (idealistErr) {
-          console.error('[PULSE:IMAN] Idealist scan error:', idealistErr.message);
-        }
       }
     }
   } catch (e) {
@@ -3970,46 +3909,6 @@ function jsonResponse(res, status, data) {
 // ⬡B:AIR:REACH.API.AIR_TEXT:CODE:routing.text.chat:USER→REACH→AIR→AGENTS→MODEL→USER:T8:v1.5.0:20260213:a1t2x⬡
 // AIR for text chat (higher token limits than voice)
 async function AIR_text(userMessage, history) {
-  // ═══════════════════════════════════════════════════════════════════════
-  // ⬡B:AIR:REACH.ROUTING.ABACIA:CODE:agents.80.routing:AIR→ABACIA→AGENT:T9:v1.12.0:20260214:r80⬡
-  // Check if message should route to one of 80 ABACIA agents
-  // Added: February 14, 2026
-  // ═══════════════════════════════════════════════════════════════════════
-  const msgLower = (userMessage || '').toLowerCase();
-  
-  // Route to ABACIA agents for specific intents
-  const abaciaKeywords = [
-    'search brain', 'find in memory', 'look up', 'semantic search',  // SAGE
-    'job search', 'career', 'interview prep', 'apply to',            // HUNTER, DOD
-    'news', 'headline', 'breaking', "what's happening",              // PRESS
-    'score', 'game', 'sports', 'nba', 'nfl', 'mlb',                  // PLAY
-    'draft email', 'write email', 'compose',                         // QUILL
-    'check calendar', 'my schedule', 'appointments',                 // RADAR
-    'check inbox', 'unread emails',                                  // IMAN
-    'meeting notes', 'meeting summary',                              // MARK
-    'bs check', 'review my writing'                                  // DRAFT
-  ];
-  
-  const shouldUseABACIA = abaciaKeywords.some(kw => msgLower.includes(kw));
-  
-  if (shouldUseABACIA) {
-    console.log('[AIR] Routing to ABACIA agents...');
-    try {
-      const abaciaResult = await ABACIA_smartRoute(userMessage, { history });
-      if (abaciaResult && abaciaResult.status !== 'error') {
-        return {
-          response: abaciaResult.response || abaciaResult.result || JSON.stringify(abaciaResult),
-          isGoodbye: false,
-          source: 'ABACIA',
-          agent: abaciaResult.agent || abaciaResult.acronym
-        };
-      }
-    } catch (e) {
-      console.log('[AIR] ABACIA routing failed, falling back to default:', e.message);
-    }
-  }
-  
-  // Continue with original flow for general chat
   const lukeAnalysis = await LUKE_process(userMessage);
   if (lukeAnalysis.isGoodbye) {
     return { response: "Take care! We are all ABA.", isGoodbye: true };
@@ -4552,63 +4451,6 @@ Phone: (336) 389-8116</p>
   // ⬡B:AIR:REACH.API.CLAUDE:CODE:models.proxy.anthropic:USER→REACH→ANTHROPIC→USER:T8:v1.5.0:20260213:c1l2d⬡ /api/models/claude - CLAUDE PROXY
   // Direct pass-through to Anthropic API for 1A Shell/CCWA
   // ═══════════════════════════════════════════════════════════════════════
-
-  // ═══════════════════════════════════════════════════════════════════════════════
-  // ⬡B:AIR:REACH.API.AGENTS:CODE:agents.proxy.abacia:USER→REACH→ABACIA→AGENTS:T9:v1.12.0:20260214:agnt⬡
-  // /api/agents/* - Proxy to ABACIA-SERVICES (80 agents)
-  // Added: February 14, 2026
-  // ═══════════════════════════════════════════════════════════════════════════════
-  if (path.startsWith('/api/agents')) {
-    try {
-      // Extract agent ID from path: /api/agents/SAGE -> SAGE
-      const agentPath = path.replace('/api/agents', '') || '/';
-      const agentId = agentPath.split('/')[1] || null;
-      
-      if (method === 'GET' && !agentId) {
-        // GET /api/agents - List all agents
-        const result = await ABACIA_listAgents();
-        return jsonResponse(res, 200, result);
-      }
-      
-      if (method === 'GET' && agentId) {
-        // GET /api/agents/:id - Get agent config
-        const result = await ABACIA_dispatch(agentId, { type: 'config' }, {});
-        return jsonResponse(res, 200, result);
-      }
-      
-      if (method === 'POST' && agentId) {
-        // POST /api/agents/:id - Dispatch to agent
-        const body = await parseBody(req);
-        const result = await ABACIA_dispatch(agentId, body.intent || {}, body.request || body);
-        return jsonResponse(res, 200, result);
-      }
-      
-      return jsonResponse(res, 400, { error: 'Invalid agents request' });
-    } catch (e) {
-      console.error('[AGENTS] Error:', e.message);
-      return jsonResponse(res, 500, { error: e.message });
-    }
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════════════
-  // ⬡B:AIR:REACH.API.SMARTROUTE:CODE:agents.smart.routing:USER→REACH→ABACIA→AGENT:T9:v1.12.0:20260214:smrt⬡
-  // /api/smart-route - Auto-detect intent and route to best agent
-  // Added: February 14, 2026
-  // ═══════════════════════════════════════════════════════════════════════════════
-  if (path === '/api/smart-route' && method === 'POST') {
-    try {
-      const body = await parseBody(req);
-      if (!body.message) return jsonResponse(res, 400, { error: 'message required' });
-      
-      console.log('[SMART-ROUTE] Routing:', body.message.substring(0, 50) + '...');
-      const result = await ABACIA_smartRoute(body.message, body.context || {});
-      return jsonResponse(res, 200, result);
-    } catch (e) {
-      console.error('[SMART-ROUTE] Error:', e.message);
-      return jsonResponse(res, 500, { error: e.message });
-    }
-  }
-
   if (path === '/api/models/claude' && method === 'POST') {
     try {
       const body = await parseBody(req);
