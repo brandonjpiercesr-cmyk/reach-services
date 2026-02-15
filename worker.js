@@ -259,7 +259,7 @@ const REACH_URL = process.env.REACH_URL || 'https://aba-reach.onrender.com';
 
 // ⬡B:AIR:REACH.SERVER.STARTUP:CODE:infrastructure.logging.boot:AIR→REACH:T10:v1.5.0:20260213:b0o1t⬡
 console.log('═══════════════════════════════════════════════════════════');
-console.log('[ABA REACH v2.6.0] FULL HIERARCHY + SIGILS + API ROUTES');
+console.log('[ABA REACH v2.6.1] FULL HIERARCHY + SIGILS + API ROUTES');
 console.log('[HIERARCHY] L6:AIR > L5:REACH > L4:VOICE,SMS,EMAIL,OMI > L3:VARA,CARA,IMAN,TASTE');
 console.log('[AIR] Hardcoded agents: LUKE, COLE, JUDE, PACK');
 console.log('[AIR] PRIMARY: Gemini Flash 2.0 | BACKUP: Claude Haiku');
@@ -3798,7 +3798,7 @@ async function postCallAutomation(session) {
     '<h3>Conversation Summary</h3>' +
     '<p>' + topicsDiscussed.replace(/\|/g, '<br>') + '</p>' +
     '<hr style="border:1px solid #e5e7eb">' +
-    '<p style="color:#9ca3af;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v2.6.0</p>' +
+    '<p style="color:#9ca3af;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v2.6.1</p>' +
     '</div>';
   
   const emailResult = await sendEmailFromCall(
@@ -3820,7 +3820,7 @@ async function postCallAutomation(session) {
   const notifyResult = await sendSMSFromCall('+13363898116', brandonNotify);
   
   // ALSO email Brandon
-  const brandonEmailHtml = '<div style="font-family:system-ui;max-width:600px;margin:0 auto"><h2>ABA Call Report</h2><p><strong>Caller:</strong> ' + callerName + '</p><p><strong>Phone:</strong> ' + callerNumber + '</p><p><strong>Duration:</strong> ' + turnCount + ' turns</p><p><strong>Topics:</strong> ' + topicsDiscussed.substring(0, 300) + '</p><p style="color:#888;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v2.6.0</p></div>';
+  const brandonEmailHtml = '<div style="font-family:system-ui;max-width:600px;margin:0 auto"><h2>ABA Call Report</h2><p><strong>Caller:</strong> ' + callerName + '</p><p><strong>Phone:</strong> ' + callerNumber + '</p><p><strong>Duration:</strong> ' + turnCount + ' turns</p><p><strong>Topics:</strong> ' + topicsDiscussed.substring(0, 300) + '</p><p style="color:#888;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v2.6.1</p></div>';
   const brandonEmail = await sendEmailFromCall('brandonjpiercesr@gmail.com', 'Brandon', 'ABA Call Report: ' + callerName + ' called', brandonEmailHtml);
   if (brandonEmail.success) console.log('[POST-CALL] Brandon email report sent');
   if (notifyResult.success) {
@@ -4924,7 +4924,7 @@ const httpServer = http.createServer(async (req, res) => {
   if (path === '/' || path === '/health') {
     return jsonResponse(res, 200, {
       status: 'ALIVE',
-      service: 'ABA REACH v2.6.0',
+      service: 'ABA REACH v2.6.1',
       mode: 'FULL API + VOICE + OMI',
       air: 'ABA Intellectual Role - CENTRAL ORCHESTRATOR',
       models: { primary: 'Gemini Flash 2.0', backup: 'Claude Haiku', speed_fallback: 'Groq' },
@@ -7584,7 +7584,7 @@ ccWss.on('connection', (ws, req) => {
   // Send welcome message with system status
   ws.send(JSON.stringify({
     type: 'connected',
-    service: 'ABA REACH v2.6.0 - AUTONOMY LAYER ACTIVE',
+    service: 'ABA REACH v2.6.1 - AUTONOMY LAYER ACTIVE',
     timestamp: new Date().toISOString(),
     agents: ['AIR', 'VARA', 'LUKE', 'COLE', 'JUDE', 'PACK', 'IMAN', 'TASTE', 'DIAL', 'PULSE', 'SAGE'],
     features: ['proactive_email', 'deadline_alerts', 'auto_escalation', 'device_sync']
@@ -7959,6 +7959,88 @@ async function REACH_heartbeat() {
       console.log('[HEARTBEAT] ABACIA: ' + (status.heartbeat?.running ? 'ALIVE' : 'DOWN'));
     }
     
+    // ═══════════════════════════════════════════════════════════════════════════
+    // ⬡B:ABCD:ABAOS:HEARTBEAT.ELEVENLABS.POLL:v2.6.1:20260214⬡
+    // Poll ElevenLabs for completed calls and log to brain
+    // ═══════════════════════════════════════════════════════════════════════════
+    try {
+      const elevenResult = await httpsRequest({
+        hostname: 'api.elevenlabs.io',
+        path: '/v1/convai/conversations?agent_id=' + (process.env.ELEVENLABS_AGENT_ID || 'agent_0601khe2q0gben08ws34bzf7a0sa'),
+        method: 'GET',
+        headers: { 
+          'xi-api-key': process.env.ELEVENLABS_API_KEY || '',
+          'Accept': 'application/json'
+        }
+      });
+      
+      if (elevenResult.status === 200) {
+        const elevenData = JSON.parse(elevenResult.data.toString());
+        const convos = elevenData.conversations || [];
+        
+        // Check each conversation to see if we've logged it
+        for (const convo of convos.slice(0, 5)) {
+          const convoId = convo.conversation_id;
+          const startTime = convo.start_time_unix_secs;
+          const duration = convo.call_duration_secs;
+          const title = convo.call_summary_title || 'Unknown';
+          
+          // Check if we already logged this call
+          const checkResult = await httpsRequest({
+            hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+            path: '/rest/v1/aba_memory?source=eq.elevenlabs_' + convoId + '&select=id',
+            method: 'GET',
+            headers: {
+              'apikey': SUPABASE_ANON,
+              'Authorization': 'Bearer ' + SUPABASE_ANON
+            }
+          });
+          
+          if (checkResult.status === 200) {
+            const existing = JSON.parse(checkResult.data.toString());
+            if (existing.length === 0) {
+              // New call - log it!
+              console.log('[HEARTBEAT] New call found: ' + convoId + ' - ' + title);
+              
+              // Get full transcript
+              const transcriptResult = await httpsRequest({
+                hostname: 'api.elevenlabs.io',
+                path: '/v1/convai/conversations/' + convoId,
+                method: 'GET',
+                headers: { 
+                  'xi-api-key': process.env.ELEVENLABS_API_KEY || '',
+                  'Accept': 'application/json'
+                }
+              });
+              
+              let transcript = '';
+              if (transcriptResult.status === 200) {
+                const fullConvo = JSON.parse(transcriptResult.data.toString());
+                const messages = fullConvo.transcript || [];
+                if (Array.isArray(messages)) {
+                  transcript = messages.map(m => (m.role || '').toUpperCase() + ': ' + (m.message || '')).join('\n');
+                }
+              }
+              
+              // Store to brain
+              await storeToBrain({
+                content: 'VOICE CALL ' + convoId + ' (Duration: ' + duration + 's): ' + title + '\n\n' + transcript.substring(0, 3000),
+                memory_type: 'voice_transcript',
+                categories: ['voice', 'elevenlabs', 'auto_logged'],
+                importance: 7,
+                source: 'elevenlabs_' + convoId,
+                tags: ['voice', 'call', 'elevenlabs', 'auto']
+              });
+              
+              console.log('[HEARTBEAT] Logged call: ' + convoId);
+            }
+          }
+        }
+      }
+    } catch (elevenErr) {
+      console.log('[HEARTBEAT] ElevenLabs poll error:', elevenErr.message);
+    }
+    
     // Broadcast to Command Center
     broadcastToCommandCenter({
       type: 'heartbeat',
@@ -7991,7 +8073,7 @@ function getHeartbeatStatus() {
 httpServer.listen(PORT, '0.0.0.0', () => {
   console.log('');
   console.log('═══════════════════════════════════════════════════════════');
-  console.log('[ABA REACH v2.6.0] LIVE on port ' + PORT);
+  console.log('[ABA REACH v2.6.1] LIVE on port ' + PORT);
   console.log('═══════════════════════════════════════════════════════════');
   console.log('[AIR] ABA Intellectual Role - ONLINE');
   console.log('[AIR] PRIMARY: Gemini Flash 2.0');
