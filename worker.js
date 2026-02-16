@@ -6068,14 +6068,24 @@ const httpServer = http.createServer(async (req, res) => {
     return jsonResponse(res, 200, {
       status: 'ALIVE',
       service: 'ABA TOUCH v2.12.0-INTEL',
-      mode: 'FULL API + VOICE + OMI + GROUP CALLS + SCHEDULED CALLS',
+      mode: 'FULL API + VOICE + OMI + SMS + SPEECH INTELLIGENCE',
       air: 'ABA Intellectual Role - CENTRAL ORCHESTRATOR',
       models: { primary: 'Gemini Flash 2.0', backup: 'Claude Haiku', speed_fallback: 'Groq' },
-      agents: { hardcoded: ['LUKE', 'COLE', 'JUDE', 'PACK'], voice: 'VARA' },
+      agents: { hardcoded: ['LUKE', 'COLE', 'JUDE', 'PACK'], voice: 'VARA', intelligence: 'DEEPGRAM' },
       voice: 'ElevenLabs ' + ELEVENLABS_VOICE,
       phone: TWILIO_PHONE,
-      capabilities: ['outbound_calls', 'group_calls', 'scheduled_calls', 'voicemail_drops', 'call_transfers', 'dawn_briefings', 'speech_intelligence', 'email_send'],
-      api_routes: ['/api/router', '/api/voice/analyze', '/api/iman/send-gmail', '/api/cron/scheduled-calls', '/api/voice/deepgram-token', '/api/omi/manifest', '/api/omi/webhook', '/api/sms/send'],
+      capabilities: [
+        'outbound_calls', 'group_calls', 'scheduled_calls', 'voicemail_drops', 
+        'call_transfers', 'dawn_briefings', 'speech_intelligence', 'email_send',
+        'sms_receive', 'call_recording', 'call_transcription'
+      ],
+      api_routes: [
+        '/api/router', '/api/voice/analyze', '/api/iman/send-gmail', 
+        '/api/cron/scheduled-calls', '/api/voice/deepgram-token', 
+        '/api/omi/manifest', '/api/omi/webhook', 
+        '/api/sms/send', '/api/sms/receive',
+        '/api/elevenlabs/webhook', '/api/call/intelligence/:id', '/api/calls/recent'
+      ],
       speech_intelligence: ['diarization', 'topics', 'entities', 'intent', 'sentiment', 'summarization', 'language_detection'],
       message: 'We are all ABA'
     });
@@ -7124,6 +7134,267 @@ Phone: (336) 389-8116</p>
       const json = JSON.parse(result.data.toString());
       console.log('[SMS] Sent to ' + to + ': ' + (json.sid || 'error'));
       return jsonResponse(res, result.status, { success: !!json.sid, sid: json.sid, status: json.status, error: json.message });
+    } catch (e) {
+      return jsonResponse(res, 500, { error: e.message });
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // ⬡B:TOUCH:API.SMS.RECEIVE:endpoint:20260216⬡
+  // SMS RECEIVE - Webhook for incoming Twilio SMS
+  // Configure in Twilio: https://console.twilio.com > Phone Numbers > +13362037510
+  // Set "A MESSAGE COMES IN" to: https://aba-reach.onrender.com/api/sms/receive POST
+  // ═══════════════════════════════════════════════════════════════════════
+  if (path === '/api/sms/receive' && method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      
+      // Twilio sends form data
+      const from = body.From || body.from || 'unknown';
+      const to = body.To || body.to || TWILIO_PHONE;
+      const smsBody = body.Body || body.body || '';
+      const messageSid = body.MessageSid || body.messageSid || 'unknown';
+      
+      console.log('[SMS RECEIVE] From:', from, '| Message:', smsBody.substring(0, 50));
+      
+      // Look up who texted
+      const sender = lookupContact(from) || { name: from, phone: from };
+      
+      // Store to brain
+      await storeToBrain({
+        content: `SMS FROM ${sender.name}: ${smsBody}`,
+        memory_type: 'sms_received',
+        categories: ['sms', 'inbound', sender.name.toLowerCase()],
+        importance: 7,
+        tags: ['sms', 'inbound', messageSid],
+        source: 'sms_receive_' + messageSid
+      });
+      
+      // Route through AIR to generate response
+      let responseText = "Got your message! I'll let Brandon know.";
+      
+      try {
+        const airResult = await AIR_process(smsBody, {
+          source: 'sms',
+          caller: sender,
+          phone: from
+        });
+        
+        if (airResult && airResult.response) {
+          responseText = airResult.response;
+        }
+      } catch (e) {
+        console.log('[SMS RECEIVE] AIR error:', e.message);
+      }
+      
+      // Respond with TwiML
+      res.writeHead(200, { 'Content-Type': 'text/xml' });
+      return res.end(`<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Message>${responseText}</Message>
+</Response>`);
+      
+    } catch (e) {
+      console.log('[SMS RECEIVE] Error:', e.message);
+      res.writeHead(200, { 'Content-Type': 'text/xml' });
+      return res.end(`<?xml version="1.0" encoding="UTF-8"?><Response></Response>`);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // ⬡B:TOUCH:API.ELEVENLABS.WEBHOOK:endpoint:20260216⬡
+  // ELEVENLABS CALL WEBHOOK - Receives call completion events
+  // Configure in ElevenLabs agent settings: Webhook URL
+  // Captures: recording URL, transcripts, conversation data
+  // ═══════════════════════════════════════════════════════════════════════
+  if (path === '/api/elevenlabs/webhook' && method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      
+      console.log('[ELEVENLABS WEBHOOK] Event received:', body.type || 'unknown');
+      
+      const eventType = body.type || body.event_type;
+      const conversationId = body.conversation_id || body.conversationId;
+      const recordingUrl = body.recording_url || body.recordingUrl;
+      const transcript = body.transcript || body.transcription;
+      const duration = body.duration || body.call_duration;
+      
+      // Store the raw event
+      await storeToBrain({
+        content: JSON.stringify(body),
+        memory_type: 'elevenlabs_webhook',
+        categories: ['elevenlabs', 'webhook', eventType || 'unknown'],
+        importance: 6,
+        tags: ['elevenlabs', 'webhook', conversationId],
+        source: 'elevenlabs_webhook_' + (conversationId || Date.now())
+      });
+      
+      // If call completed with recording, analyze it
+      if (recordingUrl && (eventType === 'call.completed' || eventType === 'conversation.ended')) {
+        console.log('[ELEVENLABS WEBHOOK] Recording available:', recordingUrl);
+        
+        // Store recording reference
+        await storeToBrain({
+          content: `CALL RECORDING | ConvID: ${conversationId} | URL: ${recordingUrl} | Duration: ${duration}s | Date: ${new Date().toISOString()}`,
+          memory_type: 'call_recording',
+          categories: ['call', 'recording', 'elevenlabs'],
+          importance: 7,
+          tags: ['call', 'recording', conversationId],
+          source: 'elevenlabs_recording_' + conversationId
+        });
+        
+        // Trigger full speech intelligence analysis
+        console.log('[ELEVENLABS WEBHOOK] Triggering Deepgram analysis...');
+        
+        // Run analysis in background (don't block webhook response)
+        analyzeCallWithDeepgram(recordingUrl).then(analysis => {
+          if (analysis) {
+            console.log('[ELEVENLABS WEBHOOK] Analysis complete:', {
+              topics: analysis.topics?.length || 0,
+              sentiment: analysis.sentiment?.overall || 'unknown',
+              summary: analysis.summary?.substring(0, 50) || 'none'
+            });
+            
+            // Store enhanced analysis with call reference
+            storeToBrain({
+              content: JSON.stringify({
+                conversation_id: conversationId,
+                recording_url: recordingUrl,
+                duration: duration,
+                analysis: analysis
+              }),
+              memory_type: 'call_intelligence',
+              categories: ['call', 'intelligence', 'analyzed'],
+              importance: 8,
+              tags: ['call', 'intelligence', conversationId, ...(analysis.topics?.slice(0, 5) || [])],
+              source: 'call_intelligence_' + conversationId
+            });
+          }
+        }).catch(e => {
+          console.log('[ELEVENLABS WEBHOOK] Analysis error:', e.message);
+        });
+      }
+      
+      // If transcript provided, store it
+      if (transcript) {
+        await storeToBrain({
+          content: `CALL TRANSCRIPT (${conversationId}):\n${transcript}`,
+          memory_type: 'call_transcript',
+          categories: ['call', 'transcript', 'elevenlabs'],
+          importance: 7,
+          tags: ['call', 'transcript', conversationId],
+          source: 'elevenlabs_transcript_' + conversationId
+        });
+      }
+      
+      return jsonResponse(res, 200, { 
+        success: true, 
+        message: 'Webhook processed',
+        conversation_id: conversationId,
+        recording_received: !!recordingUrl,
+        transcript_received: !!transcript
+      });
+      
+    } catch (e) {
+      console.log('[ELEVENLABS WEBHOOK] Error:', e.message);
+      return jsonResponse(res, 200, { success: false, error: e.message });
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // ⬡B:TOUCH:API.CALL.INTELLIGENCE:endpoint:20260216⬡
+  // GET /api/call/intelligence/:conversation_id - Get speech intelligence for a call
+  // ═══════════════════════════════════════════════════════════════════════
+  if (path.startsWith('/api/call/intelligence/') && method === 'GET') {
+    try {
+      const conversationId = path.split('/').pop();
+      
+      if (!conversationId) {
+        return jsonResponse(res, 400, { error: 'conversation_id required' });
+      }
+      
+      // Query brain for this call's intelligence
+      const result = await httpsRequest({
+        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+        path: '/rest/v1/aba_memory?source=eq.call_intelligence_' + conversationId + '&select=content&limit=1',
+        method: 'GET',
+        headers: {
+          'apikey': SUPABASE_KEY || SUPABASE_ANON,
+          'Authorization': 'Bearer ' + (SUPABASE_KEY || SUPABASE_ANON)
+        }
+      });
+      
+      if (result.status === 200) {
+        const data = JSON.parse(result.data.toString());
+        if (data.length > 0) {
+          const intelligence = JSON.parse(data[0].content);
+          return jsonResponse(res, 200, {
+            success: true,
+            conversation_id: conversationId,
+            intelligence: intelligence
+          });
+        }
+      }
+      
+      return jsonResponse(res, 404, { 
+        error: 'Intelligence not found for this call',
+        conversation_id: conversationId,
+        hint: 'Call may still be processing or recording not available'
+      });
+      
+    } catch (e) {
+      return jsonResponse(res, 500, { error: e.message });
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // ⬡B:TOUCH:API.CALLS.RECENT:endpoint:20260216⬡
+  // GET /api/calls/recent - Get recent calls with intelligence
+  // ═══════════════════════════════════════════════════════════════════════
+  if (path === '/api/calls/recent' && method === 'GET') {
+    try {
+      const url = new URL(req.url, 'https://' + req.headers.host);
+      const limit = parseInt(url.searchParams.get('limit')) || 10;
+      
+      // Query brain for recent call intelligence
+      const result = await httpsRequest({
+        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+        path: '/rest/v1/aba_memory?memory_type=eq.call_intelligence&order=created_at.desc&limit=' + limit + '&select=content,created_at,source',
+        method: 'GET',
+        headers: {
+          'apikey': SUPABASE_KEY || SUPABASE_ANON,
+          'Authorization': 'Bearer ' + (SUPABASE_KEY || SUPABASE_ANON)
+        }
+      });
+      
+      if (result.status === 200) {
+        const data = JSON.parse(result.data.toString());
+        const calls = data.map(d => {
+          try {
+            const intel = JSON.parse(d.content);
+            return {
+              conversation_id: intel.conversation_id,
+              created_at: d.created_at,
+              duration: intel.duration,
+              summary: intel.analysis?.summary || null,
+              sentiment: intel.analysis?.sentiment?.overall || 'unknown',
+              topics: intel.analysis?.topics?.slice(0, 5) || [],
+              entities: intel.analysis?.entities?.slice(0, 5) || []
+            };
+          } catch (e) {
+            return null;
+          }
+        }).filter(Boolean);
+        
+        return jsonResponse(res, 200, {
+          success: true,
+          count: calls.length,
+          calls: calls
+        });
+      }
+      
+      return jsonResponse(res, 200, { success: true, count: 0, calls: [] });
+      
     } catch (e) {
       return jsonResponse(res, 500, { error: e.message });
     }
