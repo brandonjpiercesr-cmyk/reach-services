@@ -259,7 +259,7 @@ const REACH_URL = process.env.REACH_URL || 'https://aba-reach.onrender.com';
 
 // ⬡B:AIR:REACH.SERVER.STARTUP:CODE:infrastructure.logging.boot:AIR→REACH:T10:v1.5.0:20260213:b0o1t⬡
 console.log('═══════════════════════════════════════════════════════════');
-console.log('[ABA REACH v2.8.6] FULL HIERARCHY + SIGILS + API ROUTES');
+console.log('[ABA REACH v2.9.0] FULL HIERARCHY + SIGILS + API ROUTES');
 console.log('[HIERARCHY] L6:AIR > L5:REACH > L4:VOICE,SMS,EMAIL,OMI > L3:VARA,CARA,IMAN,TASTE');
 console.log('[AIR] Hardcoded agents: LUKE, COLE, JUDE, PACK');
 console.log('[AIR] PRIMARY: Gemini Flash 2.0 | BACKUP: Claude Haiku');
@@ -3798,7 +3798,7 @@ async function postCallAutomation(session) {
     '<h3>Conversation Summary</h3>' +
     '<p>' + topicsDiscussed.replace(/\|/g, '<br>') + '</p>' +
     '<hr style="border:1px solid #e5e7eb">' +
-    '<p style="color:#9ca3af;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v2.8.6</p>' +
+    '<p style="color:#9ca3af;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v2.9.0</p>' +
     '</div>';
   
   const emailResult = await sendEmailFromCall(
@@ -3820,7 +3820,7 @@ async function postCallAutomation(session) {
   const notifyResult = await sendSMSFromCall('+13363898116', brandonNotify);
   
   // ALSO email Brandon
-  const brandonEmailHtml = '<div style="font-family:system-ui;max-width:600px;margin:0 auto"><h2>ABA Call Report</h2><p><strong>Caller:</strong> ' + callerName + '</p><p><strong>Phone:</strong> ' + callerNumber + '</p><p><strong>Duration:</strong> ' + turnCount + ' turns</p><p><strong>Topics:</strong> ' + topicsDiscussed.substring(0, 300) + '</p><p style="color:#888;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v2.8.6</p></div>';
+  const brandonEmailHtml = '<div style="font-family:system-ui;max-width:600px;margin:0 auto"><h2>ABA Call Report</h2><p><strong>Caller:</strong> ' + callerName + '</p><p><strong>Phone:</strong> ' + callerNumber + '</p><p><strong>Duration:</strong> ' + turnCount + ' turns</p><p><strong>Topics:</strong> ' + topicsDiscussed.substring(0, 300) + '</p><p style="color:#888;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v2.9.0</p></div>';
   const brandonEmail = await sendEmailFromCall('brandonjpiercesr@gmail.com', 'Brandon', 'ABA Call Report: ' + callerName + ' called', brandonEmailHtml);
   if (brandonEmail.success) console.log('[POST-CALL] Brandon email report sent');
   if (notifyResult.success) {
@@ -4968,7 +4968,7 @@ const httpServer = http.createServer(async (req, res) => {
   if (path === '/' || path === '/health') {
     return jsonResponse(res, 200, {
       status: 'ALIVE',
-      service: 'ABA REACH v2.8.6',
+      service: 'ABA REACH v2.9.0',
       mode: 'FULL API + VOICE + OMI',
       air: 'ABA Intellectual Role - CENTRAL ORCHESTRATOR',
       models: { primary: 'Gemini Flash 2.0', backup: 'Claude Haiku', speed_fallback: 'Groq' },
@@ -7162,25 +7162,22 @@ Phone: (336) 389-8116</p>
     let twiml;
     
     if (mode === 'twoway') {
-      // 2-WAY CONVERSATION using Media Streams
-      // ⬡B:TOUCH:FIX:escalate.twiml.start:20260216⬡
-      // FIX: Use <Start><Stream> not <Connect><Stream>
-      // <Connect> expects ConversationRelay protocol, but /media-stream uses regular media events
-      const safeGreeting = msg.replace(/"/g, "'").replace(/&/g, "and").replace(/</g, "").replace(/>/g, "");
+      // ⬡B:TOUCH:FIX:escalate.connect.conversationrelay:20260216⬡
+      // REAL 2-WAY CONVERSATION using ConversationRelay
+      // <Connect><Stream> = bidirectional with ConversationRelay protocol
+      // <Start><Stream> = one-way monitoring only (WRONG for 2-way!)
       
-      // Build WebSocket URL
-      const wsUrl = 'wss://' + req.headers.host + '/media-stream?trace=' + traceId + '-outbound';
+      const safeGreeting = msg.replace(/"/g, "'").replace(/&/g, "and").replace(/</g, "").replace(/>/g, "");
+      const wsUrl = 'wss://' + req.headers.host + '/conversation-relay?trace=' + traceId + '&greeting=' + encodeURIComponent(safeGreeting);
       
       twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Play>${REACH_URL}/api/voice/tts-stream?text=${encodeURIComponent(safeGreeting)}</Play>
-  <Start>
-    <Stream url="${wsUrl}" track="both_tracks">
+  <Connect>
+    <Stream url="${wsUrl}">
       <Parameter name="outbound" value="true"/>
-      <Parameter name="callerNumber" value="aba-outbound"/>
+      <Parameter name="greeting" value="${safeGreeting.substring(0, 200)}"/>
     </Stream>
-  </Start>
-  <Pause length="3600"/>
+  </Connect>
 </Response>`;
     } else {
       // One-way announcement mode (legacy)
@@ -7766,7 +7763,7 @@ ccWss.on('connection', (ws, req) => {
   // Send welcome message with system status
   ws.send(JSON.stringify({
     type: 'connected',
-    service: 'ABA REACH v2.8.6 - AUTONOMY LAYER ACTIVE',
+    service: 'ABA REACH v2.9.0 - AUTONOMY LAYER ACTIVE',
     timestamp: new Date().toISOString(),
     agents: ['AIR', 'VARA', 'LUKE', 'COLE', 'JUDE', 'PACK', 'IMAN', 'TASTE', 'DIAL', 'PULSE', 'SAGE'],
     features: ['proactive_email', 'deadline_alerts', 'auto_escalation', 'device_sync']
@@ -7887,24 +7884,55 @@ const crSessions = new Map(); // callSid -> session data
 crWss.on('connection', async (ws, req) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const traceId = url.searchParams.get('trace') || 'cr-' + Date.now();
+  const greeting = url.searchParams.get('greeting') || '';
   
   console.log('[CR] New ConversationRelay connection | Trace:', traceId);
+  console.log('[CR] Greeting:', greeting.substring(0, 50) + '...');
+  
+  // DEBUG: Log to brain
+  fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
+    method: 'POST',
+    headers: { 'apikey': SUPABASE_KEY || SUPABASE_ANON, 'Authorization': `Bearer ${SUPABASE_KEY || SUPABASE_ANON}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+    body: JSON.stringify({ content: `DEBUG CR CONNECTION: trace=${traceId}, greeting=${greeting.substring(0,50)}`, memory_type: 'debug', source: 'cr_connect_' + Date.now() })
+  }).catch(e => {});
   
   const sessionData = {
     traceId,
     history: [],
-    callSid: null
+    callSid: null,
+    greeting: greeting,
+    greetingSent: false
   };
   
   ws.on('message', async (data) => {
     try {
       const message = JSON.parse(data.toString());
       
+      // DEBUG: Log message
+      fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
+        method: 'POST',
+        headers: { 'apikey': SUPABASE_KEY || SUPABASE_ANON, 'Authorization': `Bearer ${SUPABASE_KEY || SUPABASE_ANON}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+        body: JSON.stringify({ content: `DEBUG CR MESSAGE: type=${message.type}`, memory_type: 'debug', source: 'cr_msg_' + Date.now() })
+      }).catch(e => {});
+      
       switch (message.type) {
         case 'setup':
           sessionData.callSid = message.callSid;
           crSessions.set(message.callSid, sessionData);
           console.log('[CR] Setup complete | CallSid:', message.callSid);
+          
+          // ⬡B:TOUCH:FIX:cr.greeting.on.setup:20260216⬡
+          // Send greeting immediately after setup
+          if (sessionData.greeting && !sessionData.greetingSent) {
+            console.log('[CR] Sending greeting...');
+            sessionData.greetingSent = true;
+            ws.send(JSON.stringify({
+              type: 'text',
+              token: sessionData.greeting,
+              last: true
+            }));
+            console.log('[CR] Greeting sent!');
+          }
           break;
           
         case 'prompt':
@@ -7912,27 +7940,54 @@ crWss.on('connection', async (ws, req) => {
           const userText = message.voicePrompt;
           console.log('[CR] User:', userText);
           
+          // DEBUG: Log to brain
+          fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
+            method: 'POST',
+            headers: { 'apikey': SUPABASE_KEY || SUPABASE_ANON, 'Authorization': `Bearer ${SUPABASE_KEY || SUPABASE_ANON}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+            body: JSON.stringify({ content: `DEBUG CR PROMPT: user said "${userText.substring(0,80)}"`, memory_type: 'debug', source: 'cr_prompt_' + Date.now() })
+          }).catch(e => {});
+          
           // Route through AIR for intelligent response
+          // For outbound calls (with greeting), assume it's Brandon
+          const callerIdentity = sessionData.greeting 
+            ? { name: 'Brandon', trust: 'owner', access: 'full' }
+            : { name: 'Phone Caller', trust: 'medium', access: 'standard' };
+          
           try {
-            const response = await AIR_process(
+            const result = await AIR_process(
               userText, 
               sessionData.history, 
-              { name: 'Phone Caller', trust: 'medium', access: 'standard' },
+              callerIdentity,
               null
             );
             
+            const responseText = result.response || result;
+            
             // Add to history
             sessionData.history.push({ role: 'user', content: userText });
-            sessionData.history.push({ role: 'assistant', content: response });
+            sessionData.history.push({ role: 'assistant', content: responseText });
             
-            console.log('[CR] ABA:', response.substring(0, 100) + '...');
+            console.log('[CR] ABA:', (responseText || '').substring(0, 100) + '...');
+            
+            // DEBUG: Log response
+            fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
+              method: 'POST',
+              headers: { 'apikey': SUPABASE_KEY || SUPABASE_ANON, 'Authorization': `Bearer ${SUPABASE_KEY || SUPABASE_ANON}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+              body: JSON.stringify({ content: `DEBUG CR RESPONSE: "${(responseText || '').substring(0,80)}"`, memory_type: 'debug', source: 'cr_response_' + Date.now() })
+            }).catch(e => {});
             
             // Send response - ConversationRelay will TTS it
             ws.send(JSON.stringify({
               type: 'text',
-              token: response,
+              token: responseText,
               last: true
             }));
+            
+            // Check for goodbye
+            if (result.isGoodbye) {
+              console.log('[CR] Goodbye detected, closing...');
+              setTimeout(() => ws.close(), 3000);
+            }
           } catch (e) {
             console.error('[CR] AIR error:', e.message);
             ws.send(JSON.stringify({
@@ -8359,7 +8414,7 @@ function getHeartbeatStatus() {
 httpServer.listen(PORT, '0.0.0.0', () => {
   console.log('');
   console.log('═══════════════════════════════════════════════════════════');
-  console.log('[ABA REACH v2.8.6] LIVE on port ' + PORT);
+  console.log('[ABA REACH v2.9.0] LIVE on port ' + PORT);
   console.log('═══════════════════════════════════════════════════════════');
   console.log('[AIR] ABA Intellectual Role - ONLINE');
   console.log('[AIR] PRIMARY: Gemini Flash 2.0');
