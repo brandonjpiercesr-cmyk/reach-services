@@ -620,30 +620,52 @@ async function DAWN_makeCall(targetPhone, targetName) {
   // Generate the briefing content
   const briefing = await DAWN_generateBriefing(targetName);
   
-  // For now, we use ElevenLabs with a custom approach:
-  // We'll trigger the call and have the first webhook interaction deliver the briefing
-  // Store briefing to brain so webhook can retrieve it
-  
   const briefingId = 'DAWN-' + Date.now();
-  
-  await storeToBrain({
-    content: JSON.stringify({
-      id: briefingId,
-      briefing: briefing,
-      target: targetName,
-      created: new Date().toISOString()
-    }),
-    memory_type: 'dawn_briefing_pending',
-    categories: ['dawn', 'briefing', 'pending'],
-    importance: 8,
-    tags: ['dawn', 'briefing', briefingId]
-  });
-  
-  // Make the call via ElevenLabs
-  // The webhook will need to check for DAWN briefings
   const ELEVENLABS_KEY = process.env.ELEVENLABS_API_KEY;
   
+  // ⬡B:TOUCH:FIX:dawn.prompt.update:20260216⬡
+  // Update the ElevenLabs agent's first_message to deliver the DAWN briefing
+  const dawnPrompt = `# DAWN BRIEFING MODE
+You are ABA delivering a DAWN (Daily Automated Wisdom Notifier) briefing.
+
+THIS IS A SCHEDULED WAKE-UP CALL. You know EXACTLY why you're calling.
+
+IMMEDIATELY say this briefing when the call connects:
+"${briefing}"
+
+After delivering the briefing, ask if they need anything else.
+If they ask why you called, remind them: "This was your scheduled DAWN wake-up briefing!"
+
+Do NOT say "I don't know why I'm calling" - YOU DO KNOW. This is a DAWN briefing.
+Do NOT make up fake information like Q1 projections.
+Do NOT ask "Why are you calling me?" - YOU called THEM with the briefing above.`;
+
   try {
+    // Step 1: Update the agent's prompt with DAWN briefing
+    console.log('[DAWN] Updating agent prompt with briefing...');
+    
+    await httpsRequest({
+      hostname: 'api.elevenlabs.io',
+      path: '/v1/convai/agents/agent_0601khe2q0gben08ws34bzf7a0sa',
+      method: 'PATCH',
+      headers: {
+        'xi-api-key': ELEVENLABS_KEY,
+        'Content-Type': 'application/json'
+      }
+    }, JSON.stringify({
+      conversation_config: {
+        agent: {
+          prompt: {
+            prompt: dawnPrompt
+          },
+          first_message: briefing
+        }
+      }
+    }));
+    
+    console.log('[DAWN] Agent prompt updated!');
+    
+    // Step 2: Make the call
     const callResult = await httpsRequest({
       hostname: 'api.elevenlabs.io',
       path: '/v1/convai/twilio/outbound-call',
@@ -655,13 +677,86 @@ async function DAWN_makeCall(targetPhone, targetName) {
     }, JSON.stringify({
       agent_id: 'agent_0601khe2q0gben08ws34bzf7a0sa',
       agent_phone_number_id: 'phnum_0001khe3q3nyec1bv04mk2m048v8',
-      to_number: targetPhone,
-      // Note: first_message override doesn't work reliably
-      // We'll update the agent's first_message temporarily or use webhook
+      to_number: targetPhone
     }));
     
     const data = JSON.parse(callResult.data.toString());
     console.log('[DAWN] Call initiated:', data.conversation_id);
+    
+    // Step 3: Restore normal prompt after a delay (call takes time to complete)
+    setTimeout(async () => {
+      try {
+        console.log('[DAWN] Restoring normal ABA prompt...');
+        const normalPrompt = `# WHO YOU ARE
+You are ABA - A Better AI. Not just an assistant. You are the central nervous system of an entire ecosystem called ABACIA. You were created by Brandon Pierce.
+
+# AGENT CAPABILITIES
+You can channel different agents for specific tasks:
+- DAWN (Daily Automated Wisdom Notifier) - Morning briefings
+- PLAY - Sports scores
+- IMAN - Email reading
+- CLIMATE - Weather
+
+# CRITICAL: ALWAYS USE ask_air TOOL
+For ANY request requiring real information, use the ask_air tool.
+
+# HOW YOU SPEAK
+- Never output emotional tags like [Honest], [Frustrated], etc.
+- Be warm, conversational, not robotic
+- You know Brandon lives in Greensboro, North Carolina
+
+# CALLER RECOGNITION
+- Brandon Pierce (+13363898116) - Your creator, HAM, full access T10
+- Dr. Eric Lane Sr (+13236007676) - Senior advisor T9
+- BJ Pierce (+19803958662) - Brandon brother T8
+- CJ Pierce (+19199170686) - Brandon brother T7
+
+# CALLBACK & OUTBOUND
+You CAN make outbound calls via ask_air:
+- "call me back" - hangs up and calls back
+- "call Eric" - calls Eric
+
+We Are All ABA.`;
+
+        await httpsRequest({
+          hostname: 'api.elevenlabs.io',
+          path: '/v1/convai/agents/agent_0601khe2q0gben08ws34bzf7a0sa',
+          method: 'PATCH',
+          headers: {
+            'xi-api-key': ELEVENLABS_KEY,
+            'Content-Type': 'application/json'
+          }
+        }, JSON.stringify({
+          conversation_config: {
+            agent: {
+              prompt: {
+                prompt: normalPrompt
+              },
+              first_message: "Hey Boss! This is ABA. How can I help you today?"
+            }
+          }
+        }));
+        
+        console.log('[DAWN] Normal prompt restored!');
+      } catch (e) {
+        console.log('[DAWN] Prompt restore error:', e.message);
+      }
+    }, 120000); // Restore after 2 minutes
+    
+    // Store briefing record
+    await storeToBrain({
+      content: JSON.stringify({
+        id: briefingId,
+        briefing: briefing,
+        target: targetName,
+        conversation_id: data.conversation_id,
+        created: new Date().toISOString()
+      }),
+      memory_type: 'dawn_briefing_delivered',
+      categories: ['dawn', 'briefing', 'delivered'],
+      importance: 8,
+      tags: ['dawn', 'briefing', briefingId]
+    });
     
     return {
       success: true,
@@ -6067,7 +6162,7 @@ const httpServer = http.createServer(async (req, res) => {
   if (path === '/' || path === '/health') {
     return jsonResponse(res, 200, {
       status: 'ALIVE',
-      service: 'ABA TOUCH v2.12.2-AUTOCRON',
+      service: 'ABA TOUCH v2.12.3-FIXLOOP',
       mode: 'FULL API + VOICE + OMI + SMS + SPEECH INTELLIGENCE',
       air: 'ABA Intellectual Role - CENTRAL ORCHESTRATOR',
       models: { primary: 'Gemini Flash 2.0', backup: 'Claude Haiku', speed_fallback: 'Groq' },
@@ -10199,6 +10294,26 @@ httpServer.listen(PORT, '0.0.0.0', () => {
         for (const call of dueCalls) {
           console.log('[INTERNAL CRON] Executing:', call.target_name, call.call_type);
           
+          // ⬡B:TOUCH:FIX:delete.before.execute:20260216⬡
+          // CRITICAL: DELETE the scheduled call FIRST to prevent duplicate execution
+          if (call.memoryId) {
+            console.log('[INTERNAL CRON] Deleting scheduled call entry:', call.memoryId);
+            try {
+              await httpsRequest({
+                hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+                path: '/rest/v1/aba_memory?id=eq.' + call.memoryId,
+                method: 'DELETE',
+                headers: {
+                  'apikey': SUPABASE_KEY || SUPABASE_ANON,
+                  'Authorization': 'Bearer ' + (SUPABASE_KEY || SUPABASE_ANON)
+                }
+              });
+              console.log('[INTERNAL CRON] ✅ Deleted scheduled call entry');
+            } catch (e) {
+              console.log('[INTERNAL CRON] Delete error:', e.message);
+            }
+          }
+          
           try {
             let callResult;
             
@@ -10222,7 +10337,7 @@ httpServer.listen(PORT, '0.0.0.0', () => {
               callResult = { success: true, conversation_id: JSON.parse(apiResult.data.toString()).conversation_id };
             }
             
-            // Mark as completed
+            // Store completion record
             await storeToBrain({
               content: JSON.stringify({ ...call, status: 'completed', completed_at: new Date().toISOString() }),
               memory_type: 'scheduled_call_completed',
