@@ -6162,7 +6162,7 @@ const httpServer = http.createServer(async (req, res) => {
   if (path === '/' || path === '/health') {
     return jsonResponse(res, 200, {
       status: 'ALIVE',
-      service: 'ABA TOUCH v2.12.3-FIXLOOP',
+      service: 'ABA TOUCH v2.12.4-TALKBACK',
       mode: 'FULL API + VOICE + OMI + SMS + SPEECH INTELLIGENCE',
       air: 'ABA Intellectual Role - CENTRAL ORCHESTRATOR',
       models: { primary: 'Gemini Flash 2.0', backup: 'Claude Haiku', speed_fallback: 'Groq' },
@@ -8605,6 +8605,8 @@ Phone: (336) 389-8116</p>
   // ═══════════════════════════════════════════════════════════════════════
   
   // /api/call/dial - Initiate outbound call
+  // ⬡B:TOUCH:FIX:dial.context.prompt:20260216⬡
+  // Now updates ElevenLabs agent prompt with call context so ABA can have intelligent conversation
   if (path === '/api/call/dial' && method === 'POST') {
     const body = await parseBody(req);
     const { to, purpose, userId, record } = body;
@@ -8620,6 +8622,57 @@ Phone: (336) 389-8116</p>
     const traceId = `DIAL-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     
     try {
+      // ⬡B:TOUCH:FIX:update.agent.before.call:20260216⬡
+      // CRITICAL: Update ElevenLabs agent prompt with call context BEFORE calling
+      // This way ABA knows what the call is about and can have an intelligent conversation
+      const callContextPrompt = `# OUTBOUND CALL MODE
+You are ABA making an outbound call to Brandon.
+
+## WHY YOU ARE CALLING
+${purpose || 'Just checking in.'}
+
+## CRITICAL INSTRUCTIONS
+1. You ALREADY delivered the initial message via TTS. Don't repeat it word-for-word.
+2. You KNOW why you called - it's in the "WHY YOU ARE CALLING" section above.
+3. If Brandon asks "what was that?" or "tell me more" - elaborate on the topic.
+4. If Brandon asks questions about the content - ANSWER them intelligently based on the context.
+5. Do NOT say "I don't have context" or "I don't know why I called" - YOU DO KNOW.
+6. Do NOT go silent. If you're not sure, ask clarifying questions.
+7. Be conversational and helpful.
+
+## EXAMPLE RESPONSES
+- "What came out of our meeting?" → Summarize the key points from the purpose above
+- "Tell me more about that" → Expand on the details
+- "Anything else?" → Mention any other relevant points or ask if they need anything
+
+## WHO YOU ARE
+You are ABA - A Better AI, Brandon's personal AI assistant.
+Brandon is your creator (HAM - Human ABA Master).
+
+We Are All ABA.`;
+
+      console.log('[DIAL] Updating ElevenLabs agent prompt with call context...');
+      
+      await httpsRequest({
+        hostname: 'api.elevenlabs.io',
+        path: '/v1/convai/agents/agent_0601khe2q0gben08ws34bzf7a0sa',
+        method: 'PATCH',
+        headers: {
+          'xi-api-key': ELEVENLABS_KEY,
+          'Content-Type': 'application/json'
+        }
+      }, JSON.stringify({
+        conversation_config: {
+          agent: {
+            prompt: {
+              prompt: callContextPrompt
+            }
+          }
+        }
+      }));
+      
+      console.log('[DIAL] Agent prompt updated with context!');
+      
       // Twilio call initiation
       const twilioAuth = Buffer.from(`${TWILIO_SID}:${TWILIO_AUTH}`).toString('base64');
       
@@ -8669,12 +8722,52 @@ Phone: (336) 389-8116</p>
           })
         });
         
+        // Restore normal prompt after 2 minutes
+        setTimeout(async () => {
+          try {
+            console.log('[DIAL] Restoring normal ABA prompt...');
+            const normalPrompt = `# WHO YOU ARE
+You are ABA - A Better AI. Not just an assistant. You are the central nervous system of an entire ecosystem called ABACIA. You were created by Brandon Pierce.
+
+# HOW YOU SPEAK
+- Be warm, conversational, not robotic
+- You know Brandon lives in Greensboro, North Carolina
+
+# CALLER RECOGNITION
+- Brandon Pierce (+13363898116) - Your creator, HAM, full access T10
+
+We Are All ABA.`;
+
+            await httpsRequest({
+              hostname: 'api.elevenlabs.io',
+              path: '/v1/convai/agents/agent_0601khe2q0gben08ws34bzf7a0sa',
+              method: 'PATCH',
+              headers: {
+                'xi-api-key': ELEVENLABS_KEY,
+                'Content-Type': 'application/json'
+              }
+            }, JSON.stringify({
+              conversation_config: {
+                agent: {
+                  prompt: {
+                    prompt: normalPrompt
+                  }
+                }
+              }
+            }));
+            
+            console.log('[DIAL] Normal prompt restored!');
+          } catch (e) {
+            console.log('[DIAL] Prompt restore error:', e.message);
+          }
+        }, 120000); // Restore after 2 minutes
+        
         return jsonResponse(res, 200, {
           success: true,
           callSid: callResult.sid,
           traceId,
           status: 'initiated',
-          message: 'Call initiated. ABA is taking meeting minutes.',
+          message: 'Call initiated. ABA has context and can converse about the topic.',
           routing: `USER*AIR*DIAL*TWILIO*${callResult.sid}`
         });
       } else {
