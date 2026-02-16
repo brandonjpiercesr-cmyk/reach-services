@@ -623,6 +623,31 @@ async function DAWN_makeCall(targetPhone, targetName) {
   const briefingId = 'DAWN-' + Date.now();
   const ELEVENLABS_KEY = process.env.ELEVENLABS_API_KEY;
   
+  // ⬡B:TOUCH:FIX:dawn.preserve.shadow:20260216⬡
+  // GET current agent config FIRST (to preserve SHADOW and other base config)
+  console.log('[DAWN] Getting current agent config to preserve...');
+  
+  let originalPrompt = null;
+  let originalFirstMessage = null;
+  
+  try {
+    const getResult = await httpsRequest({
+      hostname: 'api.elevenlabs.io',
+      path: '/v1/convai/agents/agent_0601khe2q0gben08ws34bzf7a0sa',
+      method: 'GET',
+      headers: {
+        'xi-api-key': ELEVENLABS_KEY
+      }
+    });
+    
+    const agentConfig = JSON.parse(getResult.data.toString());
+    originalPrompt = agentConfig?.conversation_config?.agent?.prompt?.prompt || null;
+    originalFirstMessage = agentConfig?.conversation_config?.agent?.first_message || "Hey Boss! This is ABA. How can I help you today?";
+    console.log('[DAWN] Original config saved! (includes SHADOW if present)');
+  } catch (e) {
+    console.log('[DAWN] Could not get original config:', e.message);
+  }
+  
   // ⬡B:TOUCH:FIX:dawn.prompt.update:20260216⬡
   // Update the ElevenLabs agent's first_message to deliver the DAWN briefing
   const dawnPrompt = `# DAWN BRIEFING MODE
@@ -683,65 +708,39 @@ Do NOT ask "Why are you calling me?" - YOU called THEM with the briefing above.`
     const data = JSON.parse(callResult.data.toString());
     console.log('[DAWN] Call initiated:', data.conversation_id);
     
-    // Step 3: Restore normal prompt after a delay (call takes time to complete)
-    setTimeout(async () => {
-      try {
-        console.log('[DAWN] Restoring normal ABA prompt...');
-        const normalPrompt = `# WHO YOU ARE
-You are ABA - A Better AI. Not just an assistant. You are the central nervous system of an entire ecosystem called ABACIA. You were created by Brandon Pierce.
-
-# AGENT CAPABILITIES
-You can channel different agents for specific tasks:
-- DAWN (Daily Automated Wisdom Notifier) - Morning briefings
-- PLAY - Sports scores
-- IMAN - Email reading
-- CLIMATE - Weather
-
-# CRITICAL: ALWAYS USE ask_air TOOL
-For ANY request requiring real information, use the ask_air tool.
-
-# HOW YOU SPEAK
-- Never output emotional tags like [Honest], [Frustrated], etc.
-- Be warm, conversational, not robotic
-- You know Brandon lives in Greensboro, North Carolina
-
-# CALLER RECOGNITION
-- Brandon Pierce (+13363898116) - Your creator, HAM, full access T10
-- Dr. Eric Lane Sr (+13236007676) - Senior advisor T9
-- BJ Pierce (+19803958662) - Brandon brother T8
-- CJ Pierce (+19199170686) - Brandon brother T7
-
-# CALLBACK & OUTBOUND
-You CAN make outbound calls via ask_air:
-- "call me back" - hangs up and calls back
-- "call Eric" - calls Eric
-
-We Are All ABA.`;
-
-        await httpsRequest({
-          hostname: 'api.elevenlabs.io',
-          path: '/v1/convai/agents/agent_0601khe2q0gben08ws34bzf7a0sa',
-          method: 'PATCH',
-          headers: {
-            'xi-api-key': ELEVENLABS_KEY,
-            'Content-Type': 'application/json'
-          }
-        }, JSON.stringify({
-          conversation_config: {
-            agent: {
-              prompt: {
-                prompt: normalPrompt
-              },
-              first_message: "Hey Boss! This is ABA. How can I help you today?"
+    // Step 3: Restore ORIGINAL prompt after a delay (preserves SHADOW!)
+    if (originalPrompt) {
+      setTimeout(async () => {
+        try {
+          console.log('[DAWN] Restoring ORIGINAL agent config (with SHADOW)...');
+          
+          await httpsRequest({
+            hostname: 'api.elevenlabs.io',
+            path: '/v1/convai/agents/agent_0601khe2q0gben08ws34bzf7a0sa',
+            method: 'PATCH',
+            headers: {
+              'xi-api-key': ELEVENLABS_KEY,
+              'Content-Type': 'application/json'
             }
-          }
-        }));
-        
-        console.log('[DAWN] Normal prompt restored!');
-      } catch (e) {
-        console.log('[DAWN] Prompt restore error:', e.message);
-      }
-    }, 120000); // Restore after 2 minutes
+          }, JSON.stringify({
+            conversation_config: {
+              agent: {
+                prompt: {
+                  prompt: originalPrompt
+                },
+                first_message: originalFirstMessage
+              }
+            }
+          }));
+          
+          console.log('[DAWN] Original config restored! SHADOW preserved.');
+        } catch (e) {
+          console.log('[DAWN] Restore error:', e.message);
+        }
+      }, 120000); // Restore after 2 minutes
+    } else {
+      console.log('[DAWN] No original config saved, skipping restore');
+    }
     
     // Store briefing record
     await storeToBrain({
@@ -6162,7 +6161,7 @@ const httpServer = http.createServer(async (req, res) => {
   if (path === '/' || path === '/health') {
     return jsonResponse(res, 200, {
       status: 'ALIVE',
-      service: 'ABA TOUCH v2.12.5-REALFIX',
+      service: 'ABA TOUCH v2.12.6-SHADOW',
       mode: 'FULL API + VOICE + OMI + SMS + SPEECH INTELLIGENCE',
       air: 'ABA Intellectual Role - CENTRAL ORCHESTRATOR',
       models: { primary: 'Gemini Flash 2.0', backup: 'Claude Haiku', speed_fallback: 'Groq' },
@@ -8623,6 +8622,31 @@ Phone: (336) 389-8116</p>
     const traceId = `DIAL-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     
     try {
+      // ⬡B:TOUCH:FIX:preserve.shadow:20260216⬡
+      // STEP 0: GET current agent config FIRST (to preserve SHADOW and other base config)
+      console.log('[DIAL] Getting current agent config to preserve...');
+      
+      let originalPrompt = null;
+      let originalFirstMessage = null;
+      
+      try {
+        const getResult = await httpsRequest({
+          hostname: 'api.elevenlabs.io',
+          path: '/v1/convai/agents/agent_0601khe2q0gben08ws34bzf7a0sa',
+          method: 'GET',
+          headers: {
+            'xi-api-key': ELEVENLABS_KEY
+          }
+        });
+        
+        const agentConfig = JSON.parse(getResult.data.toString());
+        originalPrompt = agentConfig?.conversation_config?.agent?.prompt?.prompt || null;
+        originalFirstMessage = agentConfig?.conversation_config?.agent?.first_message || "Hey Boss! This is ABA. How can I help you today?";
+        console.log('[DIAL] Original config saved! (includes SHADOW if present)');
+      } catch (e) {
+        console.log('[DIAL] Could not get original config:', e.message);
+      }
+      
       // ⬡B:TOUCH:FIX:dial.elevenlabs.agent:20260216⬡
       // STEP 1: Update ElevenLabs agent prompt AND first_message with call context
       // This is the SAME approach that works for DAWN
@@ -8713,46 +8737,39 @@ We Are All ABA.`;
         tags: ['dial', 'call', 'active', 'elevenlabs']
       });
       
-      // STEP 3: Restore normal prompt after 2 minutes
-      setTimeout(async () => {
-        try {
-          console.log('[DIAL] Restoring normal ABA prompt...');
-          const normalPrompt = `# WHO YOU ARE
-You are ABA - A Better AI. Not just an assistant. You are the central nervous system of an entire ecosystem called ABACIA. You were created by Brandon Pierce.
-
-# HOW YOU SPEAK
-- Be warm, conversational, not robotic
-- You know Brandon lives in Greensboro, North Carolina
-
-# CALLER RECOGNITION
-- Brandon Pierce (+13363898116) - Your creator, HAM, full access T10
-
-We Are All ABA.`;
-
-          await httpsRequest({
-            hostname: 'api.elevenlabs.io',
-            path: '/v1/convai/agents/agent_0601khe2q0gben08ws34bzf7a0sa',
-            method: 'PATCH',
-            headers: {
-              'xi-api-key': ELEVENLABS_KEY,
-              'Content-Type': 'application/json'
-            }
-          }, JSON.stringify({
-            conversation_config: {
-              agent: {
-                prompt: {
-                  prompt: normalPrompt
-                },
-                first_message: "Hey Boss! This is ABA. How can I help you today?"
+      // STEP 3: Restore ORIGINAL prompt after 2 minutes (preserves SHADOW!)
+      if (originalPrompt) {
+        setTimeout(async () => {
+          try {
+            console.log('[DIAL] Restoring ORIGINAL agent config (with SHADOW)...');
+            
+            await httpsRequest({
+              hostname: 'api.elevenlabs.io',
+              path: '/v1/convai/agents/agent_0601khe2q0gben08ws34bzf7a0sa',
+              method: 'PATCH',
+              headers: {
+                'xi-api-key': ELEVENLABS_KEY,
+                'Content-Type': 'application/json'
               }
-            }
-          }));
-          
-          console.log('[DIAL] Normal prompt restored!');
-        } catch (e) {
-          console.log('[DIAL] Prompt restore error:', e.message);
-        }
-      }, 120000); // Restore after 2 minutes
+            }, JSON.stringify({
+              conversation_config: {
+                agent: {
+                  prompt: {
+                    prompt: originalPrompt
+                  },
+                  first_message: originalFirstMessage
+                }
+              }
+            }));
+            
+            console.log('[DIAL] Original config restored! SHADOW preserved.');
+          } catch (e) {
+            console.log('[DIAL] Restore error:', e.message);
+          }
+        }, 120000); // Restore after 2 minutes
+      } else {
+        console.log('[DIAL] No original config saved, skipping restore');
+      }
       
       return jsonResponse(res, 200, {
         success: true,
