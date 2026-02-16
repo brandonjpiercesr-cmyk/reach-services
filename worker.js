@@ -6067,7 +6067,7 @@ const httpServer = http.createServer(async (req, res) => {
   if (path === '/' || path === '/health') {
     return jsonResponse(res, 200, {
       status: 'ALIVE',
-      service: 'ABA TOUCH v2.12.1-HOTFIX',
+      service: 'ABA TOUCH v2.12.2-AUTOCRON',
       mode: 'FULL API + VOICE + OMI + SMS + SPEECH INTELLIGENCE',
       air: 'ABA Intellectual Role - CENTRAL ORCHESTRATOR',
       models: { primary: 'Gemini Flash 2.0', backup: 'Claude Haiku', speed_fallback: 'Groq' },
@@ -10180,6 +10180,71 @@ httpServer.listen(PORT, '0.0.0.0', () => {
   startHeartbeat();
   console.log('[HEARTBEAT] Autonomous heartbeat STARTED');
   console.log('We are all ABA.');
+  console.log('═══════════════════════════════════════════════════════════');
+  
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ⬡B:TOUCH:INTERNAL.CRON:scheduled.calls.loop:20260216⬡
+  // INTERNAL CRON - Check scheduled calls every 60 seconds
+  // No external services needed! No GitHub Actions! No cron-job.org!
+  // ═══════════════════════════════════════════════════════════════════════════
+  console.log('[CRON] Starting internal scheduled calls checker (every 60s)...');
+  
+  setInterval(async () => {
+    try {
+      const dueCalls = await checkScheduledCalls();
+      
+      if (dueCalls.length > 0) {
+        console.log('[INTERNAL CRON] Found', dueCalls.length, 'scheduled call(s) due!');
+        
+        for (const call of dueCalls) {
+          console.log('[INTERNAL CRON] Executing:', call.target_name, call.call_type);
+          
+          try {
+            let callResult;
+            
+            if (call.call_type === 'dawn_briefing') {
+              callResult = await DAWN_makeCall(call.target_phone, call.target_name);
+            } else {
+              // Regular scheduled call via ElevenLabs
+              const apiResult = await httpsRequest({
+                hostname: 'api.elevenlabs.io',
+                path: '/v1/convai/twilio/outbound-call',
+                method: 'POST',
+                headers: {
+                  'xi-api-key': ELEVENLABS_KEY,
+                  'Content-Type': 'application/json'
+                }
+              }, JSON.stringify({
+                agent_id: 'agent_0601khe2q0gben08ws34bzf7a0sa',
+                agent_phone_number_id: 'phnum_0001khe3q3nyec1bv04mk2m048v8',
+                to_number: call.target_phone
+              }));
+              callResult = { success: true, conversation_id: JSON.parse(apiResult.data.toString()).conversation_id };
+            }
+            
+            // Mark as completed
+            await storeToBrain({
+              content: JSON.stringify({ ...call, status: 'completed', completed_at: new Date().toISOString() }),
+              memory_type: 'scheduled_call_completed',
+              categories: ['scheduled', 'call', 'completed'],
+              importance: 6,
+              tags: ['scheduled_call', 'completed', call.target_name.toLowerCase()]
+            });
+            
+            console.log('[INTERNAL CRON] ✅ Call executed:', call.target_name);
+            
+          } catch (e) {
+            console.log('[INTERNAL CRON] ❌ Call error:', e.message);
+          }
+        }
+      }
+    } catch (e) {
+      // Silent fail - don't crash the server
+      console.log('[INTERNAL CRON] Check error:', e.message);
+    }
+  }, 60000); // Every 60 seconds
+  
+  console.log('[CRON] ✅ Internal cron ACTIVE - Checking every 60 seconds');
   console.log('═══════════════════════════════════════════════════════════');
   
   // ═══════════════════════════════════════════════════════════════════════════
