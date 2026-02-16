@@ -1578,6 +1578,93 @@ async function STORE_conversation(callerIdentity, userSaid, abaResponse, convers
   }
 }
 
+// ⬡B:AIR:REACH.AGENTS.SHADOW:FUNC:vault.access.consent:v1.0.0:20260216⬡
+// SHADOW Agent - Secure Handling And Data Oversight Watch
+// L3: Manager-level agent for vaulted data (meeting notes, transcripts, recordings)
+// Requires consent before releasing detailed information
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:ABCD:BOTH:AGENT.SHADOW⬡
+async function SHADOW_accessVault(query, callerIdentity) {
+  console.log('[SHADOW] Vault access request:', query);
+  
+  // Track consent state per conversation (would need proper session management)
+  // For now, we'll prompt for consent on every request
+  
+  // Search brain for meeting notes/transcripts
+  const searchTerms = ['meeting', 'transcript', 'omi', 'otter', 'eric', 'notes'];
+  let foundContent = [];
+  
+  try {
+    // Search for recent meeting-related content in brain
+    const searchRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/aba_memory?` + 
+      `or=(content.ilike.*meeting*,content.ilike.*transcript*,memory_type.eq.omi_transcript,memory_type.eq.voice_transcript)` +
+      `&order=created_at.desc&limit=10&select=content,source,memory_type,created_at`,
+      {
+        headers: {
+          'apikey': SUPABASE_KEY || SUPABASE_ANON,
+          'Authorization': `Bearer ${SUPABASE_KEY || SUPABASE_ANON}`
+        }
+      }
+    );
+    
+    if (searchRes.ok) {
+      foundContent = await searchRes.json();
+      console.log('[SHADOW] Found', foundContent.length, 'meeting-related entries');
+    }
+  } catch (e) {
+    console.log('[SHADOW] Brain search error:', e.message);
+  }
+  
+  // Check if we found any meeting data
+  if (foundContent.length === 0) {
+    return {
+      response: "Boss, I searched my vault but couldn't find any recent meeting notes or transcripts. Were they uploaded to Omi or Otter? I can only access what's been synced to my brain.",
+      needsConsent: false
+    };
+  }
+  
+  // We found data - check consent
+  // Look for consent keywords in query
+  const consentWords = ['consent', 'unlock', 'yes', 'authorize', 'approved', 'go ahead', 'permission'];
+  const hasConsent = consentWords.some(word => query.toLowerCase().includes(word));
+  
+  if (!hasConsent) {
+    // Need consent - this is the SHADOW protocol
+    const summary = `I found ${foundContent.length} meeting entries in my vault from recent conversations.`;
+    return {
+      response: `${summary} However, this detailed information is protected under Shadow protocol. Do you consent to unlock it for this session? Just say 'yes' or 'unlock' to proceed.`,
+      needsConsent: true,
+      entryCount: foundContent.length
+    };
+  }
+  
+  // Consent given - compile and return meeting notes
+  console.log('[SHADOW] Consent granted - releasing vault contents');
+  
+  let compiledNotes = "Alright Boss, unlocking the vault. Here's what I found:\n\n";
+  
+  for (let i = 0; i < Math.min(foundContent.length, 5); i++) {
+    const entry = foundContent[i];
+    const date = new Date(entry.created_at).toLocaleString();
+    const source = entry.source || 'Unknown';
+    const snippet = (entry.content || '').substring(0, 500);
+    
+    compiledNotes += `**Entry ${i+1}** (${source}, ${date}):\n${snippet}\n\n`;
+  }
+  
+  if (foundContent.length > 5) {
+    compiledNotes += `\n...and ${foundContent.length - 5} more entries available.`;
+  }
+  
+  return {
+    response: compiledNotes,
+    needsConsent: false,
+    released: true,
+    entryCount: foundContent.length
+  };
+}
+
 // ⬡B:AIR:REACH.AGENTS.CLIMATE:FUNC:weather.lookup:v2.4.1:20260214⬡
 // CLIMATE Agent - Weather lookup
 // L3: Manager-level agent for weather
@@ -3958,6 +4045,24 @@ async function AIR_DISPATCH(lukeAnalysis, judeResult, callerIdentity) {
   const agentNames = (judeResult?.agents || []).map(a => (a.name || '').toLowerCase());
   console.log('[AIR DISPATCH] JUDE found agents:', agentNames.join(', ') || 'none');
   
+  // ⬡B:AIR:REACH.DISPATCH.SHADOW:ROUTE:notes.transcripts.vault:v1.0.0:20260216⬡
+  // SHADOW Agent - Meeting notes, transcripts, recordings (L3: Manager, VAULT department)
+  // This is the consent-based data protection agent
+  if (query.includes('notes') || query.includes('transcript') || query.includes('recording') ||
+      query.includes('meeting') && (query.includes('detail') || query.includes('full') || query.includes('pull up')) ||
+      query.includes('omi') || query.includes('otter') || query.includes('last night') ||
+      agentNames.includes('shadow')) {
+    console.log('[AIR DISPATCH] → L3: SHADOW (Secure Handling And Data Oversight Watch)');
+    try {
+      const result = await SHADOW_accessVault(query, callerIdentity);
+      if (result) {
+        return { handled: true, agent: 'SHADOW', data: result.response, type: 'vault', needsConsent: result.needsConsent };
+      }
+    } catch (e) {
+      console.log('[AIR DISPATCH] SHADOW error:', e.message);
+    }
+  }
+
     // ⬡B:AIR:REACH.DISPATCH.CLIMATE:ROUTE:weather:v2.4.1:20260214⬡
   // CLIMATE Agent - Weather queries (L3: Manager)
   if (query.includes('weather') || query.includes('temperature') || query.includes('outside') ||
@@ -6161,7 +6266,7 @@ const httpServer = http.createServer(async (req, res) => {
   if (path === '/' || path === '/health') {
     return jsonResponse(res, 200, {
       status: 'ALIVE',
-      service: 'ABA TOUCH v2.12.6-SHADOW',
+      service: 'ABA TOUCH v2.12.7-SHADOW-AIR',
       mode: 'FULL API + VOICE + OMI + SMS + SPEECH INTELLIGENCE',
       air: 'ABA Intellectual Role - CENTRAL ORCHESTRATOR',
       models: { primary: 'Gemini Flash 2.0', backup: 'Claude Haiku', speed_fallback: 'Groq' },
