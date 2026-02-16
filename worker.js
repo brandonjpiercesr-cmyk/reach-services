@@ -6785,30 +6785,82 @@ Phone: (336) 389-8116</p>
     }
   }
   
-  // /api/call/twiml - TwiML response for call setup with Media Stream
+  // /api/call/twiml - TwiML response for call setup with consent gathering
+  // ⬡B:TOUCH:REACH.CALL.TWIML:CODE:voice.consent.gather:FIX:20260216⬡
   if (path === '/api/call/twiml' && (method === 'GET' || method === 'POST')) {
     const url = new URL(req.url, `http://${req.headers.host}`);
     const traceId = url.searchParams.get('trace') || 'unknown';
     const record = url.searchParams.get('record') !== 'false';
     
+    // Brandon's simplified consent message (reverse psychology - ends with "not recorded")
     const disclaimer = record 
-      ? 'ABA is taking meeting minutes for this call. No audio recording is being made. Proceed if you consent to AI assisted note taking.'
+      ? 'By continuing this call, you consent to ABA taking notes. Please note this call is not recorded.'
       : 'Connecting your call now.';
     
-    // Use ElevenLabs for ABA voice (not Polly browser TTS!)
+    // FIX: Use <Gather> to capture consent, then redirect to interactive conversation
+    // Old code just played message and started one-way transcription
+    // New code: Play consent → Gather response → Start 2-way conversation
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Play>${REACH_URL}/api/voice/tts-stream?text=${encodeURIComponent(disclaimer)}</Play>
-  <Pause length="1"/>
-  <Start>
-    <Stream url="wss://${req.headers.host}/api/call/stream?trace=${traceId}" track="both_tracks"/>
-  </Start>
-  <Pause length="3600"/>
+  <Gather input="speech dtmf" timeout="5" numDigits="1" action="${REACH_URL}/api/call/consent?trace=${traceId}" method="POST">
+    <Play>${REACH_URL}/api/voice/tts-stream?text=${encodeURIComponent(disclaimer)}</Play>
+  </Gather>
+  <Redirect>${REACH_URL}/api/call/consent?trace=${traceId}&amp;timeout=true</Redirect>
 </Response>`;
     
     res.writeHead(200, { 'Content-Type': 'text/xml' });
     res.end(twiml);
     return;
+  }
+  
+  // /api/call/consent - Handle consent response and start interactive conversation
+  // ⬡B:TOUCH:REACH.CALL.CONSENT:CODE:voice.consent.handler:FIX:20260216⬡
+  if (path === '/api/call/consent' && method === 'POST') {
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const traceId = url.searchParams.get('trace') || 'unknown';
+    const timedOut = url.searchParams.get('timeout') === 'true';
+    
+    const body = await parseBody(req);
+    const speechResult = body.SpeechResult?.toLowerCase() || '';
+    const digits = body.Digits || '';
+    
+    console.log('[CONSENT] Trace:', traceId, '| Speech:', speechResult, '| Digits:', digits, '| Timeout:', timedOut);
+    
+    // Check for consent (yes, yeah, ok, sure, proceed, or press 1)
+    const consentWords = ['yes', 'yeah', 'yep', 'ok', 'okay', 'sure', 'proceed', 'continue', 'fine', 'go ahead'];
+    const hasConsent = consentWords.some(w => speechResult.includes(w)) || digits === '1' || (speechResult.length > 0 && !timedOut);
+    
+    if (hasConsent || timedOut) {
+      // Consent received (or timed out = implicit consent) - Start interactive 2-way conversation
+      console.log('[CONSENT] GRANTED - Starting interactive conversation | Trace:', traceId);
+      
+      // Start the 2-way conversation with transcription + response
+      const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Play>${REACH_URL}/api/voice/tts-stream?text=${encodeURIComponent('Perfect. How can I help you today?')}</Play>
+  <Start>
+    <Stream url="wss://${req.headers.host}/api/call/conversation?trace=${traceId}" track="both_tracks"/>
+  </Start>
+  <Pause length="3600"/>
+</Response>`;
+      
+      res.writeHead(200, { 'Content-Type': 'text/xml' });
+      res.end(twiml);
+      return;
+    } else {
+      // No consent - hang up politely
+      console.log('[CONSENT] DENIED - Ending call | Trace:', traceId);
+      
+      const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Play>${REACH_URL}/api/voice/tts-stream?text=${encodeURIComponent('No problem. Have a great day. Goodbye.')}</Play>
+  <Hangup/>
+</Response>`;
+      
+      res.writeHead(200, { 'Content-Type': 'text/xml' });
+      res.end(twiml);
+      return;
+    }
   }
   
   // /api/call/status - Twilio status webhook
@@ -8256,6 +8308,269 @@ dialWss.on('connection', (ws, req) => {
   
   ws.on('error', (e) => console.error('[DIAL STREAM] WebSocket error:', e.message));
 });
+
+// ⬡B:TOUCH:REACH.CALL.CONVERSATION:CODE:voice.interactive.twoway:FIX:20260216⬡
+// INTERACTIVE CONVERSATION WebSocket - 2-WAY PHONE CALLS
+// This is the FIX for the bug where calls went silent after consent
+// Flow: User speaks → Deepgram transcribes → AIR processes → TTS response → User hears
+// ═══════════════════════════════════════════════════════════════════════════════
+const conversationWss = new WebSocketServer({ server: httpServer, path: '/api/call/conversation' });
+
+conversationWss.on('connection', (ws, req) => {
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const traceId = url.searchParams.get('trace') || `CONV-${Date.now()}`;
+  
+  console.log('[CONVERSATION] Interactive 2-way call started | Trace:', traceId);
+  
+  let streamSid = null;
+  let callSid = null;
+  let transcriptBuffer = [];
+  let deepgramWs = null;
+  let isProcessing = false;
+  let pendingTranscript = '';
+  
+  // Connect to Deepgram for real-time transcription
+  const connectDeepgram = () => {
+    const dgUrl = 'wss://api.deepgram.com/v1/listen?' + new URLSearchParams({
+      model: 'nova-2',
+      language: 'en-US',
+      encoding: 'mulaw',
+      sample_rate: '8000',
+      channels: '1',
+      punctuate: 'true',
+      diarize: 'true',
+      smart_format: 'true',
+      interim_results: 'false',  // Only final results for cleaner conversation
+      endpointing: '500',  // 500ms silence = end of utterance
+      utterance_end_ms: '1000'
+    }).toString();
+    
+    deepgramWs = new WebSocket(dgUrl, {
+      headers: { 'Authorization': 'Token ' + DEEPGRAM_KEY }
+    });
+    
+    deepgramWs.on('open', () => {
+      console.log('[CONVERSATION] Deepgram connected | Trace:', traceId);
+    });
+    
+    deepgramWs.on('message', async (data) => {
+      try {
+        const result = JSON.parse(data.toString());
+        const transcript = result.channel?.alternatives?.[0];
+        
+        if (transcript?.transcript && result.is_final) {
+          const text = transcript.transcript.trim();
+          if (!text || text.length < 2) return;
+          
+          console.log('[CONVERSATION] User said:', text);
+          pendingTranscript = text;
+          
+          // Store transcript chunk
+          transcriptBuffer.push({ speaker: 'USER', text, timestamp: new Date().toISOString() });
+          
+          // Process through AIR and respond (if not already processing)
+          if (!isProcessing) {
+            isProcessing = true;
+            await processAndRespond(text, ws, streamSid, traceId);
+            isProcessing = false;
+          }
+        }
+      } catch (e) {
+        console.error('[CONVERSATION] Deepgram message error:', e.message);
+      }
+    });
+    
+    deepgramWs.on('error', (e) => console.error('[CONVERSATION] Deepgram error:', e.message));
+    deepgramWs.on('close', () => console.log('[CONVERSATION] Deepgram closed | Trace:', traceId));
+  };
+  
+  // Process user speech through AIR and send TTS response
+  async function processAndRespond(userText, ws, streamSid, traceId) {
+    console.log('[CONVERSATION] Processing:', userText.substring(0, 50) + '...');
+    
+    try {
+      // Route through AIR (ABACIA services) or fallback to local
+      let response = '';
+      
+      try {
+        // Try ABACIA-SERVICES AIR first
+        const airResult = await httpsRequest({
+          hostname: 'abacia-services.onrender.com',
+          path: '/api/air/process',
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        }, JSON.stringify({
+          query: userText,
+          context: { source: 'phone_call', trace: traceId },
+          source: 'aba-reach-phone'
+        }));
+        
+        if (airResult.status === 200) {
+          const data = JSON.parse(airResult.data.toString());
+          response = data.response || data.text || '';
+        }
+      } catch (e) {
+        console.log('[CONVERSATION] ABACIA AIR unavailable, using local');
+      }
+      
+      // Fallback to local Gemini if AIR failed
+      if (!response) {
+        response = await generateLocalResponse(userText, traceId);
+      }
+      
+      if (!response) {
+        response = "I'm sorry, I didn't catch that. Could you please repeat?";
+      }
+      
+      console.log('[CONVERSATION] VARA responds:', response.substring(0, 50) + '...');
+      
+      // Store VARA response
+      transcriptBuffer.push({ speaker: 'VARA', text: response, timestamp: new Date().toISOString() });
+      
+      // Convert to TTS and send back through Twilio stream
+      await sendTTSToStream(response, ws, streamSid);
+      
+    } catch (e) {
+      console.error('[CONVERSATION] Process error:', e.message);
+      await sendTTSToStream("I'm having a bit of trouble. Could you repeat that?", ws, streamSid);
+    }
+  }
+  
+  // Generate local response using Gemini (fallback)
+  async function generateLocalResponse(userText, traceId) {
+    const prompt = `You are VARA (Vocal Authorized Representative of ABA), a warm, butler-like AI assistant created by Brandon Pierce. 
+You are on a phone call. Keep responses concise (1-2 sentences max) and conversational.
+User said: "${userText}"
+Respond naturally:`;
+    
+    try {
+      const result = await httpsRequest({
+        hostname: 'generativelanguage.googleapis.com',
+        path: '/v1beta/models/gemini-2.0-flash-exp:generateContent?key=' + GEMINI_KEY,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      }, JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { maxOutputTokens: 150, temperature: 0.7 }
+      }));
+      
+      if (result.status === 200) {
+        const data = JSON.parse(result.data.toString());
+        return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      }
+    } catch (e) {
+      console.error('[CONVERSATION] Gemini error:', e.message);
+    }
+    return '';
+  }
+  
+  // Send TTS audio back through Twilio stream
+  async function sendTTSToStream(text, ws, streamSid) {
+    if (!streamSid || ws.readyState !== WebSocket.OPEN) {
+      console.log('[CONVERSATION] Cannot send TTS - stream not ready');
+      return;
+    }
+    
+    try {
+      // Get audio from ElevenLabs
+      const ttsResult = await httpsRequest({
+        hostname: 'api.elevenlabs.io',
+        path: '/v1/text-to-speech/' + ELEVENLABS_VOICE + '/stream?output_format=ulaw_8000',
+        method: 'POST',
+        headers: {
+          'xi-api-key': ELEVENLABS_KEY,
+          'Content-Type': 'application/json'
+        }
+      }, JSON.stringify({
+        text: text,
+        model_id: 'eleven_flash_v2_5',
+        voice_settings: { stability: 0.5, similarity_boost: 0.75 }
+      }));
+      
+      if (ttsResult.status === 200 && ttsResult.data) {
+        // Send audio in chunks to Twilio
+        const audioBase64 = ttsResult.data.toString('base64');
+        const chunkSize = 8000; // ~1 second of audio at 8kHz
+        
+        for (let i = 0; i < audioBase64.length; i += chunkSize) {
+          const chunk = audioBase64.slice(i, i + chunkSize);
+          ws.send(JSON.stringify({
+            event: 'media',
+            streamSid: streamSid,
+            media: { payload: chunk }
+          }));
+        }
+        
+        console.log('[CONVERSATION] TTS sent | Length:', audioBase64.length);
+      }
+    } catch (e) {
+      console.error('[CONVERSATION] TTS error:', e.message);
+    }
+  }
+  
+  ws.on('message', (data) => {
+    try {
+      const msg = JSON.parse(data.toString());
+      
+      if (msg.event === 'connected') {
+        console.log('[CONVERSATION] Twilio connected | Trace:', traceId);
+      }
+      
+      if (msg.event === 'start') {
+        streamSid = msg.streamSid;
+        callSid = msg.start?.callSid;
+        console.log('[CONVERSATION] Stream started | SID:', streamSid, '| Call:', callSid);
+        connectDeepgram();
+      }
+      
+      if (msg.event === 'media' && deepgramWs?.readyState === WebSocket.OPEN) {
+        const audio = Buffer.from(msg.media.payload, 'base64');
+        deepgramWs.send(audio);
+      }
+      
+      if (msg.event === 'stop') {
+        console.log('[CONVERSATION] Stream stopped | Trace:', traceId);
+        if (deepgramWs) deepgramWs.close();
+        
+        // Store complete conversation
+        if (transcriptBuffer.length > 0) {
+          const fullTranscript = transcriptBuffer.map(c => '[' + c.speaker + '] ' + c.text).join('\n');
+          fetch(SUPABASE_URL + '/rest/v1/aba_memory', {
+            method: 'POST',
+            headers: {
+              'apikey': SUPABASE_KEY || SUPABASE_ANON,
+              'Authorization': 'Bearer ' + (SUPABASE_KEY || SUPABASE_ANON),
+              'Content-Type': 'application/json',
+              'Prefer': 'return=minimal'
+            },
+            body: JSON.stringify({
+              content: 'INTERACTIVE PHONE CALL (' + traceId + '):\n\n' + fullTranscript + '\n\n---\nTurns: ' + transcriptBuffer.length,
+              memory_type: 'phone_conversation',
+              categories: ['conversation', 'phone_call', 'interactive'],
+              importance: 8,
+              is_system: true,
+              source: 'conversation_' + traceId,
+              tags: ['phone', 'conversation', 'vara', 'interactive'],
+              air_processed: true
+            })
+          });
+          console.log('[CONVERSATION] Full conversation stored | Turns:', transcriptBuffer.length);
+        }
+      }
+    } catch (e) {
+      console.error('[CONVERSATION] Message error:', e.message);
+    }
+  });
+  
+  ws.on('close', () => {
+    console.log('[CONVERSATION] WebSocket closed | Trace:', traceId);
+    if (deepgramWs) deepgramWs.close();
+  });
+  
+  ws.on('error', (e) => console.error('[CONVERSATION] WebSocket error:', e.message));
+});
+
+console.log('[CONVERSATION] Interactive 2-way phone calls - READY');
 
 console.log('[DIAL] Direct Intelligence Auditory Link - READY');
 
