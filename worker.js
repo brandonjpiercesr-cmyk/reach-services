@@ -259,7 +259,7 @@ const REACH_URL = process.env.REACH_URL || 'https://aba-reach.onrender.com';
 
 // ⬡B:AIR:REACH.SERVER.STARTUP:CODE:infrastructure.logging.boot:AIR→REACH:T10:v1.5.0:20260213:b0o1t⬡
 console.log('═══════════════════════════════════════════════════════════');
-console.log('[ABA REACH v2.7.1] FULL HIERARCHY + SIGILS + API ROUTES');
+console.log('[ABA REACH v2.7.2] FULL HIERARCHY + SIGILS + API ROUTES');
 console.log('[HIERARCHY] L6:AIR > L5:REACH > L4:VOICE,SMS,EMAIL,OMI > L3:VARA,CARA,IMAN,TASTE');
 console.log('[AIR] Hardcoded agents: LUKE, COLE, JUDE, PACK');
 console.log('[AIR] PRIMARY: Gemini Flash 2.0 | BACKUP: Claude Haiku');
@@ -3798,7 +3798,7 @@ async function postCallAutomation(session) {
     '<h3>Conversation Summary</h3>' +
     '<p>' + topicsDiscussed.replace(/\|/g, '<br>') + '</p>' +
     '<hr style="border:1px solid #e5e7eb">' +
-    '<p style="color:#9ca3af;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v2.7.1</p>' +
+    '<p style="color:#9ca3af;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v2.7.2</p>' +
     '</div>';
   
   const emailResult = await sendEmailFromCall(
@@ -3820,7 +3820,7 @@ async function postCallAutomation(session) {
   const notifyResult = await sendSMSFromCall('+13363898116', brandonNotify);
   
   // ALSO email Brandon
-  const brandonEmailHtml = '<div style="font-family:system-ui;max-width:600px;margin:0 auto"><h2>ABA Call Report</h2><p><strong>Caller:</strong> ' + callerName + '</p><p><strong>Phone:</strong> ' + callerNumber + '</p><p><strong>Duration:</strong> ' + turnCount + ' turns</p><p><strong>Topics:</strong> ' + topicsDiscussed.substring(0, 300) + '</p><p style="color:#888;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v2.7.1</p></div>';
+  const brandonEmailHtml = '<div style="font-family:system-ui;max-width:600px;margin:0 auto"><h2>ABA Call Report</h2><p><strong>Caller:</strong> ' + callerName + '</p><p><strong>Phone:</strong> ' + callerNumber + '</p><p><strong>Duration:</strong> ' + turnCount + ' turns</p><p><strong>Topics:</strong> ' + topicsDiscussed.substring(0, 300) + '</p><p style="color:#888;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v2.7.2</p></div>';
   const brandonEmail = await sendEmailFromCall('brandonjpiercesr@gmail.com', 'Brandon', 'ABA Call Report: ' + callerName + ' called', brandonEmailHtml);
   if (brandonEmail.success) console.log('[POST-CALL] Brandon email report sent');
   if (notifyResult.success) {
@@ -4924,7 +4924,7 @@ const httpServer = http.createServer(async (req, res) => {
   if (path === '/' || path === '/health') {
     return jsonResponse(res, 200, {
       status: 'ALIVE',
-      service: 'ABA REACH v2.7.1',
+      service: 'ABA REACH v2.7.2',
       mode: 'FULL API + VOICE + OMI',
       air: 'ABA Intellectual Role - CENTRAL ORCHESTRATOR',
       models: { primary: 'Gemini Flash 2.0', backup: 'Claude Haiku', speed_fallback: 'Groq' },
@@ -7015,18 +7015,66 @@ Phone: (336) 389-8116</p>
     // USER→AIR→LUKE,COLE,JUDE,PACK→DECISION→DIAL/CARA→VARA→USER:T10:v1.0.0:20260214:e1s1c⬡
     // 
     // AUTONOMOUS ESCALATION - Routed through AIR with full agent analysis
-    // NOT hardcoded garbage anymore!
+    // OR force_call=true to bypass analysis (HAM asked for a call directly)
     // ═══════════════════════════════════════════════════════════════════════════════
     const body = await parseBody(req);
-    const { message, context, source, urgency, target, type } = body;
+    const { message, context, source, urgency, target, type, force_call } = body;
     
     console.log('');
     console.log('═══════════════════════════════════════════════════════════');
     console.log('[ESCALATE] *** INCOMING ESCALATION REQUEST ***');
-    console.log(`[ESCALATE] Source: ${source || 'manual'} | Type: ${type || 'direct'}`);
+    console.log(`[ESCALATE] Source: ${source || 'manual'} | Type: ${type || 'direct'} | Force Call: ${force_call || false}`);
     console.log('═══════════════════════════════════════════════════════════');
     
     try {
+      // ⬡B:TOUCH:FIX:force_call:20260216⬡
+      // If HAM asks for a call, JUST CALL. No analysis needed.
+      if (force_call === true) {
+        console.log('[ESCALATE] force_call=true - BYPASSING ANALYSIS, CALLING NOW');
+        
+        const traceId = 'FORCE-' + Date.now();
+        const spokenMessage = message || 'Hey, this is ABA calling as requested.';
+        
+        // Get Brandon's number
+        const targetPhone = '+19803791422'; // Brandon
+        
+        // Direct Twilio call
+        const twilioAuth = Buffer.from(`${TWILIO_SID}:${TWILIO_AUTH}`).toString('base64');
+        const callRes = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Calls.json`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Basic ${twilioAuth}`,
+            'Content-Type': 'application/x-www-form-urlencoded'
+          },
+          body: new URLSearchParams({
+            To: targetPhone,
+            From: TWILIO_PHONE,
+            Url: `${REACH_URL}/api/escalate/twiml?msg=${encodeURIComponent(spokenMessage)}&trace=${traceId}`,
+            StatusCallback: `${REACH_URL}/api/call/status?trace=${traceId}`,
+            StatusCallbackEvent: 'initiated ringing answered completed',
+            StatusCallbackMethod: 'POST'
+          }).toString()
+        });
+        
+        const callData = await callRes.json();
+        
+        return jsonResponse(res, 200, {
+          success: true,
+          routing: 'FORCE_CALL*DIRECT*TWILIO',
+          analysis: { urgency: 10, category: 'ham_request', intent: 'Call requested by HAM' },
+          decision: { action: 'call_now', target: 'Brandon', reasoning: 'HAM asked for a call - no analysis needed' },
+          execution: {
+            action: 'call_now',
+            target: 'Brandon',
+            traceId: traceId,
+            status: callData.sid ? 'call_initiated' : 'failed',
+            callSid: callData.sid,
+            timestamp: new Date().toISOString()
+          },
+          message: spokenMessage.substring(0, 100) + '...'
+        });
+      }
+      
       // Route through AIR_escalate for REAL agent analysis
       const result = await AIR_escalate({
         type: type || 'manual_escalation',
@@ -7673,7 +7721,7 @@ ccWss.on('connection', (ws, req) => {
   // Send welcome message with system status
   ws.send(JSON.stringify({
     type: 'connected',
-    service: 'ABA REACH v2.7.1 - AUTONOMY LAYER ACTIVE',
+    service: 'ABA REACH v2.7.2 - AUTONOMY LAYER ACTIVE',
     timestamp: new Date().toISOString(),
     agents: ['AIR', 'VARA', 'LUKE', 'COLE', 'JUDE', 'PACK', 'IMAN', 'TASTE', 'DIAL', 'PULSE', 'SAGE'],
     features: ['proactive_email', 'deadline_alerts', 'auto_escalation', 'device_sync']
@@ -8162,7 +8210,7 @@ function getHeartbeatStatus() {
 httpServer.listen(PORT, '0.0.0.0', () => {
   console.log('');
   console.log('═══════════════════════════════════════════════════════════');
-  console.log('[ABA REACH v2.7.1] LIVE on port ' + PORT);
+  console.log('[ABA REACH v2.7.2] LIVE on port ' + PORT);
   console.log('═══════════════════════════════════════════════════════════');
   console.log('[AIR] ABA Intellectual Role - ONLINE');
   console.log('[AIR] PRIMARY: Gemini Flash 2.0');
