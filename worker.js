@@ -259,7 +259,7 @@ const REACH_URL = process.env.REACH_URL || 'https://aba-reach.onrender.com';
 
 // ⬡B:AIR:REACH.SERVER.STARTUP:CODE:infrastructure.logging.boot:AIR→REACH:T10:v1.5.0:20260213:b0o1t⬡
 console.log('═══════════════════════════════════════════════════════════');
-console.log('[ABA REACH v2.8.2] FULL HIERARCHY + SIGILS + API ROUTES');
+console.log('[ABA REACH v2.8.3] FULL HIERARCHY + SIGILS + API ROUTES');
 console.log('[HIERARCHY] L6:AIR > L5:REACH > L4:VOICE,SMS,EMAIL,OMI > L3:VARA,CARA,IMAN,TASTE');
 console.log('[AIR] Hardcoded agents: LUKE, COLE, JUDE, PACK');
 console.log('[AIR] PRIMARY: Gemini Flash 2.0 | BACKUP: Claude Haiku');
@@ -3798,7 +3798,7 @@ async function postCallAutomation(session) {
     '<h3>Conversation Summary</h3>' +
     '<p>' + topicsDiscussed.replace(/\|/g, '<br>') + '</p>' +
     '<hr style="border:1px solid #e5e7eb">' +
-    '<p style="color:#9ca3af;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v2.8.2</p>' +
+    '<p style="color:#9ca3af;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v2.8.3</p>' +
     '</div>';
   
   const emailResult = await sendEmailFromCall(
@@ -3820,7 +3820,7 @@ async function postCallAutomation(session) {
   const notifyResult = await sendSMSFromCall('+13363898116', brandonNotify);
   
   // ALSO email Brandon
-  const brandonEmailHtml = '<div style="font-family:system-ui;max-width:600px;margin:0 auto"><h2>ABA Call Report</h2><p><strong>Caller:</strong> ' + callerName + '</p><p><strong>Phone:</strong> ' + callerNumber + '</p><p><strong>Duration:</strong> ' + turnCount + ' turns</p><p><strong>Topics:</strong> ' + topicsDiscussed.substring(0, 300) + '</p><p style="color:#888;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v2.8.2</p></div>';
+  const brandonEmailHtml = '<div style="font-family:system-ui;max-width:600px;margin:0 auto"><h2>ABA Call Report</h2><p><strong>Caller:</strong> ' + callerName + '</p><p><strong>Phone:</strong> ' + callerNumber + '</p><p><strong>Duration:</strong> ' + turnCount + ' turns</p><p><strong>Topics:</strong> ' + topicsDiscussed.substring(0, 300) + '</p><p style="color:#888;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v2.8.3</p></div>';
   const brandonEmail = await sendEmailFromCall('brandonjpiercesr@gmail.com', 'Brandon', 'ABA Call Report: ' + callerName + ' called', brandonEmailHtml);
   if (brandonEmail.success) console.log('[POST-CALL] Brandon email report sent');
   if (notifyResult.success) {
@@ -4931,7 +4931,7 @@ const httpServer = http.createServer(async (req, res) => {
   if (path === '/' || path === '/health') {
     return jsonResponse(res, 200, {
       status: 'ALIVE',
-      service: 'ABA REACH v2.8.2',
+      service: 'ABA REACH v2.8.3',
       mode: 'FULL API + VOICE + OMI',
       air: 'ABA Intellectual Role - CENTRAL ORCHESTRATOR',
       models: { primary: 'Gemini Flash 2.0', backup: 'Claude Haiku', speed_fallback: 'Groq' },
@@ -7729,7 +7729,7 @@ ccWss.on('connection', (ws, req) => {
   // Send welcome message with system status
   ws.send(JSON.stringify({
     type: 'connected',
-    service: 'ABA REACH v2.8.2 - AUTONOMY LAYER ACTIVE',
+    service: 'ABA REACH v2.8.3 - AUTONOMY LAYER ACTIVE',
     timestamp: new Date().toISOString(),
     agents: ['AIR', 'VARA', 'LUKE', 'COLE', 'JUDE', 'PACK', 'IMAN', 'TASTE', 'DIAL', 'PULSE', 'SAGE'],
     features: ['proactive_email', 'deadline_alerts', 'auto_escalation', 'device_sync']
@@ -8014,10 +8014,25 @@ wss.on('connection', (ws) => {
           // Connect Deepgram for speech recognition
           connectDeepgram(session);
           
-          console.log('[OUTBOUND] Ready to listen. Deepgram connected. Waiting for speech...');
+          // ⬡B:TOUCH:FIX:wait.for.deepgram:20260216⬡
+          // CRITICAL: Wait for Deepgram to actually connect before returning
+          // Otherwise media events arrive before Deepgram is ready!
+          console.log('[OUTBOUND] Waiting for Deepgram to connect...');
+          let waitCount = 0;
+          while ((!session.deepgramWs || session.deepgramWs.readyState !== WebSocket.OPEN) && waitCount < 50) {
+            await new Promise(r => setTimeout(r, 100));
+            waitCount++;
+          }
+          
+          if (session.deepgramWs?.readyState === WebSocket.OPEN) {
+            console.log('[OUTBOUND] ✅ Deepgram connected! Ready to listen.');
+          } else {
+            console.log('[OUTBOUND] ⚠️ Deepgram not ready after 5s, continuing anyway...');
+          }
+          
           // No greeting needed - TwiML already spoke
-          return;
-        }
+          // DON'T return - let the handler continue to process media events
+        } else {
         
         // INBOUND call path - full setup
         console.log('[INBOUND] Standard inbound call setup...');
@@ -8056,7 +8071,8 @@ wss.on('connection', (ws) => {
           if (session.touchpoints.WELCOME_BACK !== undefined) session.touchpoints.WELCOME_BACK = true;
           if (session.touchpoints.HELLO !== undefined) session.touchpoints.HELLO = true;
         }, 500);
-      }
+        } // close else (inbound path)
+      } // close if (msg.event === 'start')
       
       if (msg.event === 'media' && session?.deepgramWs?.readyState === WebSocket.OPEN) {
         session.deepgramWs.send(Buffer.from(msg.media.payload, 'base64'));
@@ -8241,7 +8257,7 @@ function getHeartbeatStatus() {
 httpServer.listen(PORT, '0.0.0.0', () => {
   console.log('');
   console.log('═══════════════════════════════════════════════════════════');
-  console.log('[ABA REACH v2.8.2] LIVE on port ' + PORT);
+  console.log('[ABA REACH v2.8.3] LIVE on port ' + PORT);
   console.log('═══════════════════════════════════════════════════════════');
   console.log('[AIR] ABA Intellectual Role - ONLINE');
   console.log('[AIR] PRIMARY: Gemini Flash 2.0');
