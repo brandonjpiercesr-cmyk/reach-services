@@ -6277,7 +6277,7 @@ const httpServer = http.createServer(async (req, res) => {
   if (path === '/' || path === '/health') {
     return jsonResponse(res, 200, {
       status: 'ALIVE',
-      service: 'ABA TOUCH v2.12.12-SHADOW-BRAIN',
+      service: 'ABA TOUCH v2.12.13-SHADOW-BYPASS',
       mode: 'FULL API + VOICE + OMI + SMS + SPEECH INTELLIGENCE',
       air: 'ABA Intellectual Role - CENTRAL ORCHESTRATOR',
       models: { primary: 'Gemini Flash 2.0', backup: 'Claude Haiku', speed_fallback: 'Groq' },
@@ -7056,12 +7056,31 @@ Phone: (336) 389-8116</p>
         }
       }
       
-      // ⬡B:AIR:REACH.VOICE.ROUTING:LOGIC:abacia.central:v2.12.10:20260216⬡
-      // Route to ABACIA - THE REAL BRAIN with 75+ agents
-      // REACH is just the physical touch layer - ABACIA is the intelligence
-      console.log('[AIR VOICE TOOL] Routing to ABACIA (real brain with 38+ coded agents)...');
+      // ⬡B:AIR:REACH.VOICE.ROUTING:LOGIC:shadow.bypass:v2.12.13:20260216⬡
+      // For meeting/notes/transcript queries, use local SHADOW directly
+      // SHADOW searches ALL memory types and filters out ABA's own calls
+      const msgLowerForShadow = userMessage.toLowerCase();
+      const needsShadowDirect = msgLowerForShadow.includes('notes') ||
+                                msgLowerForShadow.includes('transcript') ||
+                                msgLowerForShadow.includes('recording') ||
+                                msgLowerForShadow.includes('meeting') ||
+                                msgLowerForShadow.includes('brotherhood') ||
+                                msgLowerForShadow.includes('fraternity') ||
+                                msgLowerForShadow.includes('strategy session') ||
+                                msgLowerForShadow.includes('omi') ||
+                                msgLowerForShadow.includes('otter');
       
       let airResponse = null;
+      
+      if (needsShadowDirect) {
+        console.log('[AIR VOICE TOOL] SHADOW query detected - bypassing ABACIA, using local SHADOW');
+        airResponse = await AIR_process(userMessage, [], callerIdentity, {});
+      }
+      
+      // ⬡B:AIR:REACH.VOICE.ROUTING:LOGIC:abacia.central:v2.12.10:20260216⬡
+      // Route to ABACIA for non-SHADOW queries
+      if (!airResponse) {
+        console.log('[AIR VOICE TOOL] Routing to ABACIA (real brain with 38+ coded agents)...');
       
       try {
         const abaciaResult = await fetch('https://abacia-services.onrender.com/api/air/process', {
@@ -7122,6 +7141,7 @@ Phone: (336) 389-8116</p>
       } catch (e) {
         console.log('[AIR VOICE TOOL] ABACIA error:', e.message);
       }
+      } // Close if (!airResponse) for ABACIA routing
       
       // Fallback to local AIR if ABACIA didn't return useful data
       if (!airResponse) {
