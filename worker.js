@@ -4231,7 +4231,7 @@ async function AIR_process(userSaid, history, callerIdentity, demoState) {
     
     // Return factual data directly - no LLM hallucination risk
     // ⬡B:TOUCH:FIX:direct.response.all.factual:20260216⬡
-    const directTypes = ['sports', 'weather', 'email', 'calendar', 'tasks', 'contacts', 'brain_search'];
+    const directTypes = ['sports', 'weather', 'email', 'calendar', 'tasks', 'contacts', 'brain_search', 'vault'];
     if (directTypes.includes(dispatchResult.type)) {
       console.log('[AIR] Returning agent data DIRECTLY (no LLM) - Type:', dispatchResult.type);
       return { 
@@ -6275,7 +6275,7 @@ const httpServer = http.createServer(async (req, res) => {
   if (path === '/' || path === '/health') {
     return jsonResponse(res, 200, {
       status: 'ALIVE',
-      service: 'ABA TOUCH v2.12.8-SHADOW-DEBUG',
+      service: 'ABA TOUCH v2.12.9-SHADOW-DIRECT',
       mode: 'FULL API + VOICE + OMI + SMS + SPEECH INTELLIGENCE',
       air: 'ABA Intellectual Role - CENTRAL ORCHESTRATOR',
       models: { primary: 'Gemini Flash 2.0', backup: 'Claude Haiku', speed_fallback: 'Groq' },
