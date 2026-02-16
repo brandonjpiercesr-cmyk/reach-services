@@ -259,7 +259,7 @@ const REACH_URL = process.env.REACH_URL || 'https://aba-reach.onrender.com';
 
 // ⬡B:AIR:REACH.SERVER.STARTUP:CODE:infrastructure.logging.boot:AIR→REACH:T10:v1.5.0:20260213:b0o1t⬡
 console.log('═══════════════════════════════════════════════════════════');
-console.log('[ABA REACH v2.6.1] FULL HIERARCHY + SIGILS + API ROUTES');
+console.log('[ABA REACH v2.7.0] FULL HIERARCHY + SIGILS + API ROUTES');
 console.log('[HIERARCHY] L6:AIR > L5:REACH > L4:VOICE,SMS,EMAIL,OMI > L3:VARA,CARA,IMAN,TASTE');
 console.log('[AIR] Hardcoded agents: LUKE, COLE, JUDE, PACK');
 console.log('[AIR] PRIMARY: Gemini Flash 2.0 | BACKUP: Claude Haiku');
@@ -3798,7 +3798,7 @@ async function postCallAutomation(session) {
     '<h3>Conversation Summary</h3>' +
     '<p>' + topicsDiscussed.replace(/\|/g, '<br>') + '</p>' +
     '<hr style="border:1px solid #e5e7eb">' +
-    '<p style="color:#9ca3af;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v2.6.1</p>' +
+    '<p style="color:#9ca3af;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v2.7.0</p>' +
     '</div>';
   
   const emailResult = await sendEmailFromCall(
@@ -3820,7 +3820,7 @@ async function postCallAutomation(session) {
   const notifyResult = await sendSMSFromCall('+13363898116', brandonNotify);
   
   // ALSO email Brandon
-  const brandonEmailHtml = '<div style="font-family:system-ui;max-width:600px;margin:0 auto"><h2>ABA Call Report</h2><p><strong>Caller:</strong> ' + callerName + '</p><p><strong>Phone:</strong> ' + callerNumber + '</p><p><strong>Duration:</strong> ' + turnCount + ' turns</p><p><strong>Topics:</strong> ' + topicsDiscussed.substring(0, 300) + '</p><p style="color:#888;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v2.6.1</p></div>';
+  const brandonEmailHtml = '<div style="font-family:system-ui;max-width:600px;margin:0 auto"><h2>ABA Call Report</h2><p><strong>Caller:</strong> ' + callerName + '</p><p><strong>Phone:</strong> ' + callerNumber + '</p><p><strong>Duration:</strong> ' + turnCount + ' turns</p><p><strong>Topics:</strong> ' + topicsDiscussed.substring(0, 300) + '</p><p style="color:#888;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v2.7.0</p></div>';
   const brandonEmail = await sendEmailFromCall('brandonjpiercesr@gmail.com', 'Brandon', 'ABA Call Report: ' + callerName + ' called', brandonEmailHtml);
   if (brandonEmail.success) console.log('[POST-CALL] Brandon email report sent');
   if (notifyResult.success) {
@@ -4924,7 +4924,7 @@ const httpServer = http.createServer(async (req, res) => {
   if (path === '/' || path === '/health') {
     return jsonResponse(res, 200, {
       status: 'ALIVE',
-      service: 'ABA REACH v2.6.1',
+      service: 'ABA REACH v2.7.0',
       mode: 'FULL API + VOICE + OMI',
       air: 'ABA Intellectual Role - CENTRAL ORCHESTRATOR',
       models: { primary: 'Gemini Flash 2.0', backup: 'Claude Haiku', speed_fallback: 'Groq' },
@@ -6722,13 +6722,14 @@ Phone: (336) 389-8116</p>
     try {
       // Twilio call initiation
       const twilioAuth = Buffer.from(`${TWILIO_SID}:${TWILIO_AUTH}`).toString('base64');
-      const twimlUrl = encodeURIComponent(`${REACH_URL}/api/call/twiml?trace=${traceId}&record=${record !== false}`);
-      const statusCallback = encodeURIComponent(`${REACH_URL}/api/call/status?trace=${traceId}`);
+      
+      // Use OUTBOUND endpoint (not twiml) - includes purpose, no consent needed
+      const outboundUrl = `${REACH_URL}/api/call/outbound?trace=${traceId}&purpose=${encodeURIComponent(purpose || 'checking in')}`;
       
       const callData = new URLSearchParams({
         To: to.startsWith('+') ? to : `+1${to.replace(/\D/g, '')}`,
         From: TWILIO_PHONE,
-        Url: `${REACH_URL}/api/call/twiml?trace=${traceId}&record=${record !== false}`,
+        Url: outboundUrl,
         StatusCallback: `${REACH_URL}/api/call/status?trace=${traceId}`,
         StatusCallbackEvent: 'initiated ringing answered completed',
         StatusCallbackMethod: 'POST'
@@ -6861,6 +6862,37 @@ Phone: (336) 389-8116</p>
       res.end(twiml);
       return;
     }
+  }
+  
+  // /api/call/outbound - TwiML for OUTBOUND calls (ABA calling user)
+  // ⬡B:TOUCH:REACH.CALL.OUTBOUND:CODE:voice.outbound.twiml:FIX:20260216⬡
+  // NO CONSENT NEEDED - ABA initiated the call, not the user
+  if (path === '/api/call/outbound' && (method === 'GET' || method === 'POST')) {
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const traceId = url.searchParams.get('trace') || 'unknown';
+    const purpose = decodeURIComponent(url.searchParams.get('purpose') || 'I wanted to check in with you.');
+    
+    console.log('[OUTBOUND] ABA calling user | Trace:', traceId, '| Purpose:', purpose.substring(0, 50));
+    
+    // For outbound calls, ABA speaks first (no consent gather)
+    // Then starts interactive 2-way conversation
+    const greeting = purpose.length > 200 
+      ? purpose.substring(0, 200) + '... How can I help you today?'
+      : purpose + ' How can I help you today?';
+    
+    const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Play>${REACH_URL}/api/voice/tts-stream?text=${encodeURIComponent('Hey, this is ABA calling. ' + greeting)}</Play>
+  <Pause length="1"/>
+  <Start>
+    <Stream url="wss://${req.headers.host}/api/call/conversation?trace=${traceId}" track="both_tracks"/>
+  </Start>
+  <Pause length="3600"/>
+</Response>`;
+    
+    res.writeHead(200, { 'Content-Type': 'text/xml' });
+    res.end(twiml);
+    return;
   }
   
   // /api/call/status - Twilio status webhook
@@ -7636,7 +7668,7 @@ ccWss.on('connection', (ws, req) => {
   // Send welcome message with system status
   ws.send(JSON.stringify({
     type: 'connected',
-    service: 'ABA REACH v2.6.1 - AUTONOMY LAYER ACTIVE',
+    service: 'ABA REACH v2.7.0 - AUTONOMY LAYER ACTIVE',
     timestamp: new Date().toISOString(),
     agents: ['AIR', 'VARA', 'LUKE', 'COLE', 'JUDE', 'PACK', 'IMAN', 'TASTE', 'DIAL', 'PULSE', 'SAGE'],
     features: ['proactive_email', 'deadline_alerts', 'auto_escalation', 'device_sync']
@@ -8125,7 +8157,7 @@ function getHeartbeatStatus() {
 httpServer.listen(PORT, '0.0.0.0', () => {
   console.log('');
   console.log('═══════════════════════════════════════════════════════════');
-  console.log('[ABA REACH v2.6.1] LIVE on port ' + PORT);
+  console.log('[ABA REACH v2.7.0] LIVE on port ' + PORT);
   console.log('═══════════════════════════════════════════════════════════');
   console.log('[AIR] ABA Intellectual Role - ONLINE');
   console.log('[AIR] PRIMARY: Gemini Flash 2.0');
