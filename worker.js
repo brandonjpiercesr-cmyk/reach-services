@@ -259,7 +259,7 @@ const REACH_URL = process.env.REACH_URL || 'https://aba-reach.onrender.com';
 
 // ⬡B:AIR:REACH.SERVER.STARTUP:CODE:infrastructure.logging.boot:AIR→REACH:T10:v1.5.0:20260213:b0o1t⬡
 console.log('═══════════════════════════════════════════════════════════');
-console.log('[ABA REACH v2.8.3] FULL HIERARCHY + SIGILS + API ROUTES');
+console.log('[ABA REACH v2.8.4] FULL HIERARCHY + SIGILS + API ROUTES');
 console.log('[HIERARCHY] L6:AIR > L5:REACH > L4:VOICE,SMS,EMAIL,OMI > L3:VARA,CARA,IMAN,TASTE');
 console.log('[AIR] Hardcoded agents: LUKE, COLE, JUDE, PACK');
 console.log('[AIR] PRIMARY: Gemini Flash 2.0 | BACKUP: Claude Haiku');
@@ -3798,7 +3798,7 @@ async function postCallAutomation(session) {
     '<h3>Conversation Summary</h3>' +
     '<p>' + topicsDiscussed.replace(/\|/g, '<br>') + '</p>' +
     '<hr style="border:1px solid #e5e7eb">' +
-    '<p style="color:#9ca3af;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v2.8.3</p>' +
+    '<p style="color:#9ca3af;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v2.8.4</p>' +
     '</div>';
   
   const emailResult = await sendEmailFromCall(
@@ -3820,7 +3820,7 @@ async function postCallAutomation(session) {
   const notifyResult = await sendSMSFromCall('+13363898116', brandonNotify);
   
   // ALSO email Brandon
-  const brandonEmailHtml = '<div style="font-family:system-ui;max-width:600px;margin:0 auto"><h2>ABA Call Report</h2><p><strong>Caller:</strong> ' + callerName + '</p><p><strong>Phone:</strong> ' + callerNumber + '</p><p><strong>Duration:</strong> ' + turnCount + ' turns</p><p><strong>Topics:</strong> ' + topicsDiscussed.substring(0, 300) + '</p><p style="color:#888;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v2.8.3</p></div>';
+  const brandonEmailHtml = '<div style="font-family:system-ui;max-width:600px;margin:0 auto"><h2>ABA Call Report</h2><p><strong>Caller:</strong> ' + callerName + '</p><p><strong>Phone:</strong> ' + callerNumber + '</p><p><strong>Duration:</strong> ' + turnCount + ' turns</p><p><strong>Topics:</strong> ' + topicsDiscussed.substring(0, 300) + '</p><p style="color:#888;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v2.8.4</p></div>';
   const brandonEmail = await sendEmailFromCall('brandonjpiercesr@gmail.com', 'Brandon', 'ABA Call Report: ' + callerName + ' called', brandonEmailHtml);
   if (brandonEmail.success) console.log('[POST-CALL] Brandon email report sent');
   if (notifyResult.success) {
@@ -4253,7 +4253,15 @@ function connectDeepgram(session) {
     headers: { 'Authorization': 'Token ' + DEEPGRAM_KEY }
   });
   
-  ws.on('open', () => console.log('[DEEPGRAM] Connected'));
+  ws.on('open', () => {
+    console.log('[DEEPGRAM] Connected');
+    // DEBUG: Log to brain
+    fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
+      method: 'POST',
+      headers: { 'apikey': SUPABASE_KEY || SUPABASE_ANON, 'Authorization': `Bearer ${SUPABASE_KEY || SUPABASE_ANON}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+      body: JSON.stringify({ content: `DEBUG DEEPGRAM CONNECTED: isOutbound=${session.isOutbound}`, memory_type: 'debug', source: 'deepgram_connect_' + Date.now() })
+    }).catch(e => {});
+  });
   
   ws.on('message', async (data) => {
     try {
@@ -4276,6 +4284,14 @@ function connectDeepgram(session) {
         if (transcript.trim() && isFinal) {
           console.log('[DEEPGRAM] *** FINAL TRANSCRIPT RECEIVED ***');
           console.log('[DEEPGRAM] isOutbound:', session.isOutbound);
+          
+          // DEBUG: Log transcript to brain
+          fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
+            method: 'POST',
+            headers: { 'apikey': SUPABASE_KEY || SUPABASE_ANON, 'Authorization': `Bearer ${SUPABASE_KEY || SUPABASE_ANON}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+            body: JSON.stringify({ content: `DEBUG DEEPGRAM TRANSCRIPT: isOutbound=${session.isOutbound}, text="${transcript.substring(0,100)}"`, memory_type: 'debug', source: 'deepgram_transcript_' + Date.now() })
+          }).catch(e => {});
+          
           // v1.9.0 - EAR: Extract speaker from diarized result
           const speakerId = extractSpeakerFromDiarize(msg);
           const isPrimary = speakerId !== null ? session.speakerTracker.registerSpeaker(speakerId, transcript.split(' ').length) : true;
@@ -4314,8 +4330,22 @@ function connectDeepgram(session) {
     } catch (e) {}
   });
   
-  ws.on('error', (err) => console.log('[DEEPGRAM] Error: ' + err.message));
-  ws.on('close', () => console.log('[DEEPGRAM] Disconnected'));
+  ws.on('error', (err) => {
+    console.log('[DEEPGRAM] Error: ' + err.message);
+    fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
+      method: 'POST',
+      headers: { 'apikey': SUPABASE_KEY || SUPABASE_ANON, 'Authorization': `Bearer ${SUPABASE_KEY || SUPABASE_ANON}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+      body: JSON.stringify({ content: `DEBUG DEEPGRAM ERROR: ${err.message}`, memory_type: 'debug', source: 'deepgram_error_' + Date.now() })
+    }).catch(e => {});
+  });
+  ws.on('close', () => {
+    console.log('[DEEPGRAM] Disconnected');
+    fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
+      method: 'POST',
+      headers: { 'apikey': SUPABASE_KEY || SUPABASE_ANON, 'Authorization': `Bearer ${SUPABASE_KEY || SUPABASE_ANON}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+      body: JSON.stringify({ content: `DEBUG DEEPGRAM DISCONNECTED`, memory_type: 'debug', source: 'deepgram_close_' + Date.now() })
+    }).catch(e => {});
+  });
   
   session.deepgramWs = ws;
 }
@@ -4330,6 +4360,13 @@ async function processUtterance(session, text) {
   console.log('[PROCESS] isOutbound:', session.isOutbound);
   console.log('[PROCESS] Text:', text.substring(0, 100));
   console.log('[PROCESS] CallerIdentity:', session.callerIdentity?.name);
+  
+  // DEBUG: Log to brain
+  fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
+    method: 'POST',
+    headers: { 'apikey': SUPABASE_KEY || SUPABASE_ANON, 'Authorization': `Bearer ${SUPABASE_KEY || SUPABASE_ANON}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+    body: JSON.stringify({ content: `DEBUG PROCESS UTTERANCE: isOutbound=${session.isOutbound}, identity=${session.callerIdentity?.name}, text="${text.substring(0,80)}"`, memory_type: 'debug', source: 'process_utterance_' + Date.now() })
+  }).catch(e => {});
   
   if ((session.touchpoints && session.touchpoints.type !== "owner")) {
     session.touchpoints.turnCount++;
@@ -4931,7 +4968,7 @@ const httpServer = http.createServer(async (req, res) => {
   if (path === '/' || path === '/health') {
     return jsonResponse(res, 200, {
       status: 'ALIVE',
-      service: 'ABA REACH v2.8.3',
+      service: 'ABA REACH v2.8.4',
       mode: 'FULL API + VOICE + OMI',
       air: 'ABA Intellectual Role - CENTRAL ORCHESTRATOR',
       models: { primary: 'Gemini Flash 2.0', backup: 'Claude Haiku', speed_fallback: 'Groq' },
@@ -7729,7 +7766,7 @@ ccWss.on('connection', (ws, req) => {
   // Send welcome message with system status
   ws.send(JSON.stringify({
     type: 'connected',
-    service: 'ABA REACH v2.8.3 - AUTONOMY LAYER ACTIVE',
+    service: 'ABA REACH v2.8.4 - AUTONOMY LAYER ACTIVE',
     timestamp: new Date().toISOString(),
     agents: ['AIR', 'VARA', 'LUKE', 'COLE', 'JUDE', 'PACK', 'IMAN', 'TASTE', 'DIAL', 'PULSE', 'SAGE'],
     features: ['proactive_email', 'deadline_alerts', 'auto_escalation', 'device_sync']
@@ -8008,6 +8045,14 @@ wss.on('connection', (ws) => {
         // For OUTBOUND calls - skip identifyCaller, set Brandon directly
         if (session.isOutbound) {
           console.log('[OUTBOUND] *** OUTBOUND CALL - FAST PATH ***');
+          
+          // DEBUG: Log to brain
+          fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
+            method: 'POST',
+            headers: { 'apikey': SUPABASE_KEY || SUPABASE_ANON, 'Authorization': `Bearer ${SUPABASE_KEY || SUPABASE_ANON}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+            body: JSON.stringify({ content: `DEBUG OUTBOUND START: streamSid=${session.streamSid}, callSid=${session.callSid}`, memory_type: 'debug', source: 'outbound_start_' + Date.now() })
+          }).catch(e => {});
+          
           session.callerIdentity = { name: 'Brandon', trust: 'owner', access: 'full' };
           session.touchpoints = { type: 'owner', turnCount: 0 };
           
@@ -8074,8 +8119,38 @@ wss.on('connection', (ws) => {
         } // close else (inbound path)
       } // close if (msg.event === 'start')
       
+      // Log ALL media events, not just ones sent to Deepgram
+      if (msg.event === 'media') {
+        if (!session) {
+          console.log('[MEDIA] ⚠️ No session yet!');
+        } else if (!session.deepgramWs) {
+          console.log('[MEDIA] ⚠️ No Deepgram WebSocket!');
+          if (!session._droppedCount) session._droppedCount = 0;
+          session._droppedCount++;
+          if (session._droppedCount === 1) {
+            fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
+              method: 'POST',
+              headers: { 'apikey': SUPABASE_KEY || SUPABASE_ANON, 'Authorization': `Bearer ${SUPABASE_KEY || SUPABASE_ANON}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+              body: JSON.stringify({ content: `DEBUG MEDIA DROPPED: No deepgramWs! isOutbound=${session.isOutbound}`, memory_type: 'debug', source: 'media_dropped_' + Date.now() })
+            }).catch(e => {});
+          }
+        } else if (session.deepgramWs.readyState !== WebSocket.OPEN) {
+          console.log('[MEDIA] ⚠️ Deepgram not OPEN, state=' + session.deepgramWs.readyState);
+        }
+      }
+      
       if (msg.event === 'media' && session?.deepgramWs?.readyState === WebSocket.OPEN) {
         session.deepgramWs.send(Buffer.from(msg.media.payload, 'base64'));
+        // DEBUG: Log first few media events to brain
+        if (!session._mediaLogCount) session._mediaLogCount = 0;
+        session._mediaLogCount++;
+        if (session._mediaLogCount <= 3) {
+          fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
+            method: 'POST',
+            headers: { 'apikey': SUPABASE_KEY || SUPABASE_ANON, 'Authorization': `Bearer ${SUPABASE_KEY || SUPABASE_ANON}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+            body: JSON.stringify({ content: `DEBUG MEDIA #${session._mediaLogCount}: isOutbound=${session.isOutbound}, deepgramState=${session.deepgramWs?.readyState}`, memory_type: 'debug', source: 'media_' + Date.now() })
+          }).catch(e => {});
+        }
       }
       
       if (msg.event === 'stop' && session) {
@@ -8257,7 +8332,7 @@ function getHeartbeatStatus() {
 httpServer.listen(PORT, '0.0.0.0', () => {
   console.log('');
   console.log('═══════════════════════════════════════════════════════════');
-  console.log('[ABA REACH v2.8.3] LIVE on port ' + PORT);
+  console.log('[ABA REACH v2.8.4] LIVE on port ' + PORT);
   console.log('═══════════════════════════════════════════════════════════');
   console.log('[AIR] ABA Intellectual Role - ONLINE');
   console.log('[AIR] PRIMARY: Gemini Flash 2.0');
