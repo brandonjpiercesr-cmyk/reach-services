@@ -259,7 +259,7 @@ const REACH_URL = process.env.REACH_URL || 'https://aba-reach.onrender.com';
 
 // ⬡B:AIR:REACH.SERVER.STARTUP:CODE:infrastructure.logging.boot:AIR→REACH:T10:v1.5.0:20260213:b0o1t⬡
 console.log('═══════════════════════════════════════════════════════════');
-console.log('[ABA REACH v2.9.0] FULL HIERARCHY + SIGILS + API ROUTES');
+console.log('[ABA REACH v2.9.1] FULL HIERARCHY + SIGILS + API ROUTES');
 console.log('[HIERARCHY] L6:AIR > L5:REACH > L4:VOICE,SMS,EMAIL,OMI > L3:VARA,CARA,IMAN,TASTE');
 console.log('[AIR] Hardcoded agents: LUKE, COLE, JUDE, PACK');
 console.log('[AIR] PRIMARY: Gemini Flash 2.0 | BACKUP: Claude Haiku');
@@ -3798,7 +3798,7 @@ async function postCallAutomation(session) {
     '<h3>Conversation Summary</h3>' +
     '<p>' + topicsDiscussed.replace(/\|/g, '<br>') + '</p>' +
     '<hr style="border:1px solid #e5e7eb">' +
-    '<p style="color:#9ca3af;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v2.9.0</p>' +
+    '<p style="color:#9ca3af;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v2.9.1</p>' +
     '</div>';
   
   const emailResult = await sendEmailFromCall(
@@ -3820,7 +3820,7 @@ async function postCallAutomation(session) {
   const notifyResult = await sendSMSFromCall('+13363898116', brandonNotify);
   
   // ALSO email Brandon
-  const brandonEmailHtml = '<div style="font-family:system-ui;max-width:600px;margin:0 auto"><h2>ABA Call Report</h2><p><strong>Caller:</strong> ' + callerName + '</p><p><strong>Phone:</strong> ' + callerNumber + '</p><p><strong>Duration:</strong> ' + turnCount + ' turns</p><p><strong>Topics:</strong> ' + topicsDiscussed.substring(0, 300) + '</p><p style="color:#888;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v2.9.0</p></div>';
+  const brandonEmailHtml = '<div style="font-family:system-ui;max-width:600px;margin:0 auto"><h2>ABA Call Report</h2><p><strong>Caller:</strong> ' + callerName + '</p><p><strong>Phone:</strong> ' + callerNumber + '</p><p><strong>Duration:</strong> ' + turnCount + ' turns</p><p><strong>Topics:</strong> ' + topicsDiscussed.substring(0, 300) + '</p><p style="color:#888;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v2.9.1</p></div>';
   const brandonEmail = await sendEmailFromCall('brandonjpiercesr@gmail.com', 'Brandon', 'ABA Call Report: ' + callerName + ' called', brandonEmailHtml);
   if (brandonEmail.success) console.log('[POST-CALL] Brandon email report sent');
   if (notifyResult.success) {
@@ -4968,7 +4968,7 @@ const httpServer = http.createServer(async (req, res) => {
   if (path === '/' || path === '/health') {
     return jsonResponse(res, 200, {
       status: 'ALIVE',
-      service: 'ABA REACH v2.9.0',
+      service: 'ABA REACH v2.9.1',
       mode: 'FULL API + VOICE + OMI',
       air: 'ABA Intellectual Role - CENTRAL ORCHESTRATOR',
       models: { primary: 'Gemini Flash 2.0', backup: 'Claude Haiku', speed_fallback: 'Groq' },
@@ -7167,8 +7167,11 @@ Phone: (336) 389-8116</p>
       // <Connect><Stream> = bidirectional with ConversationRelay protocol
       // <Start><Stream> = one-way monitoring only (WRONG for 2-way!)
       
+      // ⬡B:TOUCH:FIX:xml.entity.escape:20260216⬡
+      // FIX: Don't put greeting in URL - the & breaks XML parsing!
+      // Pass greeting via Parameter instead (already done below)
       const safeGreeting = msg.replace(/"/g, "'").replace(/&/g, "and").replace(/</g, "").replace(/>/g, "");
-      const wsUrl = 'wss://' + req.headers.host + '/conversation-relay?trace=' + traceId + '&greeting=' + encodeURIComponent(safeGreeting);
+      const wsUrl = 'wss://' + req.headers.host + '/conversation-relay?trace=' + traceId;
       
       twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
@@ -7763,7 +7766,7 @@ ccWss.on('connection', (ws, req) => {
   // Send welcome message with system status
   ws.send(JSON.stringify({
     type: 'connected',
-    service: 'ABA REACH v2.9.0 - AUTONOMY LAYER ACTIVE',
+    service: 'ABA REACH v2.9.1 - AUTONOMY LAYER ACTIVE',
     timestamp: new Date().toISOString(),
     agents: ['AIR', 'VARA', 'LUKE', 'COLE', 'JUDE', 'PACK', 'IMAN', 'TASTE', 'DIAL', 'PULSE', 'SAGE'],
     features: ['proactive_email', 'deadline_alerts', 'auto_escalation', 'device_sync']
@@ -7884,23 +7887,21 @@ const crSessions = new Map(); // callSid -> session data
 crWss.on('connection', async (ws, req) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const traceId = url.searchParams.get('trace') || 'cr-' + Date.now();
-  const greeting = url.searchParams.get('greeting') || '';
   
   console.log('[CR] New ConversationRelay connection | Trace:', traceId);
-  console.log('[CR] Greeting:', greeting.substring(0, 50) + '...');
   
   // DEBUG: Log to brain
   fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
     method: 'POST',
     headers: { 'apikey': SUPABASE_KEY || SUPABASE_ANON, 'Authorization': `Bearer ${SUPABASE_KEY || SUPABASE_ANON}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
-    body: JSON.stringify({ content: `DEBUG CR CONNECTION: trace=${traceId}, greeting=${greeting.substring(0,50)}`, memory_type: 'debug', source: 'cr_connect_' + Date.now() })
+    body: JSON.stringify({ content: `DEBUG CR CONNECTION: trace=${traceId}`, memory_type: 'debug', source: 'cr_connect_' + Date.now() })
   }).catch(e => {});
   
   const sessionData = {
     traceId,
     history: [],
     callSid: null,
-    greeting: greeting,
+    greeting: '', // Will be set from setup message customParameters
     greetingSent: false
   };
   
@@ -7912,14 +7913,19 @@ crWss.on('connection', async (ws, req) => {
       fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
         method: 'POST',
         headers: { 'apikey': SUPABASE_KEY || SUPABASE_ANON, 'Authorization': `Bearer ${SUPABASE_KEY || SUPABASE_ANON}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
-        body: JSON.stringify({ content: `DEBUG CR MESSAGE: type=${message.type}`, memory_type: 'debug', source: 'cr_msg_' + Date.now() })
+        body: JSON.stringify({ content: `DEBUG CR MESSAGE: type=${message.type}, params=${JSON.stringify(message.customParameters || {}).substring(0,50)}`, memory_type: 'debug', source: 'cr_msg_' + Date.now() })
       }).catch(e => {});
       
       switch (message.type) {
         case 'setup':
           sessionData.callSid = message.callSid;
           crSessions.set(message.callSid, sessionData);
+          
+          // ⬡B:TOUCH:FIX:greeting.from.parameters:20260216⬡
+          // Get greeting from customParameters (passed via TwiML <Parameter>)
+          sessionData.greeting = message.customParameters?.greeting || '';
           console.log('[CR] Setup complete | CallSid:', message.callSid);
+          console.log('[CR] Greeting from params:', sessionData.greeting.substring(0, 50) + '...');
           
           // ⬡B:TOUCH:FIX:cr.greeting.on.setup:20260216⬡
           // Send greeting immediately after setup
@@ -8414,7 +8420,7 @@ function getHeartbeatStatus() {
 httpServer.listen(PORT, '0.0.0.0', () => {
   console.log('');
   console.log('═══════════════════════════════════════════════════════════');
-  console.log('[ABA REACH v2.9.0] LIVE on port ' + PORT);
+  console.log('[ABA REACH v2.9.1] LIVE on port ' + PORT);
   console.log('═══════════════════════════════════════════════════════════');
   console.log('[AIR] ABA Intellectual Role - ONLINE');
   console.log('[AIR] PRIMARY: Gemini Flash 2.0');
