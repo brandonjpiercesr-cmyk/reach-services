@@ -7102,31 +7102,12 @@ Phone: (336) 389-8116</p>
         }
       }
       
-      // ⬡B:AIR:REACH.VOICE.ROUTING:LOGIC:shadow.bypass:v2.12.13:20260216⬡
-      // For meeting/notes/transcript queries, use local SHADOW directly
-      // SHADOW searches ALL memory types and filters out ABA's own calls
-      const msgLowerForShadow = userMessage.toLowerCase();
-      const needsShadowDirect = msgLowerForShadow.includes('notes') ||
-                                msgLowerForShadow.includes('transcript') ||
-                                msgLowerForShadow.includes('recording') ||
-                                msgLowerForShadow.includes('meeting') ||
-                                msgLowerForShadow.includes('brotherhood') ||
-                                msgLowerForShadow.includes('fraternity') ||
-                                msgLowerForShadow.includes('strategy session') ||
-                                msgLowerForShadow.includes('omi') ||
-                                msgLowerForShadow.includes('otter');
+      // ⬡B:AIR:REACH.VOICE.ROUTING:PURE_ABACIA:v2.12.14:20260216⬡
+      // ABACIA IS THE BRAIN. Touch does NOT think. 100% passthrough to ABACIA.
+      // All 58 agents live in ABACIA including SHADOW, SAGE, TIM, etc.
+      console.log('[AIR VOICE TOOL] Routing to ABACIA (THE BRAIN - 58 agents)...');
       
-      let airResponse = null;
-      
-      if (needsShadowDirect) {
-        console.log('[AIR VOICE TOOL] SHADOW query detected - bypassing ABACIA, using local SHADOW');
-        airResponse = await AIR_process(userMessage, [], callerIdentity, {});
-      }
-      
-      // ⬡B:AIR:REACH.VOICE.ROUTING:LOGIC:abacia.central:v2.12.10:20260216⬡
-      // Route to ABACIA for non-SHADOW queries
-      if (!airResponse) {
-        console.log('[AIR VOICE TOOL] Routing to ABACIA (real brain with 38+ coded agents)...');
+      let responseText = "I understand. Let me help you with that.";
       
       try {
         const abaciaResult = await fetch('https://abacia-services.onrender.com/api/air/process', {
@@ -7142,74 +7123,40 @@ Phone: (336) 389-8116</p>
         
         if (abaciaResult.ok) {
           const abaciaData = await abaciaResult.json();
-          console.log('[AIR VOICE TOOL] ABACIA responded:', abaciaData.success ? 'success' : 'error');
-          console.log('[AIR VOICE TOOL] ABACIA agents ran:', (abaciaData.agents || []).length);
+          console.log('[AIR VOICE TOOL] ABACIA success:', abaciaData.success);
+          console.log('[AIR VOICE TOOL] Agents ran:', (abaciaData.agents || []).length);
           
-          // ABACIA returns structured data - extract useful info from SAGE
-          // SAGE (Strategic Assessment and Governance Engine) searches the brain
-          const sageAgent = (abaciaData.agents || []).find(a => 
-            a.agent && a.agent.includes('SAGE') || a.data?.agent === 'SAGE'
-          );
-          
-          if (sageAgent && sageAgent.data?.result?.matches) {
-            const matches = sageAgent.data.result.matches;
-            console.log('[AIR VOICE TOOL] SAGE found', matches.length, 'brain entries');
-            
-            // Build response from brain search results
-            if (matches.length > 0) {
-              let responseText = `I found ${matches.length} relevant entries in my brain. `;
-              
-              // Summarize top 3 matches
-              const topMatches = matches.slice(0, 3);
-              for (let i = 0; i < topMatches.length; i++) {
-                const m = topMatches[i];
-                responseText += `Entry ${i+1}: ${(m.preview || '').substring(0, 150)}... `;
+          // Check if ABACIA returned a direct response
+          if (abaciaData.response) {
+            responseText = abaciaData.response;
+          }
+          // Check if any agent returned a conversational response
+          else if (abaciaData.agents) {
+            for (const agent of abaciaData.agents) {
+              const result = agent.data?.result;
+              if (result?.response) {
+                responseText = result.response;
+                break;
               }
-              
-              if (matches.length > 3) {
-                responseText += `And ${matches.length - 3} more entries available.`;
+              if (result?.message && !result.message.includes('parsed query')) {
+                responseText = result.message;
+                break;
               }
-              
-              airResponse = { response: responseText, source: 'ABACIA_SAGE' };
             }
           }
-          
-          // If no SAGE results, check TIM for context
-          const timAgent = (abaciaData.agents || []).find(a => 
-            a.agent && a.agent.includes('TIM') || a.data?.agent === 'TIM'
-          );
-          
-          if (!airResponse && timAgent && timAgent.data?.result?.contextFound > 0) {
-            console.log('[AIR VOICE TOOL] TIM found context:', timAgent.data.result.contextFound);
-            // TIM found context but no response - fall through to local AIR
-          }
+        } else {
+          console.log('[AIR VOICE TOOL] ABACIA error status:', abaciaResult.status);
         }
       } catch (e) {
         console.log('[AIR VOICE TOOL] ABACIA error:', e.message);
       }
-      } // Close if (!airResponse) for ABACIA routing
       
-      // Fallback to local AIR if ABACIA didn't return useful data
-      if (!airResponse) {
-        console.log('[AIR VOICE TOOL] Falling back to local AIR...');
-        airResponse = await AIR_process(
-          userMessage,
-          [],
-          callerIdentity,
-          {}
-        );
-      }
-      
-      // Extract the response text
-      const responseText = airResponse?.response || airResponse?.message || 
-        "I understand. Let me help you with that.";
-      
-      console.log('[AIR VOICE TOOL] AIR Response:', responseText);
+      console.log('[AIR VOICE TOOL] Response:', responseText.substring(0, 100) + '...');
       
       // Broadcast response to Command Center
       broadcastToCommandCenter({
         type: 'voice_response',
-        source: 'air',
+        source: 'abacia',
         conversation_id: conversationId,
         aba_said: responseText,
         timestamp: new Date().toISOString()
