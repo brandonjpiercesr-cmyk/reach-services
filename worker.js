@@ -7076,48 +7076,33 @@ Phone: (336) 389-8116</p>
       if (force_call === true) {
         console.log('[ESCALATE] force_call=true - BYPASSING ANALYSIS, CALLING NOW');
         
-        const traceId = 'FORCE-' + Date.now();
+        // ⬡B:TOUCH:FIX:use.elevenlabs.dial:20260216⬡
+        // Use ElevenLabs convai for REAL 2-way calls (this is what worked with BJ!)
+        // NOT Twilio TwiML which kept breaking
+        const targetPhone = '+13363898116'; // Brandon's actual phone
         const spokenMessage = message || 'Hey, this is ABA calling as requested.';
         
-        // Get Brandon's number
-        const targetPhone = '+13363898116'; // Brandon's actual phone
-        
-        // Direct Twilio call
-        const twilioAuth = Buffer.from(`${TWILIO_SID}:${TWILIO_AUTH}`).toString('base64');
-        const callRes = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Calls.json`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Basic ${twilioAuth}`,
-            'Content-Type': 'application/x-www-form-urlencoded'
-          },
-          body: new URLSearchParams({
-            To: targetPhone,
-            From: TWILIO_PHONE,
-            Url: `${REACH_URL}/api/escalate/twiml?msg=${encodeURIComponent(spokenMessage)}&trace=${traceId}`,
-            StatusCallback: `${REACH_URL}/api/call/status?trace=${traceId}`,
-            StatusCallbackEvent: 'initiated ringing answered completed',
-            StatusCallbackMethod: 'POST',
-            Timeout: '30'  // Ring for 30 seconds before giving up
-          }).toString()
-        });
-        
-        const callData = await callRes.json();
-        
-        return jsonResponse(res, 200, {
-          success: true,
-          routing: 'FORCE_CALL*DIRECT*TWILIO',
-          analysis: { urgency: 10, category: 'ham_request', intent: 'Call requested by HAM' },
-          decision: { action: 'call_now', target: 'Brandon', reasoning: 'HAM asked for a call - no analysis needed' },
-          execution: {
-            action: 'call_now',
-            target: 'Brandon',
-            traceId: traceId,
-            status: callData.sid ? 'call_initiated' : 'failed',
-            callSid: callData.sid,
-            timestamp: new Date().toISOString()
-          },
-          message: spokenMessage.substring(0, 100) + '...'
-        });
+        try {
+          const dialResult = await DIAL_twoway(targetPhone, spokenMessage, source || 'escalate');
+          
+          return jsonResponse(res, 200, {
+            success: dialResult.success,
+            routing: 'FORCE_CALL*ELEVENLABS*TWOWAY',
+            analysis: { urgency: 10, category: 'ham_request', intent: 'Call requested by HAM' },
+            decision: { action: 'call_now', target: 'Brandon', reasoning: 'HAM asked for a call - using ElevenLabs 2-way' },
+            execution: {
+              action: 'call_now',
+              target: 'Brandon',
+              conversation_id: dialResult.conversation_id,
+              status: dialResult.success ? 'call_initiated' : 'failed',
+              timestamp: new Date().toISOString()
+            },
+            message: spokenMessage.substring(0, 100) + '...'
+          });
+        } catch (e) {
+          console.log('[ESCALATE] DIAL_twoway failed:', e.message);
+          return jsonResponse(res, 500, { error: 'Call failed: ' + e.message });
+        }
       }
       
       // Route through AIR_escalate for REAL agent analysis
