@@ -1,0 +1,35 @@
+# ⬡B:TOUCH:CRON:scheduled.calls.checker:20260216⬡
+# GitHub Actions cron job to check for scheduled ABA calls
+# Runs every minute to catch scheduled calls on time
+
+name: ABA Scheduled Calls Checker
+
+on:
+  schedule:
+    # Run every minute
+    - cron: '* * * * *'
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  check-scheduled-calls:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for due scheduled calls
+        run: |
+          echo "Checking for scheduled calls at $(date)"
+          response=$(curl -s "https://aba-reach.onrender.com/api/cron/scheduled-calls")
+          echo "Response: $response"
+          
+          # Parse response
+          status=$(echo $response | jq -r '.status // "error"')
+          executed=$(echo $response | jq -r '.executed // 0')
+          
+          if [ "$status" = "ok" ]; then
+            if [ "$executed" -gt 0 ]; then
+              echo "✅ Executed $executed scheduled call(s)"
+            else
+              echo "✓ No scheduled calls due"
+            fi
+          else
+            echo "⚠️ Cron check returned: $response"
+          fi
