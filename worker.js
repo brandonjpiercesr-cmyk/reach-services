@@ -259,7 +259,7 @@ const REACH_URL = process.env.REACH_URL || 'https://aba-reach.onrender.com';
 
 // ⬡B:AIR:REACH.SERVER.STARTUP:CODE:infrastructure.logging.boot:AIR→REACH:T10:v1.5.0:20260213:b0o1t⬡
 console.log('═══════════════════════════════════════════════════════════');
-console.log('[ABA REACH v2.8.0] FULL HIERARCHY + SIGILS + API ROUTES');
+console.log('[ABA REACH v2.8.1] FULL HIERARCHY + SIGILS + API ROUTES');
 console.log('[HIERARCHY] L6:AIR > L5:REACH > L4:VOICE,SMS,EMAIL,OMI > L3:VARA,CARA,IMAN,TASTE');
 console.log('[AIR] Hardcoded agents: LUKE, COLE, JUDE, PACK');
 console.log('[AIR] PRIMARY: Gemini Flash 2.0 | BACKUP: Claude Haiku');
@@ -3798,7 +3798,7 @@ async function postCallAutomation(session) {
     '<h3>Conversation Summary</h3>' +
     '<p>' + topicsDiscussed.replace(/\|/g, '<br>') + '</p>' +
     '<hr style="border:1px solid #e5e7eb">' +
-    '<p style="color:#9ca3af;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v2.8.0</p>' +
+    '<p style="color:#9ca3af;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v2.8.1</p>' +
     '</div>';
   
   const emailResult = await sendEmailFromCall(
@@ -3820,7 +3820,7 @@ async function postCallAutomation(session) {
   const notifyResult = await sendSMSFromCall('+13363898116', brandonNotify);
   
   // ALSO email Brandon
-  const brandonEmailHtml = '<div style="font-family:system-ui;max-width:600px;margin:0 auto"><h2>ABA Call Report</h2><p><strong>Caller:</strong> ' + callerName + '</p><p><strong>Phone:</strong> ' + callerNumber + '</p><p><strong>Duration:</strong> ' + turnCount + ' turns</p><p><strong>Topics:</strong> ' + topicsDiscussed.substring(0, 300) + '</p><p style="color:#888;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v2.8.0</p></div>';
+  const brandonEmailHtml = '<div style="font-family:system-ui;max-width:600px;margin:0 auto"><h2>ABA Call Report</h2><p><strong>Caller:</strong> ' + callerName + '</p><p><strong>Phone:</strong> ' + callerNumber + '</p><p><strong>Duration:</strong> ' + turnCount + ' turns</p><p><strong>Topics:</strong> ' + topicsDiscussed.substring(0, 300) + '</p><p style="color:#888;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v2.8.1</p></div>';
   const brandonEmail = await sendEmailFromCall('brandonjpiercesr@gmail.com', 'Brandon', 'ABA Call Report: ' + callerName + ' called', brandonEmailHtml);
   if (brandonEmail.success) console.log('[POST-CALL] Brandon email report sent');
   if (notifyResult.success) {
@@ -4274,6 +4274,8 @@ function connectDeepgram(session) {
         const isFinal = msg.is_final;
         
         if (transcript.trim() && isFinal) {
+          console.log('[DEEPGRAM] *** FINAL TRANSCRIPT RECEIVED ***');
+          console.log('[DEEPGRAM] isOutbound:', session.isOutbound);
           // v1.9.0 - EAR: Extract speaker from diarized result
           const speakerId = extractSpeakerFromDiarize(msg);
           const isPrimary = speakerId !== null ? session.speakerTracker.registerSpeaker(speakerId, transcript.split(' ').length) : true;
@@ -4323,6 +4325,11 @@ function connectDeepgram(session) {
 // ═══════════════════════════════════════════════════════════════════════════
 async function processUtterance(session, text) {
   // ⬡B:AIR:REACH.VOICE.DEMO_PROCESS:CODE:voice.demo.touchpoint_aware:AIR→VARA→USER:T9:v1.6.0:20260213:d1p2r⬡
+  
+  console.log('[PROCESS] *** PROCESSING UTTERANCE ***');
+  console.log('[PROCESS] isOutbound:', session.isOutbound);
+  console.log('[PROCESS] Text:', text.substring(0, 100));
+  console.log('[PROCESS] CallerIdentity:', session.callerIdentity?.name);
   
   if ((session.touchpoints && session.touchpoints.type !== "owner")) {
     session.touchpoints.turnCount++;
@@ -4924,7 +4931,7 @@ const httpServer = http.createServer(async (req, res) => {
   if (path === '/' || path === '/health') {
     return jsonResponse(res, 200, {
       status: 'ALIVE',
-      service: 'ABA REACH v2.8.0',
+      service: 'ABA REACH v2.8.1',
       mode: 'FULL API + VOICE + OMI',
       air: 'ABA Intellectual Role - CENTRAL ORCHESTRATOR',
       models: { primary: 'Gemini Flash 2.0', backup: 'Claude Haiku', speed_fallback: 'Groq' },
@@ -7722,7 +7729,7 @@ ccWss.on('connection', (ws, req) => {
   // Send welcome message with system status
   ws.send(JSON.stringify({
     type: 'connected',
-    service: 'ABA REACH v2.8.0 - AUTONOMY LAYER ACTIVE',
+    service: 'ABA REACH v2.8.1 - AUTONOMY LAYER ACTIVE',
     timestamp: new Date().toISOString(),
     agents: ['AIR', 'VARA', 'LUKE', 'COLE', 'JUDE', 'PACK', 'IMAN', 'TASTE', 'DIAL', 'PULSE', 'SAGE'],
     features: ['proactive_email', 'deadline_alerts', 'auto_escalation', 'device_sync']
@@ -7986,7 +7993,9 @@ wss.on('connection', (ws) => {
         sessions.set(msg.start.streamSid, session);
         
         // Check if this is an outbound call (from escalation)
+        console.log('[STREAM] customParameters:', JSON.stringify(msg.start.customParameters || {}));
         session.isOutbound = msg.start.customParameters?.outbound === 'true';
+        console.log('[STREAM] isOutbound set to:', session.isOutbound);
         
         // ⬡B:AIR:REACH.VOICE.CALLER_EXTRACT:CODE:identity.extract.twilio:TWILIO→REACH→AIR:T9:v1.6.0:20260213:c1e2x⬡
         // Extract caller number from Twilio stream parameters
@@ -8005,38 +8014,39 @@ wss.on('connection', (ws) => {
         // For OUTBOUND calls, the TwiML <Play> already spoke the message
         // Don't send another greeting - just listen for response
         if (session.isOutbound) {
+          console.log('[OUTBOUND] *** OUTBOUND CALL DETECTED ***');
           console.log('[OUTBOUND] Skipping greeting - TwiML already spoke. Listening for Brandon...');
           session.callerIdentity = { name: 'Brandon', trust: 'owner', access: 'full' };
           session.touchpoints = { type: 'owner', turnCount: 0 };
-          // Ready to process speech - no greeting needed
-          return;
+          // DON'T return - need to stay in handler for media events
+          // Just skip the greeting below
+        } else {
+          // ⬡B:AIR:REACH.VOICE.DEMO_FLOW:CODE:voice.demo.guided:AIR→VARA→USER:T9:v1.6.0:20260213:d1f2l⬡
+          // v1.8.0 - Pull cross-call memory BEFORE greeting (INBOUND only)
+          session.callHistory = await pullCallHistory(session.callerNumber);
+          if (session.callHistory) {
+            console.log('[CROSS-CALL] Found previous call history for ' + session.callerNumber);
+          }
+          
+          // Attach call history to callerIdentity so system prompt can reference it
+          if (session.callHistory) {
+            session.callerIdentity.callHistory = session.callHistory;
+          }
+          
+          // Dynamic touchpoints based on WHO is calling and WHETHER they've called before
+          session.touchpoints = getTouchpointsForCaller(session.callerIdentity, session.callHistory);
+          console.log('[TOUCHPOINTS] Type: ' + session.touchpoints.type + ' for ' + session.callerNumber);
+          
+          // Greeting adapts to caller type + history
+          const greeting = getGreetingForCaller(session.callerIdentity, session.callHistory, session.touchpoints);
+          
+          setTimeout(async () => {
+            await VARA_speak(session, greeting);
+            if (session.touchpoints.INTRO !== undefined) session.touchpoints.INTRO = true;
+            if (session.touchpoints.WELCOME_BACK !== undefined) session.touchpoints.WELCOME_BACK = true;
+            if (session.touchpoints.HELLO !== undefined) session.touchpoints.HELLO = true;
+          }, 500);
         }
-        
-        // ⬡B:AIR:REACH.VOICE.DEMO_FLOW:CODE:voice.demo.guided:AIR→VARA→USER:T9:v1.6.0:20260213:d1f2l⬡
-        // v1.8.0 - Pull cross-call memory BEFORE greeting
-        session.callHistory = await pullCallHistory(session.callerNumber);
-        if (session.callHistory) {
-          console.log('[CROSS-CALL] Found previous call history for ' + session.callerNumber);
-        }
-        
-        // Attach call history to callerIdentity so system prompt can reference it
-        if (session.callHistory) {
-          session.callerIdentity.callHistory = session.callHistory;
-        }
-        
-        // Dynamic touchpoints based on WHO is calling and WHETHER they've called before
-        session.touchpoints = getTouchpointsForCaller(session.callerIdentity, session.callHistory);
-        console.log('[TOUCHPOINTS] Type: ' + session.touchpoints.type + ' for ' + session.callerNumber);
-        
-        // Greeting adapts to caller type + history
-        const greeting = getGreetingForCaller(session.callerIdentity, session.callHistory, session.touchpoints);
-        
-        setTimeout(async () => {
-          await VARA_speak(session, greeting);
-          if (session.touchpoints.INTRO !== undefined) session.touchpoints.INTRO = true;
-          if (session.touchpoints.WELCOME_BACK !== undefined) session.touchpoints.WELCOME_BACK = true;
-          if (session.touchpoints.HELLO !== undefined) session.touchpoints.HELLO = true;
-        }, 500);
       }
       
       if (msg.event === 'media' && session?.deepgramWs?.readyState === WebSocket.OPEN) {
@@ -8222,7 +8232,7 @@ function getHeartbeatStatus() {
 httpServer.listen(PORT, '0.0.0.0', () => {
   console.log('');
   console.log('═══════════════════════════════════════════════════════════');
-  console.log('[ABA REACH v2.8.0] LIVE on port ' + PORT);
+  console.log('[ABA REACH v2.8.1] LIVE on port ' + PORT);
   console.log('═══════════════════════════════════════════════════════════');
   console.log('[AIR] ABA Intellectual Role - ONLINE');
   console.log('[AIR] PRIMARY: Gemini Flash 2.0');
