@@ -259,7 +259,7 @@ const REACH_URL = process.env.REACH_URL || 'https://aba-reach.onrender.com';
 
 // ⬡B:AIR:REACH.SERVER.STARTUP:CODE:infrastructure.logging.boot:AIR→REACH:T10:v1.5.0:20260213:b0o1t⬡
 console.log('═══════════════════════════════════════════════════════════');
-console.log('[ABA REACH v2.9.1] FULL HIERARCHY + SIGILS + API ROUTES');
+console.log('[ABA REACH v2.9.2] FULL HIERARCHY + SIGILS + API ROUTES');
 console.log('[HIERARCHY] L6:AIR > L5:REACH > L4:VOICE,SMS,EMAIL,OMI > L3:VARA,CARA,IMAN,TASTE');
 console.log('[AIR] Hardcoded agents: LUKE, COLE, JUDE, PACK');
 console.log('[AIR] PRIMARY: Gemini Flash 2.0 | BACKUP: Claude Haiku');
@@ -3798,7 +3798,7 @@ async function postCallAutomation(session) {
     '<h3>Conversation Summary</h3>' +
     '<p>' + topicsDiscussed.replace(/\|/g, '<br>') + '</p>' +
     '<hr style="border:1px solid #e5e7eb">' +
-    '<p style="color:#9ca3af;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v2.9.1</p>' +
+    '<p style="color:#9ca3af;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v2.9.2</p>' +
     '</div>';
   
   const emailResult = await sendEmailFromCall(
@@ -3820,7 +3820,7 @@ async function postCallAutomation(session) {
   const notifyResult = await sendSMSFromCall('+13363898116', brandonNotify);
   
   // ALSO email Brandon
-  const brandonEmailHtml = '<div style="font-family:system-ui;max-width:600px;margin:0 auto"><h2>ABA Call Report</h2><p><strong>Caller:</strong> ' + callerName + '</p><p><strong>Phone:</strong> ' + callerNumber + '</p><p><strong>Duration:</strong> ' + turnCount + ' turns</p><p><strong>Topics:</strong> ' + topicsDiscussed.substring(0, 300) + '</p><p style="color:#888;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v2.9.1</p></div>';
+  const brandonEmailHtml = '<div style="font-family:system-ui;max-width:600px;margin:0 auto"><h2>ABA Call Report</h2><p><strong>Caller:</strong> ' + callerName + '</p><p><strong>Phone:</strong> ' + callerNumber + '</p><p><strong>Duration:</strong> ' + turnCount + ' turns</p><p><strong>Topics:</strong> ' + topicsDiscussed.substring(0, 300) + '</p><p style="color:#888;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v2.9.2</p></div>';
   const brandonEmail = await sendEmailFromCall('brandonjpiercesr@gmail.com', 'Brandon', 'ABA Call Report: ' + callerName + ' called', brandonEmailHtml);
   if (brandonEmail.success) console.log('[POST-CALL] Brandon email report sent');
   if (notifyResult.success) {
@@ -4968,7 +4968,7 @@ const httpServer = http.createServer(async (req, res) => {
   if (path === '/' || path === '/health') {
     return jsonResponse(res, 200, {
       status: 'ALIVE',
-      service: 'ABA REACH v2.9.1',
+      service: 'ABA REACH v2.9.2',
       mode: 'FULL API + VOICE + OMI',
       air: 'ABA Intellectual Role - CENTRAL ORCHESTRATOR',
       models: { primary: 'Gemini Flash 2.0', backup: 'Claude Haiku', speed_fallback: 'Groq' },
@@ -7162,24 +7162,19 @@ Phone: (336) 389-8116</p>
     let twiml;
     
     if (mode === 'twoway') {
-      // ⬡B:TOUCH:FIX:escalate.connect.conversationrelay:20260216⬡
+      // ⬡B:TOUCH:FIX:proper.conversationrelay.twiml:20260216⬡
       // REAL 2-WAY CONVERSATION using ConversationRelay
-      // <Connect><Stream> = bidirectional with ConversationRelay protocol
-      // <Start><Stream> = one-way monitoring only (WRONG for 2-way!)
+      // <Connect><ConversationRelay> = Twilio handles STT/TTS
+      // <Connect><Stream> = raw audio (WRONG - that's Media Streams!)
       
-      // ⬡B:TOUCH:FIX:xml.entity.escape:20260216⬡
-      // FIX: Don't put greeting in URL - the & breaks XML parsing!
-      // Pass greeting via Parameter instead (already done below)
       const safeGreeting = msg.replace(/"/g, "'").replace(/&/g, "and").replace(/</g, "").replace(/>/g, "");
       const wsUrl = 'wss://' + req.headers.host + '/conversation-relay?trace=' + traceId;
       
+      // ConversationRelay - Twilio does the STT/TTS, we just send/receive text!
       twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Connect>
-    <Stream url="${wsUrl}">
-      <Parameter name="outbound" value="true"/>
-      <Parameter name="greeting" value="${safeGreeting.substring(0, 200)}"/>
-    </Stream>
+    <ConversationRelay url="${wsUrl}" welcomeGreeting="${safeGreeting.substring(0, 500)}" voice="Google.en-US-Neural2-F" language="en-US" />
   </Connect>
 </Response>`;
     } else {
@@ -7766,7 +7761,7 @@ ccWss.on('connection', (ws, req) => {
   // Send welcome message with system status
   ws.send(JSON.stringify({
     type: 'connected',
-    service: 'ABA REACH v2.9.1 - AUTONOMY LAYER ACTIVE',
+    service: 'ABA REACH v2.9.2 - AUTONOMY LAYER ACTIVE',
     timestamp: new Date().toISOString(),
     agents: ['AIR', 'VARA', 'LUKE', 'COLE', 'JUDE', 'PACK', 'IMAN', 'TASTE', 'DIAL', 'PULSE', 'SAGE'],
     features: ['proactive_email', 'deadline_alerts', 'auto_escalation', 'device_sync']
@@ -7901,8 +7896,7 @@ crWss.on('connection', async (ws, req) => {
     traceId,
     history: [],
     callSid: null,
-    greeting: '', // Will be set from setup message customParameters
-    greetingSent: false
+    isOutbound: false  // Will be set on setup
   };
   
   ws.on('message', async (data) => {
@@ -7921,24 +7915,12 @@ crWss.on('connection', async (ws, req) => {
           sessionData.callSid = message.callSid;
           crSessions.set(message.callSid, sessionData);
           
-          // ⬡B:TOUCH:FIX:greeting.from.parameters:20260216⬡
-          // Get greeting from customParameters (passed via TwiML <Parameter>)
-          sessionData.greeting = message.customParameters?.greeting || '';
+          // ⬡B:TOUCH:FIX:greeting.from.twilio:20260216⬡
+          // With ConversationRelay, Twilio handles the welcomeGreeting automatically
+          // We don't need to send it - just mark that this is an outbound call
+          sessionData.isOutbound = true;
           console.log('[CR] Setup complete | CallSid:', message.callSid);
-          console.log('[CR] Greeting from params:', sessionData.greeting.substring(0, 50) + '...');
-          
-          // ⬡B:TOUCH:FIX:cr.greeting.on.setup:20260216⬡
-          // Send greeting immediately after setup
-          if (sessionData.greeting && !sessionData.greetingSent) {
-            console.log('[CR] Sending greeting...');
-            sessionData.greetingSent = true;
-            ws.send(JSON.stringify({
-              type: 'text',
-              token: sessionData.greeting,
-              last: true
-            }));
-            console.log('[CR] Greeting sent!');
-          }
+          console.log('[CR] Outbound call - Twilio will speak welcomeGreeting');
           break;
           
         case 'prompt':
@@ -7954,8 +7936,8 @@ crWss.on('connection', async (ws, req) => {
           }).catch(e => {});
           
           // Route through AIR for intelligent response
-          // For outbound calls (with greeting), assume it's Brandon
-          const callerIdentity = sessionData.greeting 
+          // For outbound calls, assume it's Brandon
+          const callerIdentity = sessionData.isOutbound 
             ? { name: 'Brandon', trust: 'owner', access: 'full' }
             : { name: 'Phone Caller', trust: 'medium', access: 'standard' };
           
@@ -8420,7 +8402,7 @@ function getHeartbeatStatus() {
 httpServer.listen(PORT, '0.0.0.0', () => {
   console.log('');
   console.log('═══════════════════════════════════════════════════════════');
-  console.log('[ABA REACH v2.9.1] LIVE on port ' + PORT);
+  console.log('[ABA REACH v2.9.2] LIVE on port ' + PORT);
   console.log('═══════════════════════════════════════════════════════════');
   console.log('[AIR] ABA Intellectual Role - ONLINE');
   console.log('[AIR] PRIMARY: Gemini Flash 2.0');
