@@ -88,6 +88,559 @@ const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFz
 // ═══════════════════════════════════════════════════════════════════════════════
 const ABACIA_SERVICES_URL = 'https://abacia-services.onrender.com';
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:TOUCH:PHASE3:SPURT3.0:timezone.utilities:20260216⬡
+// TIMEZONE UTILITIES - Container runs UTC, users are EST/PST
+// Brandon, BJ, CJ = EST (America/New_York)
+// Eric = PST (America/Los_Angeles)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const TIMEZONE_CONFIG = {
+  brandon: { tz: 'America/New_York', offset: -5, label: 'EST' },
+  bj: { tz: 'America/New_York', offset: -5, label: 'EST' },
+  cj: { tz: 'America/New_York', offset: -5, label: 'EST' },
+  eric: { tz: 'America/Los_Angeles', offset: -8, label: 'PST' },
+  default: { tz: 'America/New_York', offset: -5, label: 'EST' }
+};
+
+// Get current time in a specific timezone
+function getTimeInTimezone(tzName = 'America/New_York') {
+  const now = new Date();
+  // Use Intl.DateTimeFormat for proper timezone conversion
+  const options = {
+    timeZone: tzName,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hour12: false
+  };
+  const parts = new Intl.DateTimeFormat('en-US', options).formatToParts(now);
+  const get = (type) => parts.find(p => p.type === type)?.value || '00';
+  
+  return {
+    year: parseInt(get('year')),
+    month: parseInt(get('month')),
+    day: parseInt(get('day')),
+    hour: parseInt(get('hour')),
+    minute: parseInt(get('minute')),
+    second: parseInt(get('second')),
+    formatted: `${get('month')}/${get('day')}/${get('year')} ${get('hour')}:${get('minute')}`,
+    dayOfWeek: new Intl.DateTimeFormat('en-US', { timeZone: tzName, weekday: 'long' }).format(now)
+  };
+}
+
+// Format a date for display in EST (for Brandon)
+function formatDateEST(date) {
+  const d = new Date(date);
+  const options = {
+    timeZone: 'America/New_York',
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric'
+  };
+  return new Intl.DateTimeFormat('en-US', options).format(d);
+}
+
+// Get "today" in EST for API queries
+function getTodayEST() {
+  const now = new Date();
+  const estString = now.toLocaleString('en-US', { timeZone: 'America/New_York' });
+  const estDate = new Date(estString);
+  return estDate.toISOString().split('T')[0].replace(/-/g, '');
+}
+
+// Check if it's a reasonable hour to call someone (8am-9pm in their timezone)
+function isReasonableHourToCall(personName) {
+  const config = TIMEZONE_CONFIG[personName?.toLowerCase()] || TIMEZONE_CONFIG.default;
+  const time = getTimeInTimezone(config.tz);
+  return time.hour >= 8 && time.hour < 21;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:TOUCH:PHASE3:SPURT3.0:contacts.master:20260216⬡
+// MASTER CONTACTS LIST - Used by voice-tool, group calls, scheduled calls
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const MASTER_CONTACTS = {
+  brandon: { 
+    phone: '+13363898116', 
+    name: 'Brandon', 
+    fullName: 'Brandon Pierce',
+    timezone: 'America/New_York',
+    trust: 'T10',
+    role: 'HAM'
+  },
+  eric: { 
+    phone: '+13236007676', 
+    name: 'Dr. Eric Lane',
+    fullName: 'Dr. Eric Lane Sr.',
+    timezone: 'America/Los_Angeles',
+    trust: 'T9',
+    role: 'Senior Advisor'
+  },
+  bj: { 
+    phone: '+19803958662', 
+    name: 'BJ',
+    fullName: 'BJ Pierce',
+    timezone: 'America/New_York',
+    trust: 'T8',
+    role: 'Brother'
+  },
+  cj: { 
+    phone: '+19199170686', 
+    name: 'CJ',
+    fullName: 'CJ Pierce',
+    timezone: 'America/New_York',
+    trust: 'T7',
+    role: 'Brother'
+  }
+};
+
+// Lookup contact by name (fuzzy matching)
+function lookupContact(nameInput) {
+  if (!nameInput) return null;
+  const name = nameInput.toLowerCase().trim();
+  
+  // Direct match
+  if (MASTER_CONTACTS[name]) return MASTER_CONTACTS[name];
+  
+  // Fuzzy matches
+  if (name.includes('eric') || name.includes('dr')) return MASTER_CONTACTS.eric;
+  if (name.includes('bj') || name.includes('b.j')) return MASTER_CONTACTS.bj;
+  if (name.includes('cj') || name.includes('c.j')) return MASTER_CONTACTS.cj;
+  if (name.includes('brandon') || name.includes('boss')) return MASTER_CONTACTS.brandon;
+  
+  return null;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:TOUCH:PHASE3:SPURT3.1:group.calls:20260216⬡
+// GROUP CALLS - Twilio Conference API
+// "Call me and Eric together" → Creates conference, calls both, adds to room
+// Uses TWILIO_SID, TWILIO_AUTH, TWILIO_PHONE from global config section
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Generate unique conference room name
+function generateConferenceName() {
+  return 'ABA-CONF-' + Date.now().toString(36).toUpperCase();
+}
+
+// Create a Twilio call that joins a conference
+async function callAndJoinConference(phoneNumber, conferenceName, announce = false) {
+  console.log('[GROUP CALL] Calling', phoneNumber, 'to join conference:', conferenceName);
+  
+  const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say voice="Polly.Joanna">Connecting you to a group call. Please hold.</Say>
+  <Dial>
+    <Conference startConferenceOnEnter="true" endConferenceOnExit="false" beep="true">
+      ${conferenceName}
+    </Conference>
+  </Dial>
+</Response>`;
+  
+  const authHeader = 'Basic ' + Buffer.from(TWILIO_SID + ':' + TWILIO_AUTH).toString('base64');
+  
+  const postData = new URLSearchParams({
+    To: phoneNumber,
+    From: TWILIO_PHONE,
+    Twiml: twiml
+  }).toString();
+  
+  try {
+    const result = await httpsRequest({
+      hostname: 'api.twilio.com',
+      path: '/2010-04-01/Accounts/' + TWILIO_SID + '/Calls.json',
+      method: 'POST',
+      headers: {
+        'Authorization': authHeader,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Length': Buffer.byteLength(postData)
+      }
+    }, postData);
+    
+    if (result.status === 201) {
+      const data = JSON.parse(result.data.toString());
+      console.log('[GROUP CALL] Call initiated:', data.sid);
+      return { success: true, callSid: data.sid };
+    }
+    
+    console.log('[GROUP CALL] Twilio returned:', result.status);
+    return { success: false, error: 'Twilio error: ' + result.status };
+    
+  } catch (e) {
+    console.log('[GROUP CALL] Error:', e.message);
+    return { success: false, error: e.message };
+  }
+}
+
+// Start a group call with multiple people
+async function startGroupCall(participants) {
+  console.log('[GROUP CALL] Starting group call with:', participants.map(p => p.name).join(', '));
+  
+  const conferenceName = generateConferenceName();
+  const results = [];
+  
+  // Call each participant sequentially
+  for (const participant of participants) {
+    const result = await callAndJoinConference(participant.phone, conferenceName);
+    results.push({
+      name: participant.name,
+      phone: participant.phone,
+      ...result
+    });
+    
+    // Small delay between calls
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+  
+  // Store conference info to brain for tracking
+  storeToBrain({
+    content: `GROUP CALL STARTED: Conference ${conferenceName} with ${participants.map(p => p.name).join(', ')}`,
+    memory_type: 'voice_activity',
+    categories: ['group_call', 'conference'],
+    importance: 7,
+    tags: ['group_call', 'conference', conferenceName]
+  }).catch(e => console.log('[GROUP CALL] Brain store error:', e.message));
+  
+  return {
+    success: results.every(r => r.success),
+    conferenceName,
+    participants: results
+  };
+}
+
+// Parse "call me and Eric together" type requests
+function parseGroupCallRequest(message) {
+  const msgLower = message.toLowerCase();
+  
+  // Patterns: "call me and Eric", "call Eric and BJ together", "group call with Eric and CJ"
+  const patterns = [
+    /call\s+(?:me\s+and\s+)?(\w+)(?:\s+and\s+(\w+))?(?:\s+together)?/i,
+    /group\s+call\s+(?:with\s+)?(\w+)(?:\s+and\s+(\w+))?/i,
+    /conference\s+(?:call\s+)?(?:with\s+)?(\w+)(?:\s+and\s+(\w+))?/i
+  ];
+  
+  // Check if this is a group call request
+  const isGroupCall = msgLower.includes(' and ') && 
+    (msgLower.includes('call') || msgLower.includes('conference') || msgLower.includes('together'));
+  
+  if (!isGroupCall) return null;
+  
+  // Extract names
+  const names = [];
+  
+  // Check for "me" (caller)
+  if (msgLower.includes('me and') || msgLower.includes('call me')) {
+    names.push('brandon'); // "me" means Brandon (the caller)
+  }
+  
+  // Look for known contacts
+  for (const contactName of Object.keys(MASTER_CONTACTS)) {
+    if (msgLower.includes(contactName)) {
+      if (!names.includes(contactName)) {
+        names.push(contactName);
+      }
+    }
+  }
+  
+  // Also check for "dr lane" or "dr. lane"
+  if (msgLower.includes('dr') && msgLower.includes('lane')) {
+    if (!names.includes('eric')) names.push('eric');
+  }
+  
+  if (names.length < 2) return null;
+  
+  // Convert to contact objects
+  const participants = names.map(name => MASTER_CONTACTS[name]).filter(Boolean);
+  
+  return participants.length >= 2 ? participants : null;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:TOUCH:PHASE3:SPURT3.2:scheduled.calls:20260216⬡
+// SCHEDULED CALLS - Store in brain, cron job picks up and executes
+// "Call me at 8am" or "Remind me to call Eric on Monday"
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Parse scheduled call request and store to brain
+async function scheduleCall(message, callerIdentity) {
+  console.log('[SCHEDULED CALL] Parsing:', message);
+  
+  const msgLower = message.toLowerCase();
+  
+  // Extract time patterns
+  let scheduledTime = null;
+  let targetContact = null;
+  
+  // Pattern: "call me at 8am", "call me at 3:30pm"
+  const timeMatch = msgLower.match(/at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
+  if (timeMatch) {
+    let hour = parseInt(timeMatch[1]);
+    const minute = timeMatch[2] ? parseInt(timeMatch[2]) : 0;
+    const ampm = timeMatch[3]?.toLowerCase();
+    
+    if (ampm === 'pm' && hour < 12) hour += 12;
+    if (ampm === 'am' && hour === 12) hour = 0;
+    
+    // Get today in EST and set the time
+    const estNow = getTimeInTimezone('America/New_York');
+    scheduledTime = new Date();
+    scheduledTime.setHours(hour + 5, minute, 0, 0); // Convert EST to UTC (add 5 hours)
+    
+    // If time has passed today, schedule for tomorrow
+    if (scheduledTime < new Date()) {
+      scheduledTime.setDate(scheduledTime.getDate() + 1);
+    }
+  }
+  
+  // Pattern: "tomorrow", "monday", etc.
+  if (msgLower.includes('tomorrow')) {
+    if (!scheduledTime) {
+      scheduledTime = new Date();
+      scheduledTime.setDate(scheduledTime.getDate() + 1);
+      scheduledTime.setHours(14, 0, 0, 0); // Default to 9am EST (14:00 UTC)
+    } else {
+      scheduledTime.setDate(scheduledTime.getDate() + 1);
+    }
+  }
+  
+  // Determine who to call
+  if (msgLower.includes('call me')) {
+    targetContact = callerIdentity?.name === 'Brandon' ? MASTER_CONTACTS.brandon : 
+                    (callerIdentity || MASTER_CONTACTS.brandon);
+  } else {
+    // Look for contact name
+    for (const contactName of Object.keys(MASTER_CONTACTS)) {
+      if (msgLower.includes(contactName)) {
+        targetContact = MASTER_CONTACTS[contactName];
+        break;
+      }
+    }
+  }
+  
+  if (!scheduledTime || !targetContact) {
+    return { success: false, error: 'Could not parse time or contact from request' };
+  }
+  
+  // Store scheduled call to brain
+  const scheduleData = {
+    type: 'scheduled_call',
+    target_phone: targetContact.phone,
+    target_name: targetContact.name,
+    scheduled_time: scheduledTime.toISOString(),
+    scheduled_time_est: formatDateEST(scheduledTime) + ' at ' + scheduledTime.getHours() + ':' + String(scheduledTime.getMinutes()).padStart(2, '0'),
+    created_by: callerIdentity?.name || 'Unknown',
+    status: 'pending',
+    original_request: message
+  };
+  
+  await storeToBrain({
+    content: JSON.stringify(scheduleData),
+    memory_type: 'scheduled_call',
+    categories: ['scheduled', 'call', 'pending'],
+    importance: 8,
+    tags: ['scheduled_call', 'pending', targetContact.name.toLowerCase()]
+  });
+  
+  console.log('[SCHEDULED CALL] Stored:', scheduleData);
+  
+  return {
+    success: true,
+    scheduledTime: scheduleData.scheduled_time_est,
+    target: targetContact.name
+  };
+}
+
+// Check for pending scheduled calls (called by cron)
+async function checkScheduledCalls() {
+  console.log('[SCHEDULED CALL] Checking for pending calls...');
+  
+  const now = new Date();
+  
+  // Query brain for pending scheduled calls
+  const result = await httpsRequest({
+    hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+    path: '/rest/v1/aba_memory?memory_type=eq.scheduled_call&content=ilike.*pending*&order=created_at.desc&limit=10',
+    method: 'GET',
+    headers: {
+      'apikey': SUPABASE_KEY || SUPABASE_ANON,
+      'Authorization': 'Bearer ' + (SUPABASE_KEY || SUPABASE_ANON)
+    }
+  });
+  
+  if (result.status !== 200) {
+    console.log('[SCHEDULED CALL] Query failed:', result.status);
+    return [];
+  }
+  
+  const pending = JSON.parse(result.data.toString());
+  const dueCalls = [];
+  
+  for (const entry of pending) {
+    try {
+      const data = JSON.parse(entry.content);
+      const scheduledTime = new Date(data.scheduled_time);
+      
+      // Check if call is due (within 1 minute of scheduled time)
+      if (scheduledTime <= now && data.status === 'pending') {
+        dueCalls.push({ ...data, memoryId: entry.id });
+      }
+    } catch (e) {
+      console.log('[SCHEDULED CALL] Parse error:', e.message);
+    }
+  }
+  
+  return dueCalls;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:TOUCH:PHASE3:SPURT3.3:voicemail.drops:20260216⬡
+// VOICEMAIL DROPS - Custom message when voicemail detected
+// ElevenLabs handles detection, we customize the message
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Custom voicemail messages per contact
+const VOICEMAIL_MESSAGES = {
+  eric: "Hey Dr. Lane, this is ABA calling on behalf of Brandon. He wanted to touch base with you. When you get a chance, give him a call back. Thanks!",
+  bj: "Hey BJ, this is ABA. Brandon asked me to give you a ring. Hit him back when you can. Peace!",
+  cj: "Hey CJ, ABA here for Brandon. Give him a call when you're free. Thanks!",
+  default: "Hello, this is ABA reaching out. I wasn't able to connect with you directly, but I wanted to make sure you received this message. When you have a moment, please feel free to return this call. Thank you, and have a wonderful day."
+};
+
+// Get voicemail message for a contact
+function getVoicemailMessage(contactName) {
+  const name = contactName?.toLowerCase();
+  return VOICEMAIL_MESSAGES[name] || VOICEMAIL_MESSAGES.default;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:TOUCH:PHASE3:SPURT3.4:call.transfers:20260216⬡
+// CALL TRANSFERS - Warm and cold transfers
+// "Transfer me to Eric" → Connects current caller to Eric
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Warm transfer - ABA stays on, introduces, then drops
+async function warmTransfer(currentCallSid, targetPhone, targetName) {
+  console.log('[TRANSFER] Warm transfer to:', targetName, targetPhone);
+  
+  // This requires modifying the current call to add a new participant
+  // Using Twilio's Conference for warm transfers
+  const conferenceName = 'TRANSFER-' + Date.now().toString(36);
+  
+  // First, move current caller to conference
+  const moveResult = await updateCallToConference(currentCallSid, conferenceName);
+  if (!moveResult.success) return moveResult;
+  
+  // Then call target and add to same conference
+  const callResult = await callAndJoinConference(targetPhone, conferenceName);
+  if (!callResult.success) return callResult;
+  
+  return {
+    success: true,
+    type: 'warm',
+    target: targetName,
+    conferenceName
+  };
+}
+
+// Cold transfer - ABA drops, connects caller directly
+async function coldTransfer(currentCallSid, targetPhone, targetName) {
+  console.log('[TRANSFER] Cold transfer to:', targetName, targetPhone);
+  
+  const authHeader = 'Basic ' + Buffer.from(TWILIO_SID + ':' + TWILIO_AUTH).toString('base64');
+  
+  // Update the call to redirect to the target
+  const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say voice="Polly.Joanna">Transferring you now.</Say>
+  <Dial callerId="${TWILIO_PHONE}">
+    ${targetPhone}
+  </Dial>
+</Response>`;
+  
+  const postData = new URLSearchParams({
+    Twiml: twiml
+  }).toString();
+  
+  try {
+    const result = await httpsRequest({
+      hostname: 'api.twilio.com',
+      path: '/2010-04-01/Accounts/' + TWILIO_SID + '/Calls/' + currentCallSid + '.json',
+      method: 'POST',
+      headers: {
+        'Authorization': authHeader,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Length': Buffer.byteLength(postData)
+      }
+    }, postData);
+    
+    if (result.status === 200) {
+      console.log('[TRANSFER] Cold transfer initiated');
+      return { success: true, type: 'cold', target: targetName };
+    }
+    
+    return { success: false, error: 'Twilio error: ' + result.status };
+    
+  } catch (e) {
+    console.log('[TRANSFER] Error:', e.message);
+    return { success: false, error: e.message };
+  }
+}
+
+// Update existing call to join a conference
+async function updateCallToConference(callSid, conferenceName) {
+  const authHeader = 'Basic ' + Buffer.from(TWILIO_SID + ':' + TWILIO_AUTH).toString('base64');
+  
+  const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say voice="Polly.Joanna">Please hold while I connect you.</Say>
+  <Dial>
+    <Conference>${conferenceName}</Conference>
+  </Dial>
+</Response>`;
+  
+  const postData = new URLSearchParams({
+    Twiml: twiml
+  }).toString();
+  
+  try {
+    const result = await httpsRequest({
+      hostname: 'api.twilio.com',
+      path: '/2010-04-01/Accounts/' + TWILIO_SID + '/Calls/' + callSid + '.json',
+      method: 'POST',
+      headers: {
+        'Authorization': authHeader,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Length': Buffer.byteLength(postData)
+      }
+    }, postData);
+    
+    return { success: result.status === 200 };
+    
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+// Parse transfer request
+function parseTransferRequest(message) {
+  const msgLower = message.toLowerCase();
+  
+  if (!msgLower.includes('transfer')) return null;
+  
+  // Look for target contact
+  for (const contactName of Object.keys(MASTER_CONTACTS)) {
+    if (msgLower.includes(contactName)) {
+      return {
+        target: MASTER_CONTACTS[contactName],
+        type: msgLower.includes('warm') ? 'warm' : 'cold'
+      };
+    }
+  }
+  
+  return null;
+}
+
 // ⬡B:AIR:REACH.BRIDGE.AIR:FUNC:abacia.air.process:v2.3.0:20260214⬡
 // Route queries through ABACIA's AIR (which has all 22+ agents)
 async function ABACIA_AIR_process(query, context) {
@@ -891,11 +1444,9 @@ async function PLAY_getScores(query) {
               const homeScore = home.score || '0';
               const awayScore = away.score || '0';
               
-              // Format date nicely
-              const gameDate = new Date(event.date);
-              const dayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][gameDate.getDay()];
-              const monthName = ['January','February','March','April','May','June','July','August','September','October','November','December'][gameDate.getMonth()];
-              const dateDisplay = dayName + ', ' + monthName + ' ' + gameDate.getDate();
+              // ⬡B:TOUCH:FIX:play.timezone.est:20260216⬡
+              // Format date in EST (Brandon's timezone), not UTC
+              const dateDisplay = formatDateEST(event.date);
               
               // VARA-style warm response with real data
               if (status === 'Final') {
@@ -4999,16 +5550,97 @@ const httpServer = http.createServer(async (req, res) => {
   if (path === '/' || path === '/health') {
     return jsonResponse(res, 200, {
       status: 'ALIVE',
-      service: 'ABA REACH v2.10.1',
-      mode: 'FULL API + VOICE + OMI',
+      service: 'ABA REACH v2.11.0-PHASE3',
+      mode: 'FULL API + VOICE + OMI + GROUP CALLS + SCHEDULED CALLS',
       air: 'ABA Intellectual Role - CENTRAL ORCHESTRATOR',
       models: { primary: 'Gemini Flash 2.0', backup: 'Claude Haiku', speed_fallback: 'Groq' },
       agents: { hardcoded: ['LUKE', 'COLE', 'JUDE', 'PACK'], voice: 'VARA' },
       voice: 'ElevenLabs ' + ELEVENLABS_VOICE,
       phone: TWILIO_PHONE,
-      api_routes: ['/api/router', '/api/models/claude', '/api/voice/deepgram-token', '/api/omi/manifest', '/api/omi/webhook', '/api/sms/send'],
+      capabilities: ['outbound_calls', 'group_calls', 'scheduled_calls', 'voicemail_drops', 'call_transfers'],
+      api_routes: ['/api/router', '/api/models/claude', '/api/voice/deepgram-token', '/api/omi/manifest', '/api/omi/webhook', '/api/sms/send', '/api/cron/scheduled-calls'],
       message: 'We are all ABA'
     });
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // ⬡B:TOUCH:PHASE3:SPURT3.2:cron.scheduled.calls:20260216⬡
+  // CRON ENDPOINT - Check and execute scheduled calls
+  // Called by Render's cron job or external scheduler
+  // ═══════════════════════════════════════════════════════════════════════
+  if (path === '/api/cron/scheduled-calls' && method === 'GET') {
+    console.log('[CRON] Checking scheduled calls...');
+    
+    try {
+      const dueCalls = await checkScheduledCalls();
+      
+      if (dueCalls.length === 0) {
+        return jsonResponse(res, 200, {
+          status: 'ok',
+          message: 'No scheduled calls due',
+          checked_at: new Date().toISOString()
+        });
+      }
+      
+      const results = [];
+      
+      for (const call of dueCalls) {
+        console.log('[CRON] Executing scheduled call to:', call.target_name);
+        
+        // Make the call via ElevenLabs
+        try {
+          const callResult = await httpsRequest({
+            hostname: 'api.elevenlabs.io',
+            path: '/v1/convai/twilio/outbound-call',
+            method: 'POST',
+            headers: {
+              'xi-api-key': ELEVENLABS_KEY,
+              'Content-Type': 'application/json'
+            }
+          }, JSON.stringify({
+            agent_id: 'agent_0601khe2q0gben08ws34bzf7a0sa',
+            agent_phone_number_id: 'phnum_0001khe3q3nyec1bv04mk2m048v8',
+            to_number: call.target_phone
+          }));
+          
+          const callData = JSON.parse(callResult.data.toString());
+          
+          // Update memory to mark as completed
+          await storeToBrain({
+            content: JSON.stringify({ ...call, status: 'completed', completed_at: new Date().toISOString() }),
+            memory_type: 'scheduled_call_completed',
+            categories: ['scheduled', 'call', 'completed'],
+            importance: 6,
+            tags: ['scheduled_call', 'completed', call.target_name.toLowerCase()]
+          });
+          
+          results.push({
+            target: call.target_name,
+            status: 'called',
+            conversation_id: callData.conversation_id
+          });
+          
+        } catch (e) {
+          console.log('[CRON] Call error:', e.message);
+          results.push({
+            target: call.target_name,
+            status: 'error',
+            error: e.message
+          });
+        }
+      }
+      
+      return jsonResponse(res, 200, {
+        status: 'ok',
+        executed: results.length,
+        results,
+        checked_at: new Date().toISOString()
+      });
+      
+    } catch (e) {
+      console.log('[CRON] Error:', e.message);
+      return jsonResponse(res, 500, { error: e.message });
+    }
   }
 
   
@@ -5388,11 +6020,89 @@ Phone: (336) 389-8116</p>
       
       console.log('[AIR VOICE TOOL] Caller identified as:', callerIdentity.name, 'Trust:', callerIdentity.trust);
       
-      // ⬡B:TOUCH:FIX:callback.capability:20260216⬡
-      // Handle "call me back" OR "call [person]" requests
+      // ⬡B:TOUCH:PHASE3:voice.tool.advanced.handlers:20260216⬡
       const msgLower = userMessage.toLowerCase();
       
-      // Check for callback/outbound call requests
+      // ═══════════════════════════════════════════════════════════════════
+      // HANDLER 1: GROUP CALLS - "Call me and Eric together"
+      // ═══════════════════════════════════════════════════════════════════
+      const groupCallParticipants = parseGroupCallRequest(userMessage);
+      if (groupCallParticipants) {
+        console.log('[AIR VOICE TOOL] GROUP CALL REQUEST DETECTED!');
+        
+        try {
+          const result = await startGroupCall(groupCallParticipants);
+          
+          if (result.success) {
+            const names = groupCallParticipants.map(p => p.name).join(' and ');
+            return jsonResponse(res, 200, {
+              response: `Got it! I'm setting up a group call with ${names}. Everyone should be receiving calls right now to join the conference.`,
+              group_call_initiated: true,
+              conference: result.conferenceName,
+              participants: result.participants
+            });
+          } else {
+            return jsonResponse(res, 200, {
+              response: "I tried to set up the group call but hit a snag. Let me try individual calls instead.",
+              error: result.error
+            });
+          }
+        } catch (e) {
+          console.log('[AIR VOICE TOOL] Group call error:', e.message);
+        }
+      }
+      
+      // ═══════════════════════════════════════════════════════════════════
+      // HANDLER 2: SCHEDULED CALLS - "Call me at 8am tomorrow"
+      // ═══════════════════════════════════════════════════════════════════
+      const isScheduleRequest = msgLower.includes('call me at') || 
+                                msgLower.includes('call me tomorrow') ||
+                                msgLower.includes('remind me to call') ||
+                                msgLower.includes('schedule a call');
+      
+      if (isScheduleRequest) {
+        console.log('[AIR VOICE TOOL] SCHEDULED CALL REQUEST DETECTED!');
+        
+        try {
+          const result = await scheduleCall(userMessage, callerIdentity);
+          
+          if (result.success) {
+            return jsonResponse(res, 200, {
+              response: `Done! I've scheduled a call to ${result.target} for ${result.scheduledTime}. I'll make sure that happens.`,
+              scheduled_call: true,
+              scheduledTime: result.scheduledTime,
+              target: result.target
+            });
+          } else {
+            return jsonResponse(res, 200, {
+              response: "I had trouble understanding when you'd like me to call. Could you say something like 'call me at 8am tomorrow'?"
+            });
+          }
+        } catch (e) {
+          console.log('[AIR VOICE TOOL] Schedule error:', e.message);
+        }
+      }
+      
+      // ═══════════════════════════════════════════════════════════════════
+      // HANDLER 3: CALL TRANSFERS - "Transfer me to Eric"
+      // ═══════════════════════════════════════════════════════════════════
+      const transferRequest = parseTransferRequest(userMessage);
+      if (transferRequest) {
+        console.log('[AIR VOICE TOOL] TRANSFER REQUEST DETECTED!');
+        
+        // Note: For ElevenLabs calls, we don't have direct call SID access
+        // This would need integration with the current call context
+        return jsonResponse(res, 200, {
+          response: `I understand you'd like to be transferred to ${transferRequest.target.name}. For now, let me call them and add you both to a conference.`,
+          transfer_requested: true,
+          target: transferRequest.target.name,
+          type: transferRequest.type
+        });
+      }
+      
+      // ═══════════════════════════════════════════════════════════════════
+      // HANDLER 4: SINGLE OUTBOUND CALLS - "Call me back" or "Call Eric"
+      // ═══════════════════════════════════════════════════════════════════
       const isCallbackRequest = msgLower.includes('call me back') || msgLower.includes('hang up and call') || msgLower.includes('callback');
       const isCallSomeoneRequest = msgLower.match(/call\s+(eric|bj|cj|brandon|dr\.?\s*lane|mom|dad)/i);
       
@@ -5407,20 +6117,19 @@ Phone: (336) 389-8116</p>
           const personMatch = msgLower.match(/call\s+(eric|bj|cj|brandon|dr\.?\s*lane|mom|dad)/i);
           const person = personMatch ? personMatch[1].toLowerCase() : null;
           
-          // ⬡B:TOUCH:FIX:smart.callback.contacts:20260216⬡
-          // Contact lookup - matches caller recognition in ABA prompt
-          const contacts = {
-            'eric': { phone: '+13236007676', name: 'Dr. Eric Lane' },
-            'dr. lane': { phone: '+13236007676', name: 'Dr. Eric Lane' },
-            'dr lane': { phone: '+13236007676', name: 'Dr. Eric Lane' },
-            'bj': { phone: '+19803958662', name: 'BJ' },
-            'cj': { phone: '+19199170686', name: 'CJ' },
-            'brandon': { phone: '+13363898116', name: 'Brandon' }
-          };
-          
-          if (person && contacts[person]) {
-            targetPhone = contacts[person].phone;
-            targetName = contacts[person].name;
+          // ⬡B:TOUCH:PHASE3:SPURT3.0:use.master.contacts:20260216⬡
+          // Use centralized MASTER_CONTACTS with timezone support
+          const contact = lookupContact(person);
+          if (contact) {
+            targetPhone = contact.phone;
+            targetName = contact.name;
+            
+            // Check if it's a reasonable hour to call in their timezone
+            if (!isReasonableHourToCall(person)) {
+              const config = TIMEZONE_CONFIG[person] || TIMEZONE_CONFIG.default;
+              const time = getTimeInTimezone(config.tz);
+              console.log('[AIR VOICE TOOL] Warning: Calling at', time.formatted, config.label);
+            }
           }
         } else if (callerIdentity && callerIdentity.phone) {
           // Callback to caller
