@@ -6067,7 +6067,7 @@ const httpServer = http.createServer(async (req, res) => {
   if (path === '/' || path === '/health') {
     return jsonResponse(res, 200, {
       status: 'ALIVE',
-      service: 'ABA TOUCH v2.12.0-INTEL',
+      service: 'ABA TOUCH v2.12.1-HOTFIX',
       mode: 'FULL API + VOICE + OMI + SMS + SPEECH INTELLIGENCE',
       air: 'ABA Intellectual Role - CENTRAL ORCHESTRATOR',
       models: { primary: 'Gemini Flash 2.0', backup: 'Claude Haiku', speed_fallback: 'Groq' },
@@ -7147,22 +7147,33 @@ Phone: (336) 389-8116</p>
   // ═══════════════════════════════════════════════════════════════════════
   if (path === '/api/sms/receive' && method === 'POST') {
     try {
-      const body = await parseBody(req);
+      // ⬡B:TOUCH:FIX:sms.form.urlencoded:20260216⬡
+      // Twilio sends application/x-www-form-urlencoded, NOT JSON!
+      // Must parse raw body with URLSearchParams
+      const rawBody = await new Promise((resolve, reject) => {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        req.on('end', () => resolve(body));
+        req.on('error', reject);
+      });
       
-      // Twilio sends form data
-      const from = body.From || body.from || 'unknown';
-      const to = body.To || body.to || TWILIO_PHONE;
-      const smsBody = body.Body || body.body || '';
-      const messageSid = body.MessageSid || body.messageSid || 'unknown';
+      console.log('[SMS RECEIVE] Raw body:', rawBody.substring(0, 200));
       
-      console.log('[SMS RECEIVE] From:', from, '| Message:', smsBody.substring(0, 50));
+      // Parse form-urlencoded data
+      const params = new URLSearchParams(rawBody);
+      const from = params.get('From') || params.get('from') || 'unknown';
+      const to = params.get('To') || params.get('to') || TWILIO_PHONE;
+      const smsBody = params.get('Body') || params.get('body') || '';
+      const messageSid = params.get('MessageSid') || params.get('messageSid') || 'unknown';
+      
+      console.log('[SMS RECEIVE] Parsed - From:', from, '| Body:', smsBody.substring(0, 50));
       
       // Look up who texted
       const sender = lookupContact(from) || { name: from, phone: from };
       
       // Store to brain
       await storeToBrain({
-        content: `SMS FROM ${sender.name}: ${smsBody}`,
+        content: `SMS FROM ${sender.name} (${from}): ${smsBody}`,
         memory_type: 'sms_received',
         categories: ['sms', 'inbound', sender.name.toLowerCase()],
         importance: 7,
