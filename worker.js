@@ -1587,17 +1587,19 @@ async function STORE_conversation(callerIdentity, userSaid, abaResponse, convers
 async function SHADOW_accessVault(query, callerIdentity) {
   console.log('[SHADOW] Vault access request:', query);
   
-  // Search brain for meeting notes/transcripts - ALL relevant types
+  // ⬡B:TOUCH:FIX:shadow.proper.search:v2.12.14:20260216⬡
+  // Search the CORRECT memory types for meeting content
+  // EXCLUDE: command_center_activity, voice_transcript (ABA's own logs)
+  // INCLUDE: meeting_report, strategy, business, brandon_context, omi_transcript
+  
   let foundContent = [];
   
   try {
-    // ⬡B:TOUCH:FIX:shadow.search.all.types:20260216⬡
-    // Search for meeting-related content across ALL memory types
-    // Not just omi_transcript - also meeting_report, strategy, business, brandon_context
+    // First, search for meeting_report and strategy (most relevant)
     const searchRes = await fetch(
       `${SUPABASE_URL}/rest/v1/aba_memory?` + 
-      `or=(memory_type.eq.meeting_report,memory_type.eq.strategy,memory_type.eq.business,memory_type.eq.omi_transcript,memory_type.eq.brandon_context,content.ilike.*meeting*,content.ilike.*transcript*,content.ilike.*eric*,content.ilike.*fraternity*,content.ilike.*brotherhood*)` +
-      `&order=created_at.desc&limit=20&select=content,source,memory_type,created_at`,
+      `or=(memory_type.eq.meeting_report,memory_type.eq.strategy)` +
+      `&order=created_at.desc&limit=10&select=content,source,memory_type,created_at`,
       {
         headers: {
           'apikey': SUPABASE_KEY || SUPABASE_ANON,
@@ -1607,22 +1609,58 @@ async function SHADOW_accessVault(query, callerIdentity) {
     );
     
     if (searchRes.ok) {
-      foundContent = await searchRes.json();
-      // Filter out ABA's own calls - we want source material
-      foundContent = foundContent.filter(item => {
-        const content = (item.content || '').toLowerCase();
-        return !content.includes('aba calling') && !content.includes('voice call [voice-');
-      });
-      console.log('[SHADOW] Found', foundContent.length, 'meeting-related entries (filtered)');
+      const meetingData = await searchRes.json();
+      console.log('[SHADOW] Found', meetingData.length, 'meeting_report/strategy entries');
+      foundContent = foundContent.concat(meetingData);
     }
+    
+    // Also search business type for fraternity/brotherhood content
+    const businessRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/aba_memory?` + 
+      `memory_type=eq.business&or=(content.ilike.*fraternity*,content.ilike.*brotherhood*,content.ilike.*majority*)` +
+      `&order=created_at.desc&limit=5&select=content,source,memory_type,created_at`,
+      {
+        headers: {
+          'apikey': SUPABASE_KEY || SUPABASE_ANON,
+          'Authorization': `Bearer ${SUPABASE_KEY || SUPABASE_ANON}`
+        }
+      }
+    );
+    
+    if (businessRes.ok) {
+      const businessData = await businessRes.json();
+      console.log('[SHADOW] Found', businessData.length, 'business entries');
+      foundContent = foundContent.concat(businessData);
+    }
+    
+    // Check Omi transcripts that aren't ABA calls
+    const omiRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/aba_memory?` + 
+      `memory_type=eq.omi_transcript&content=not.ilike.*ABA calling*` +
+      `&order=created_at.desc&limit=5&select=content,source,memory_type,created_at`,
+      {
+        headers: {
+          'apikey': SUPABASE_KEY || SUPABASE_ANON,
+          'Authorization': `Bearer ${SUPABASE_KEY || SUPABASE_ANON}`
+        }
+      }
+    );
+    
+    if (omiRes.ok) {
+      const omiData = await omiRes.json();
+      console.log('[SHADOW] Found', omiData.length, 'Omi transcripts (not ABA calls)');
+      foundContent = foundContent.concat(omiData);
+    }
+    
+    console.log('[SHADOW] Total entries found:', foundContent.length);
+    
   } catch (e) {
     console.log('[SHADOW] Brain search error:', e.message);
   }
   
-  // Check if we found any meeting data
   if (foundContent.length === 0) {
     return {
-      response: "Boss, I searched my vault but couldn't find any meeting notes or transcripts. Were they uploaded to the brain?",
+      response: "Boss, I searched my vault but couldn't find any meeting notes or transcripts.",
       needsConsent: false
     };
   }
@@ -1632,31 +1670,39 @@ async function SHADOW_accessVault(query, callerIdentity) {
   const hasConsent = consentWords.some(word => query.toLowerCase().includes(word));
   
   if (!hasConsent) {
-    // List what we found
-    const types = [...new Set(foundContent.map(f => f.memory_type))].join(', ');
+    // List what we found by type
+    const typeCount = {};
+    foundContent.forEach(f => {
+      typeCount[f.memory_type] = (typeCount[f.memory_type] || 0) + 1;
+    });
+    const typeSummary = Object.entries(typeCount).map(([t,c]) => `${c} ${t}`).join(', ');
+    
     return {
-      response: `I found ${foundContent.length} entries in my vault including: ${types}. This information is protected under Shadow protocol. Do you consent to unlock it for this session?`,
+      response: `I found ${foundContent.length} entries in my vault: ${typeSummary}. This is protected under Shadow protocol. Do you consent to unlock?`,
       needsConsent: true,
       entryCount: foundContent.length
     };
   }
   
-  // Consent given - compile and return meeting notes
+  // Consent given - compile meeting notes
   console.log('[SHADOW] Consent granted - releasing vault contents');
   
-  let compiledNotes = "Unlocking the vault. Here's what I found:\n\n";
+  let compiledNotes = "Unlocking the vault. Here's the meeting content:\n\n";
   
-  for (let i = 0; i < Math.min(foundContent.length, 5); i++) {
-    const entry = foundContent[i];
-    const date = new Date(entry.created_at).toLocaleDateString();
-    const type = entry.memory_type || 'Unknown';
-    const content = (entry.content || '').substring(0, 600);
-    
-    compiledNotes += `${type.toUpperCase()} (${date}): ${content}\n\n`;
+  // Prioritize meeting_report and strategy first
+  const prioritized = foundContent.sort((a, b) => {
+    const priority = { 'meeting_report': 1, 'strategy': 2, 'business': 3 };
+    return (priority[a.memory_type] || 99) - (priority[b.memory_type] || 99);
+  });
+  
+  for (let i = 0; i < Math.min(prioritized.length, 3); i++) {
+    const entry = prioritized[i];
+    const content = (entry.content || '').substring(0, 800);
+    compiledNotes += `${content}\n\n`;
   }
   
-  if (foundContent.length > 5) {
-    compiledNotes += `Plus ${foundContent.length - 5} more entries available.`;
+  if (prioritized.length > 3) {
+    compiledNotes += `Plus ${prioritized.length - 3} more entries available.`;
   }
   
   return {
@@ -6277,7 +6323,7 @@ const httpServer = http.createServer(async (req, res) => {
   if (path === '/' || path === '/health') {
     return jsonResponse(res, 200, {
       status: 'ALIVE',
-      service: 'ABA TOUCH v2.12.13-SHADOW-BYPASS',
+      service: 'ABA TOUCH v2.12.14-SHADOW-FIXED',
       mode: 'FULL API + VOICE + OMI + SMS + SPEECH INTELLIGENCE',
       air: 'ABA Intellectual Role - CENTRAL ORCHESTRATOR',
       models: { primary: 'Gemini Flash 2.0', backup: 'Claude Haiku', speed_fallback: 'Groq' },
