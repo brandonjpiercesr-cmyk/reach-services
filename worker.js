@@ -1587,19 +1587,17 @@ async function STORE_conversation(callerIdentity, userSaid, abaResponse, convers
 async function SHADOW_accessVault(query, callerIdentity) {
   console.log('[SHADOW] Vault access request:', query);
   
-  // Track consent state per conversation (would need proper session management)
-  // For now, we'll prompt for consent on every request
-  
-  // Search brain for meeting notes/transcripts
-  const searchTerms = ['meeting', 'transcript', 'omi', 'otter', 'eric', 'notes'];
+  // Search brain for meeting notes/transcripts - ALL relevant types
   let foundContent = [];
   
   try {
-    // Search for recent meeting-related content in brain
+    // ⬡B:TOUCH:FIX:shadow.search.all.types:20260216⬡
+    // Search for meeting-related content across ALL memory types
+    // Not just omi_transcript - also meeting_report, strategy, business, brandon_context
     const searchRes = await fetch(
       `${SUPABASE_URL}/rest/v1/aba_memory?` + 
-      `or=(content.ilike.*meeting*,content.ilike.*transcript*,memory_type.eq.omi_transcript,memory_type.eq.voice_transcript)` +
-      `&order=created_at.desc&limit=10&select=content,source,memory_type,created_at`,
+      `or=(memory_type.eq.meeting_report,memory_type.eq.strategy,memory_type.eq.business,memory_type.eq.omi_transcript,memory_type.eq.brandon_context,content.ilike.*meeting*,content.ilike.*transcript*,content.ilike.*eric*,content.ilike.*fraternity*,content.ilike.*brotherhood*)` +
+      `&order=created_at.desc&limit=20&select=content,source,memory_type,created_at`,
       {
         headers: {
           'apikey': SUPABASE_KEY || SUPABASE_ANON,
@@ -1610,7 +1608,12 @@ async function SHADOW_accessVault(query, callerIdentity) {
     
     if (searchRes.ok) {
       foundContent = await searchRes.json();
-      console.log('[SHADOW] Found', foundContent.length, 'meeting-related entries');
+      // Filter out ABA's own calls - we want source material
+      foundContent = foundContent.filter(item => {
+        const content = (item.content || '').toLowerCase();
+        return !content.includes('aba calling') && !content.includes('voice call [voice-');
+      });
+      console.log('[SHADOW] Found', foundContent.length, 'meeting-related entries (filtered)');
     }
   } catch (e) {
     console.log('[SHADOW] Brain search error:', e.message);
@@ -1619,21 +1622,20 @@ async function SHADOW_accessVault(query, callerIdentity) {
   // Check if we found any meeting data
   if (foundContent.length === 0) {
     return {
-      response: "Boss, I searched my vault but couldn't find any recent meeting notes or transcripts. Were they uploaded to Omi or Otter? I can only access what's been synced to my brain.",
+      response: "Boss, I searched my vault but couldn't find any meeting notes or transcripts. Were they uploaded to the brain?",
       needsConsent: false
     };
   }
   
-  // We found data - check consent
-  // Look for consent keywords in query
+  // Check consent
   const consentWords = ['consent', 'unlock', 'yes', 'authorize', 'approved', 'go ahead', 'permission'];
   const hasConsent = consentWords.some(word => query.toLowerCase().includes(word));
   
   if (!hasConsent) {
-    // Need consent - this is the SHADOW protocol
-    const summary = `I found ${foundContent.length} meeting entries in my vault from recent conversations.`;
+    // List what we found
+    const types = [...new Set(foundContent.map(f => f.memory_type))].join(', ');
     return {
-      response: `${summary} However, this detailed information is protected under Shadow protocol. Do you consent to unlock it for this session? Just say 'yes' or 'unlock' to proceed.`,
+      response: `I found ${foundContent.length} entries in my vault including: ${types}. This information is protected under Shadow protocol. Do you consent to unlock it for this session?`,
       needsConsent: true,
       entryCount: foundContent.length
     };
@@ -1642,19 +1644,19 @@ async function SHADOW_accessVault(query, callerIdentity) {
   // Consent given - compile and return meeting notes
   console.log('[SHADOW] Consent granted - releasing vault contents');
   
-  let compiledNotes = "Alright Boss, unlocking the vault. Here's what I found:\n\n";
+  let compiledNotes = "Unlocking the vault. Here's what I found:\n\n";
   
   for (let i = 0; i < Math.min(foundContent.length, 5); i++) {
     const entry = foundContent[i];
-    const date = new Date(entry.created_at).toLocaleString();
-    const source = entry.source || 'Unknown';
-    const snippet = (entry.content || '').substring(0, 500);
+    const date = new Date(entry.created_at).toLocaleDateString();
+    const type = entry.memory_type || 'Unknown';
+    const content = (entry.content || '').substring(0, 600);
     
-    compiledNotes += `**Entry ${i+1}** (${source}, ${date}):\n${snippet}\n\n`;
+    compiledNotes += `${type.toUpperCase()} (${date}): ${content}\n\n`;
   }
   
   if (foundContent.length > 5) {
-    compiledNotes += `\n...and ${foundContent.length - 5} more entries available.`;
+    compiledNotes += `Plus ${foundContent.length - 5} more entries available.`;
   }
   
   return {
@@ -6275,7 +6277,7 @@ const httpServer = http.createServer(async (req, res) => {
   if (path === '/' || path === '/health') {
     return jsonResponse(res, 200, {
       status: 'ALIVE',
-      service: 'ABA TOUCH v2.12.11-SAGE-EXTRACT',
+      service: 'ABA TOUCH v2.12.12-SHADOW-BRAIN',
       mode: 'FULL API + VOICE + OMI + SMS + SPEECH INTELLIGENCE',
       air: 'ABA Intellectual Role - CENTRAL ORCHESTRATOR',
       models: { primary: 'Gemini Flash 2.0', backup: 'Claude Haiku', speed_fallback: 'Groq' },
