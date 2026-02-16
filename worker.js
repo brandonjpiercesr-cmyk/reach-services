@@ -6275,7 +6275,7 @@ const httpServer = http.createServer(async (req, res) => {
   if (path === '/' || path === '/health') {
     return jsonResponse(res, 200, {
       status: 'ALIVE',
-      service: 'ABA TOUCH v2.12.9-SHADOW-DIRECT',
+      service: 'ABA TOUCH v2.12.10-ABACIA-BRAIN',
       mode: 'FULL API + VOICE + OMI + SMS + SPEECH INTELLIGENCE',
       air: 'ABA Intellectual Role - CENTRAL ORCHESTRATOR',
       models: { primary: 'Gemini Flash 2.0', backup: 'Claude Haiku', speed_fallback: 'Groq' },
@@ -7054,16 +7054,60 @@ Phone: (336) 389-8116</p>
         }
       }
       
-      // ⬡B:AIR:REACH.VOICE.ROUTING:LOGIC:air.central:v2.4.0:20260214⬡
-      // ALL routing goes through AIR_process - AIR dispatches to agents
-      // This is correct hierarchy: L5 (REACH) → L6 (AIR) → L3 (Agents)
-      // AIR_process expects: (userSaid, history, callerIdentity, demoState)
-      const airResponse = await AIR_process(
-        userMessage,           // The actual question/request as STRING
-        [],                    // No history for now (each tool call is fresh)
-        callerIdentity,        // Who is calling
-        {}                     // No demo state
-      );
+      // ⬡B:AIR:REACH.VOICE.ROUTING:LOGIC:abacia.central:v2.12.10:20260216⬡
+      // Route to ABACIA - THE REAL BRAIN with 75+ agents
+      // REACH is just the physical touch layer - ABACIA is the intelligence
+      console.log('[AIR VOICE TOOL] Routing to ABACIA (real brain with 38+ coded agents)...');
+      
+      let airResponse = null;
+      
+      try {
+        const abaciaResult = await fetch('https://abacia-services.onrender.com/api/air/process', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            query: userMessage,
+            caller: callerIdentity,
+            source: 'elevenlabs_voice',
+            conversation_id: conversationId
+          })
+        });
+        
+        if (abaciaResult.ok) {
+          const abaciaData = await abaciaResult.json();
+          console.log('[AIR VOICE TOOL] ABACIA responded:', abaciaData.success ? 'success' : 'error');
+          
+          // Extract response from ABACIA
+          // ABACIA returns structured data with agents array
+          if (abaciaData.response) {
+            airResponse = { response: abaciaData.response };
+          } else if (abaciaData.agents && abaciaData.agents.length > 0) {
+            // Build response from agent results
+            const agentResponses = abaciaData.agents
+              .filter(a => a.data && a.data.result)
+              .map(a => a.data.result.message || a.data.result.response || '')
+              .filter(m => m)
+              .join(' ');
+            
+            if (agentResponses) {
+              airResponse = { response: agentResponses };
+            }
+          }
+        }
+      } catch (e) {
+        console.log('[AIR VOICE TOOL] ABACIA error:', e.message);
+      }
+      
+      // Fallback to local AIR if ABACIA fails
+      if (!airResponse) {
+        console.log('[AIR VOICE TOOL] Falling back to local AIR...');
+        airResponse = await AIR_process(
+          userMessage,
+          [],
+          callerIdentity,
+          {}
+        );
+      }
       
       // Extract the response text
       const responseText = airResponse?.response || airResponse?.message || 
