@@ -259,7 +259,7 @@ const REACH_URL = process.env.REACH_URL || 'https://aba-reach.onrender.com';
 
 // ⬡B:AIR:REACH.SERVER.STARTUP:CODE:infrastructure.logging.boot:AIR→REACH:T10:v1.5.0:20260213:b0o1t⬡
 console.log('═══════════════════════════════════════════════════════════');
-console.log('[ABA REACH v2.9.8] FULL HIERARCHY + SIGILS + API ROUTES');
+console.log('[ABA REACH v2.9.9] FULL HIERARCHY + SIGILS + API ROUTES');
 console.log('[HIERARCHY] L6:AIR > L5:REACH > L4:VOICE,SMS,EMAIL,OMI > L3:VARA,CARA,IMAN,TASTE');
 console.log('[AIR] Hardcoded agents: LUKE, COLE, JUDE, PACK');
 console.log('[AIR] PRIMARY: Gemini Flash 2.0 | BACKUP: Claude Haiku');
@@ -837,74 +837,85 @@ async function CLIMATE_getWeather(location) {
 async function PLAY_getScores(query) {
   console.log('[PLAY] Sports query:', query);
   
-  const now = new Date();
-  const dateStr = now.toISOString().split('T')[0].replace(/-/g, '');
-  
   // Determine sport and team from query
   const queryLower = query.toLowerCase();
   let sport = 'basketball/nba';
   let teamSearch = '';
   
-  if (queryLower.includes('laker')) { teamSearch = 'lakers'; sport = 'basketball/nba'; }
-  else if (queryLower.includes('celtics')) { teamSearch = 'celtics'; sport = 'basketball/nba'; }
-  else if (queryLower.includes('warrior')) { teamSearch = 'warriors'; sport = 'basketball/nba'; }
-  else if (queryLower.includes('heat')) { teamSearch = 'heat'; sport = 'basketball/nba'; }
+  if (queryLower.includes('laker')) { teamSearch = 'LAL'; sport = 'basketball/nba'; }
+  else if (queryLower.includes('celtics')) { teamSearch = 'BOS'; sport = 'basketball/nba'; }
+  else if (queryLower.includes('warrior')) { teamSearch = 'GSW'; sport = 'basketball/nba'; }
+  else if (queryLower.includes('heat')) { teamSearch = 'MIA'; sport = 'basketball/nba'; }
+  else if (queryLower.includes('mavs') || queryLower.includes('mavericks') || queryLower.includes('dallas')) { teamSearch = 'DAL'; sport = 'basketball/nba'; }
   else if (queryLower.includes('nfl') || queryLower.includes('football')) { sport = 'football/nfl'; }
   else if (queryLower.includes('baseball') || queryLower.includes('mlb')) { sport = 'baseball/mlb'; }
   
   try {
-    const result = await httpsRequest({
-      hostname: 'site.api.espn.com',
-      path: '/apis/site/v2/sports/' + sport + '/scoreboard?dates=' + dateStr,
-      method: 'GET',
-      headers: { 'Accept': 'application/json' }
-    });
+    // ⬡B:TOUCH:FIX:play.multiday.search:20260216⬡
+    // Check last 5 days to find recent games, not just today
+    const now = new Date();
+    let foundGame = null;
     
-    if (result.status === 200) {
-      const data = JSON.parse(result.data.toString());
-      const events = data.events || [];
+    for (let daysBack = 0; daysBack < 5 && !foundGame; daysBack++) {
+      const checkDate = new Date(now);
+      checkDate.setDate(checkDate.getDate() - daysBack);
+      const dateStr = checkDate.toISOString().split('T')[0].replace(/-/g, '');
       
-      // Find team-specific game
-      for (const event of events) {
-        const name = (event.name || '').toLowerCase();
-        if (teamSearch && name.includes(teamSearch)) {
-          const comp = event.competitions?.[0];
-          const status = comp?.status?.type?.description || 'Unknown';
-          const teams = comp?.competitors || [];
-          
-          const home = teams.find(t => t.homeAway === 'home');
-          const away = teams.find(t => t.homeAway === 'away');
-          
-          if (home && away) {
-            const homeName = home.team?.shortDisplayName || home.team?.name;
-            const awayName = away.team?.shortDisplayName || away.team?.name;
-            const homeScore = home.score || '0';
-            const awayScore = away.score || '0';
+      console.log('[PLAY] Checking date:', dateStr);
+      
+      const result = await httpsRequest({
+        hostname: 'site.api.espn.com',
+        path: '/apis/site/v2/sports/' + sport + '/scoreboard?dates=' + dateStr,
+        method: 'GET',
+        headers: { 'Accept': 'application/json' }
+      });
+      
+      if (result.status === 200) {
+        const data = JSON.parse(result.data.toString());
+        const events = data.events || [];
+        
+        // Find team-specific game
+        for (const event of events) {
+          const shortName = (event.shortName || '').toUpperCase();
+          if (teamSearch && shortName.includes(teamSearch)) {
+            const comp = event.competitions?.[0];
+            const status = comp?.status?.type?.description || 'Unknown';
+            const teams = comp?.competitors || [];
             
-            // VARA-style warm response
-            if (status === 'Final') {
-              const winner = parseInt(homeScore) > parseInt(awayScore) ? homeName : awayName;
-              const loser = parseInt(homeScore) > parseInt(awayScore) ? awayName : homeName;
-              const winScore = Math.max(parseInt(homeScore), parseInt(awayScore));
-              const loseScore = Math.min(parseInt(homeScore), parseInt(awayScore));
-              return `The ${winner} took it! Final score was ${winScore} to ${loseScore} against the ${loser}.`;
-            } else if (status === 'In Progress') {
-              return 'The game is live right now! ' + homeName + ' ' + homeScore + ', ' + awayName + ' ' + awayScore + '. Want me to keep you posted?';
-            } else {
-              return 'The ' + homeName + ' are scheduled to play the ' + awayName + ' ' + status.toLowerCase() + '. I can remind you when it starts if you like.';
+            const home = teams.find(t => t.homeAway === 'home');
+            const away = teams.find(t => t.homeAway === 'away');
+            
+            if (home && away) {
+              const homeName = home.team?.displayName || home.team?.name;
+              const awayName = away.team?.displayName || away.team?.name;
+              const homeScore = home.score || '0';
+              const awayScore = away.score || '0';
+              
+              // Format date nicely
+              const gameDate = new Date(event.date);
+              const dayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][gameDate.getDay()];
+              const monthName = ['January','February','March','April','May','June','July','August','September','October','November','December'][gameDate.getMonth()];
+              const dateDisplay = dayName + ', ' + monthName + ' ' + gameDate.getDate();
+              
+              // VARA-style warm response with real data
+              if (status === 'Final') {
+                const winner = parseInt(homeScore) > parseInt(awayScore) ? homeName : awayName;
+                const loser = parseInt(homeScore) > parseInt(awayScore) ? awayName : homeName;
+                const winScore = Math.max(parseInt(homeScore), parseInt(awayScore));
+                const loseScore = Math.min(parseInt(homeScore), parseInt(awayScore));
+                return `On ${dateDisplay}, the ${winner} took it! Final score was ${winScore} to ${loseScore} against the ${loser}.`;
+              } else if (status === 'In Progress') {
+                return 'The game is live right now! ' + homeName + ' ' + homeScore + ', ' + awayName + ' ' + awayScore + '. Want me to keep you posted?';
+              } else {
+                return 'The ' + homeName + ' are scheduled to play the ' + awayName + ' ' + status.toLowerCase() + '. I can remind you when it starts if you like.';
+              }
             }
           }
         }
       }
-      
-      // No specific game found
-      if (events.length > 0) {
-        return 'I found ' + events.length + ' games today but I did not see your team playing. Would you like me to check a different team?';
-      }
-      return 'It looks like there are no games scheduled right now. Would you like me to check a specific team or date?';
     }
     
-    return 'I had a little trouble reaching the sports data. Let me try again in a moment.';
+    return 'I checked the last few days but could not find a recent game for that team. Would you like me to check a specific date?';
     
   } catch (e) {
     console.log('[PLAY] Error:', e.message);
@@ -3803,7 +3814,7 @@ async function postCallAutomation(session) {
     '<h3>Conversation Summary</h3>' +
     '<p>' + topicsDiscussed.replace(/\|/g, '<br>') + '</p>' +
     '<hr style="border:1px solid #e5e7eb">' +
-    '<p style="color:#9ca3af;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v2.9.8</p>' +
+    '<p style="color:#9ca3af;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v2.9.9</p>' +
     '</div>';
   
   const emailResult = await sendEmailFromCall(
@@ -3825,7 +3836,7 @@ async function postCallAutomation(session) {
   const notifyResult = await sendSMSFromCall('+13363898116', brandonNotify);
   
   // ALSO email Brandon
-  const brandonEmailHtml = '<div style="font-family:system-ui;max-width:600px;margin:0 auto"><h2>ABA Call Report</h2><p><strong>Caller:</strong> ' + callerName + '</p><p><strong>Phone:</strong> ' + callerNumber + '</p><p><strong>Duration:</strong> ' + turnCount + ' turns</p><p><strong>Topics:</strong> ' + topicsDiscussed.substring(0, 300) + '</p><p style="color:#888;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v2.9.8</p></div>';
+  const brandonEmailHtml = '<div style="font-family:system-ui;max-width:600px;margin:0 auto"><h2>ABA Call Report</h2><p><strong>Caller:</strong> ' + callerName + '</p><p><strong>Phone:</strong> ' + callerNumber + '</p><p><strong>Duration:</strong> ' + turnCount + ' turns</p><p><strong>Topics:</strong> ' + topicsDiscussed.substring(0, 300) + '</p><p style="color:#888;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v2.9.9</p></div>';
   const brandonEmail = await sendEmailFromCall('brandonjpiercesr@gmail.com', 'Brandon', 'ABA Call Report: ' + callerName + ' called', brandonEmailHtml);
   if (brandonEmail.success) console.log('[POST-CALL] Brandon email report sent');
   if (notifyResult.success) {
@@ -4973,7 +4984,7 @@ const httpServer = http.createServer(async (req, res) => {
   if (path === '/' || path === '/health') {
     return jsonResponse(res, 200, {
       status: 'ALIVE',
-      service: 'ABA REACH v2.9.8',
+      service: 'ABA REACH v2.9.9',
       mode: 'FULL API + VOICE + OMI',
       air: 'ABA Intellectual Role - CENTRAL ORCHESTRATOR',
       models: { primary: 'Gemini Flash 2.0', backup: 'Claude Haiku', speed_fallback: 'Groq' },
@@ -5363,15 +5374,49 @@ Phone: (336) 389-8116</p>
       console.log('[AIR VOICE TOOL] Caller identified as:', callerIdentity.name, 'Trust:', callerIdentity.trust);
       
       // ⬡B:TOUCH:FIX:callback.capability:20260216⬡
-      // Handle "call me back" requests - trigger outbound call
+      // Handle "call me back" OR "call [person]" requests
       const msgLower = userMessage.toLowerCase();
-      if (msgLower.includes('call me back') || msgLower.includes('call back') || 
-          msgLower.includes('hang up and call') || msgLower.includes('callback')) {
-        console.log('[AIR VOICE TOOL] CALLBACK REQUEST DETECTED!');
+      
+      // Check for callback/outbound call requests
+      const isCallbackRequest = msgLower.includes('call me back') || msgLower.includes('hang up and call') || msgLower.includes('callback');
+      const isCallSomeoneRequest = msgLower.match(/call\s+(eric|bj|cj|brandon|dr\.?\s*lane|mom|dad)/i);
+      
+      if (isCallbackRequest || isCallSomeoneRequest) {
+        console.log('[AIR VOICE TOOL] OUTBOUND CALL REQUEST DETECTED!');
+        
+        // Determine who to call
+        let targetPhone = '+13363898116'; // Default to Brandon
+        let targetName = 'you';
+        
+        if (isCallSomeoneRequest) {
+          const personMatch = msgLower.match(/call\s+(eric|bj|cj|brandon|dr\.?\s*lane|mom|dad)/i);
+          const person = personMatch ? personMatch[1].toLowerCase() : null;
+          
+          // ⬡B:TOUCH:FIX:smart.callback.contacts:20260216⬡
+          // Contact lookup - matches caller recognition in ABA prompt
+          const contacts = {
+            'eric': { phone: '+13236007676', name: 'Dr. Eric Lane' },
+            'dr. lane': { phone: '+13236007676', name: 'Dr. Eric Lane' },
+            'dr lane': { phone: '+13236007676', name: 'Dr. Eric Lane' },
+            'bj': { phone: '+19803958662', name: 'BJ' },
+            'cj': { phone: '+19199170686', name: 'CJ' },
+            'brandon': { phone: '+13363898116', name: 'Brandon' }
+          };
+          
+          if (person && contacts[person]) {
+            targetPhone = contacts[person].phone;
+            targetName = contacts[person].name;
+          }
+        } else if (callerIdentity && callerIdentity.phone) {
+          // Callback to caller
+          targetPhone = callerIdentity.phone;
+          targetName = callerIdentity.name || 'you';
+        }
+        
+        console.log('[AIR VOICE TOOL] Calling:', targetName, 'at', targetPhone);
         
         // Trigger outbound call via ElevenLabs API
         const ELEVENLABS_KEY = process.env.ELEVENLABS_API_KEY;
-        const targetPhone = callerIdentity.phone || '+13363898116'; // Default to Brandon
         
         try {
           const callResult = await httpsRequest({
@@ -5389,17 +5434,23 @@ Phone: (336) 389-8116</p>
           }));
           
           const callData = JSON.parse(callResult.data.toString());
-          console.log('[AIR VOICE TOOL] Callback initiated:', callData.conversation_id);
+          console.log('[AIR VOICE TOOL] Outbound call initiated:', callData.conversation_id);
+          
+          // Different response based on who we're calling
+          const responseMsg = isCallbackRequest 
+            ? "Absolutely! I will hang up now and call you right back. Talk to you in just a moment!"
+            : `Got it! I am calling ${targetName} right now. They should be getting my call any second.`;
           
           return jsonResponse(res, 200, {
-            response: "Absolutely! I will hang up now and call you right back. Talk to you in just a moment!",
-            callback_initiated: true,
+            response: responseMsg,
+            outbound_call_initiated: true,
+            target: targetName,
             conversation_id: callData.conversation_id
           });
         } catch (e) {
-          console.log('[AIR VOICE TOOL] Callback error:', e.message);
+          console.log('[AIR VOICE TOOL] Outbound call error:', e.message);
           return jsonResponse(res, 200, {
-            response: "I tried to set up the callback but hit a small snag. Let me stay on the line with you instead. What can I help you with?"
+            response: "I tried to place that call but hit a small snag. Let me stay on the line with you instead. What else can I help with?"
           });
         }
       }
@@ -7797,7 +7848,7 @@ ccWss.on('connection', (ws, req) => {
   // Send welcome message with system status
   ws.send(JSON.stringify({
     type: 'connected',
-    service: 'ABA REACH v2.9.8 - AUTONOMY LAYER ACTIVE',
+    service: 'ABA REACH v2.9.9 - AUTONOMY LAYER ACTIVE',
     timestamp: new Date().toISOString(),
     agents: ['AIR', 'VARA', 'LUKE', 'COLE', 'JUDE', 'PACK', 'IMAN', 'TASTE', 'DIAL', 'PULSE', 'SAGE'],
     features: ['proactive_email', 'deadline_alerts', 'auto_escalation', 'device_sync']
@@ -8445,7 +8496,7 @@ function getHeartbeatStatus() {
 httpServer.listen(PORT, '0.0.0.0', () => {
   console.log('');
   console.log('═══════════════════════════════════════════════════════════');
-  console.log('[ABA REACH v2.9.8] LIVE on port ' + PORT);
+  console.log('[ABA REACH v2.9.9] LIVE on port ' + PORT);
   console.log('═══════════════════════════════════════════════════════════');
   console.log('[AIR] ABA Intellectual Role - ONLINE');
   console.log('[AIR] PRIMARY: Gemini Flash 2.0');
