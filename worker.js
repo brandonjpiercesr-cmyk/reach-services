@@ -4973,6 +4973,361 @@ class CallSession {
 
 const sessions = new Map();
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:TOUCH:SPEECH.INTELLIGENCE:deepgram.full.features:20260216⬡
+// DEEPGRAM SPEECH INTELLIGENCE - Full feature set from email
+// Features: Diarization, Topics, Language, Entities, Intent, Sentiment, Summary
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Process speech intelligence results from Deepgram
+async function processSpeechIntelligence(transcript, intelligenceData) {
+  console.log('[SPEECH INTELLIGENCE] Processing...');
+  
+  const analysis = {
+    transcript: transcript,
+    timestamp: new Date().toISOString(),
+    
+    // Diarization - who is speaking
+    speakers: intelligenceData.speakers || [],
+    
+    // Topics - what they're talking about (350+ topics)
+    topics: intelligenceData.topics || [],
+    
+    // Language - detected language
+    language: intelligenceData.language || 'en',
+    languageConfidence: intelligenceData.language_confidence || 1.0,
+    
+    // Entities - names, places, orgs, etc
+    entities: intelligenceData.entities || [],
+    
+    // Intent - what they want to do
+    intents: intelligenceData.intents || [],
+    
+    // Sentiment - positive/negative/neutral
+    sentiment: intelligenceData.sentiment || { overall: 'neutral', score: 0 },
+    sentimentSegments: intelligenceData.sentiment_segments || [],
+    
+    // Summarization
+    summary: intelligenceData.summary || null
+  };
+  
+  // Store to brain for learning
+  await storeToBrain({
+    content: JSON.stringify(analysis),
+    memory_type: 'speech_intelligence',
+    categories: ['voice', 'intelligence', 'deepgram'],
+    importance: 6,
+    tags: ['speech', 'analysis', ...analysis.topics.slice(0, 5)]
+  });
+  
+  console.log('[SPEECH INTELLIGENCE] Stored:', {
+    topics: analysis.topics.length,
+    entities: analysis.entities.length,
+    sentiment: analysis.sentiment.overall
+  });
+  
+  return analysis;
+}
+
+// Analyze completed call with full intelligence
+async function analyzeCallWithDeepgram(audioUrl) {
+  console.log('[DEEPGRAM ANALYZE] Full analysis of:', audioUrl);
+  
+  if (!DEEPGRAM_KEY) {
+    console.log('[DEEPGRAM ANALYZE] No API key');
+    return null;
+  }
+  
+  try {
+    // Use Deepgram's pre-recorded API with all intelligence features
+    const result = await httpsRequest({
+      hostname: 'api.deepgram.com',
+      path: '/v1/listen?' + new URLSearchParams({
+        // Speech-to-text options
+        model: 'nova-2',
+        language: 'en-US',
+        punctuate: 'true',
+        paragraphs: 'true',
+        smart_format: 'true',
+        
+        // SPEECH INTELLIGENCE FEATURES
+        diarize: 'true',                    // Speaker identification
+        detect_topics: 'true',              // 350+ topics
+        detect_language: 'true',            // Language detection
+        detect_entities: 'true',            // Entity extraction
+        intents: 'true',                    // Intent recognition
+        sentiment: 'true',                  // Sentiment analysis
+        summarize: 'v2'                     // Summarization
+      }).toString(),
+      method: 'POST',
+      headers: {
+        'Authorization': 'Token ' + DEEPGRAM_KEY,
+        'Content-Type': 'application/json'
+      }
+    }, JSON.stringify({ url: audioUrl }));
+    
+    if (result.status === 200) {
+      const data = JSON.parse(result.data.toString());
+      
+      // Extract intelligence from results
+      const intelligence = {
+        speakers: extractSpeakers(data),
+        topics: data.results?.topics?.segments?.map(s => s.topics).flat() || [],
+        language: data.results?.channels?.[0]?.detected_language,
+        language_confidence: data.results?.channels?.[0]?.language_confidence,
+        entities: data.results?.entities?.entities || [],
+        intents: data.results?.intents?.segments?.map(s => s.intents).flat() || [],
+        sentiment: data.results?.sentiments?.average || { sentiment: 'neutral', sentiment_score: 0 },
+        sentiment_segments: data.results?.sentiments?.segments || [],
+        summary: data.results?.summary?.short || null
+      };
+      
+      const transcript = data.results?.channels?.[0]?.alternatives?.[0]?.transcript || '';
+      
+      return await processSpeechIntelligence(transcript, intelligence);
+    }
+    
+    console.log('[DEEPGRAM ANALYZE] Error:', result.status);
+    return null;
+    
+  } catch (e) {
+    console.log('[DEEPGRAM ANALYZE] Error:', e.message);
+    return null;
+  }
+}
+
+// Extract speaker info from diarization
+function extractSpeakers(data) {
+  const words = data.results?.channels?.[0]?.alternatives?.[0]?.words || [];
+  const speakers = {};
+  
+  for (const word of words) {
+    if (word.speaker !== undefined) {
+      if (!speakers[word.speaker]) {
+        speakers[word.speaker] = { wordCount: 0, totalDuration: 0, segments: [] };
+      }
+      speakers[word.speaker].wordCount++;
+      speakers[word.speaker].totalDuration += (word.end - word.start);
+    }
+  }
+  
+  return Object.entries(speakers).map(([id, data]) => ({
+    speaker: parseInt(id),
+    wordCount: data.wordCount,
+    totalDuration: Math.round(data.totalDuration * 100) / 100
+  }));
+}
+
+// Real-time sentiment tracking during call
+function createSentimentTracker() {
+  return {
+    segments: [],
+    overallScore: 0,
+    trend: 'neutral',
+    
+    addSegment(text, sentiment, score) {
+      this.segments.push({ text, sentiment, score, timestamp: Date.now() });
+      
+      // Calculate running average
+      const total = this.segments.reduce((sum, s) => sum + s.score, 0);
+      this.overallScore = total / this.segments.length;
+      
+      // Determine trend (improving/declining/stable)
+      if (this.segments.length >= 3) {
+        const recent = this.segments.slice(-3);
+        const recentAvg = recent.reduce((sum, s) => sum + s.score, 0) / 3;
+        const previousAvg = this.segments.slice(-6, -3).reduce((sum, s) => sum + s.score, 0) / 3 || recentAvg;
+        
+        if (recentAvg > previousAvg + 0.1) this.trend = 'improving';
+        else if (recentAvg < previousAvg - 0.1) this.trend = 'declining';
+        else this.trend = 'stable';
+      }
+      
+      return this.getSummary();
+    },
+    
+    getSummary() {
+      const avgSentiment = this.overallScore > 0.2 ? 'positive' : 
+                          this.overallScore < -0.2 ? 'negative' : 'neutral';
+      return {
+        sentiment: avgSentiment,
+        score: Math.round(this.overallScore * 100) / 100,
+        trend: this.trend,
+        segmentCount: this.segments.length
+      };
+    }
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:TOUCH:IMAN.GMAIL.SEND:email.send.direct:20260216⬡
+// IMAN Gmail Send - Direct Gmail API for sending emails
+// Voice trigger: "Send an email to Eric about the meeting"
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Gmail credentials stored in env
+const GMAIL_CLIENT_ID = process.env.GMAIL_CLIENT_ID;
+const GMAIL_CLIENT_SECRET = process.env.GMAIL_CLIENT_SECRET;
+const GMAIL_REFRESH_TOKEN = process.env.GMAIL_REFRESH_TOKEN;
+
+// Get fresh Gmail access token
+async function getGmailAccessToken() {
+  if (!GMAIL_CLIENT_ID || !GMAIL_CLIENT_SECRET || !GMAIL_REFRESH_TOKEN) {
+    console.log('[IMAN GMAIL] Missing credentials');
+    return null;
+  }
+  
+  try {
+    const result = await httpsRequest({
+      hostname: 'oauth2.googleapis.com',
+      path: '/token',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded'
+      }
+    }, new URLSearchParams({
+      client_id: GMAIL_CLIENT_ID,
+      client_secret: GMAIL_CLIENT_SECRET,
+      refresh_token: GMAIL_REFRESH_TOKEN,
+      grant_type: 'refresh_token'
+    }).toString());
+    
+    if (result.status === 200) {
+      const data = JSON.parse(result.data.toString());
+      console.log('[IMAN GMAIL] Token refreshed');
+      return data.access_token;
+    }
+    
+    console.log('[IMAN GMAIL] Token refresh failed:', result.status);
+    return null;
+    
+  } catch (e) {
+    console.log('[IMAN GMAIL] Token error:', e.message);
+    return null;
+  }
+}
+
+// Create RFC 2822 email message
+function createEmailMessage(to, subject, body, from = 'brandonjpierce@gmail.com') {
+  const message = [
+    `From: ${from}`,
+    `To: ${to}`,
+    `Subject: ${subject}`,
+    'MIME-Version: 1.0',
+    'Content-Type: text/plain; charset=utf-8',
+    '',
+    body
+  ].join('\r\n');
+  
+  // Base64url encode
+  return Buffer.from(message)
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+}
+
+// Send email via Gmail API
+async function IMAN_sendEmailGmail(to, subject, body) {
+  console.log('[IMAN GMAIL] Sending to:', to, 'Subject:', subject);
+  
+  const accessToken = await getGmailAccessToken();
+  if (!accessToken) {
+    return { success: false, error: 'Could not get Gmail access token' };
+  }
+  
+  try {
+    const raw = createEmailMessage(to, subject, body);
+    
+    const result = await httpsRequest({
+      hostname: 'gmail.googleapis.com',
+      path: '/gmail/v1/users/me/messages/send',
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + accessToken,
+        'Content-Type': 'application/json'
+      }
+    }, JSON.stringify({ raw }));
+    
+    if (result.status === 200) {
+      const data = JSON.parse(result.data.toString());
+      console.log('[IMAN GMAIL] Sent! Message ID:', data.id);
+      
+      // Store to brain
+      await storeToBrain({
+        content: JSON.stringify({ to, subject, messageId: data.id, sent: new Date().toISOString() }),
+        memory_type: 'email_sent',
+        categories: ['iman', 'email', 'sent'],
+        importance: 7,
+        tags: ['email', 'sent', 'gmail']
+      });
+      
+      return { success: true, messageId: data.id };
+    }
+    
+    console.log('[IMAN GMAIL] Send failed:', result.status);
+    return { success: false, error: 'Gmail API error: ' + result.status };
+    
+  } catch (e) {
+    console.log('[IMAN GMAIL] Error:', e.message);
+    return { success: false, error: e.message };
+  }
+}
+
+// Lookup email for contact
+function getContactEmail(name) {
+  const emails = {
+    eric: 'dr.ericlane@gmail.com',  // Example - replace with real
+    bj: 'bj@example.com',
+    cj: 'cj@example.com',
+    brandon: 'brandonjpierce@gmail.com'
+  };
+  return emails[name?.toLowerCase()] || null;
+}
+
+// Voice command: "Send an email to Eric about the meeting"
+async function IMAN_voiceEmailCommand(message, callerIdentity) {
+  console.log('[IMAN VOICE] Processing email command:', message);
+  
+  const msgLower = message.toLowerCase();
+  
+  // Parse "send email to [person] about [topic]"
+  const toMatch = msgLower.match(/email\s+(?:to\s+)?(\w+)/i);
+  const aboutMatch = msgLower.match(/about\s+(.+?)(?:\.|$)/i);
+  
+  if (!toMatch) {
+    return { success: false, response: "I didn't catch who to send the email to. Who should I email?" };
+  }
+  
+  const recipientName = toMatch[1];
+  const topic = aboutMatch ? aboutMatch[1] : 'follow up';
+  
+  const recipientEmail = getContactEmail(recipientName);
+  if (!recipientEmail) {
+    return { success: false, response: `I don't have an email address for ${recipientName}. What's their email?` };
+  }
+  
+  // Draft email with AI
+  const draftResult = await IMAN_draftEmail({
+    to: recipientEmail,
+    regarding: topic,
+    tone: 'professional',
+    points: [`Regarding: ${topic}`, `From: ${callerIdentity?.name || 'Brandon'}`]
+  });
+  
+  if (!draftResult) {
+    return { success: false, response: "I had trouble drafting that email. Want me to try again?" };
+  }
+  
+  // Return draft for confirmation
+  return {
+    success: true,
+    draft: draftResult,
+    response: `I've drafted an email to ${recipientName} about ${topic}. Here's what I have: Subject: ${draftResult.subject}. ${draftResult.body.substring(0, 100)}... Should I send it?`,
+    awaiting_confirmation: true
+  };
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // ⬡B:AIR:REACH.VOICE.DEEPGRAM:CODE:voice.stt.connection:TWILIO→REACH→DEEPGRAM:T8:v1.5.0:20260213:d1g2c⬡
 // ═══════════════════════════════════════════════════════════════════════════
@@ -5712,15 +6067,16 @@ const httpServer = http.createServer(async (req, res) => {
   if (path === '/' || path === '/health') {
     return jsonResponse(res, 200, {
       status: 'ALIVE',
-      service: 'ABA REACH v2.11.1-DAWN',
+      service: 'ABA TOUCH v2.12.0-INTEL',
       mode: 'FULL API + VOICE + OMI + GROUP CALLS + SCHEDULED CALLS',
       air: 'ABA Intellectual Role - CENTRAL ORCHESTRATOR',
       models: { primary: 'Gemini Flash 2.0', backup: 'Claude Haiku', speed_fallback: 'Groq' },
       agents: { hardcoded: ['LUKE', 'COLE', 'JUDE', 'PACK'], voice: 'VARA' },
       voice: 'ElevenLabs ' + ELEVENLABS_VOICE,
       phone: TWILIO_PHONE,
-      capabilities: ['outbound_calls', 'group_calls', 'scheduled_calls', 'voicemail_drops', 'call_transfers'],
-      api_routes: ['/api/router', '/api/models/claude', '/api/voice/deepgram-token', '/api/omi/manifest', '/api/omi/webhook', '/api/sms/send', '/api/cron/scheduled-calls'],
+      capabilities: ['outbound_calls', 'group_calls', 'scheduled_calls', 'voicemail_drops', 'call_transfers', 'dawn_briefings', 'speech_intelligence', 'email_send'],
+      api_routes: ['/api/router', '/api/voice/analyze', '/api/iman/send-gmail', '/api/cron/scheduled-calls', '/api/voice/deepgram-token', '/api/omi/manifest', '/api/omi/webhook', '/api/sms/send'],
+      speech_intelligence: ['diarization', 'topics', 'entities', 'intent', 'sentiment', 'summarization', 'language_detection'],
       message: 'We are all ABA'
     });
   }
@@ -5825,6 +6181,87 @@ const httpServer = http.createServer(async (req, res) => {
       
     } catch (e) {
       console.log('[CRON] Error:', e.message);
+      return jsonResponse(res, 500, { error: e.message });
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // ⬡B:TOUCH:API.SPEECH.INTELLIGENCE:endpoint:20260216⬡
+  // SPEECH INTELLIGENCE API - Analyze audio with full Deepgram features
+  // POST /api/voice/analyze - Analyze audio URL
+  // GET /api/voice/intelligence/:call_id - Get analysis for a call
+  // ═══════════════════════════════════════════════════════════════════════
+  if (path === '/api/voice/analyze' && method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      const { audio_url, call_id } = body;
+      
+      if (!audio_url) {
+        return jsonResponse(res, 400, { error: 'audio_url required' });
+      }
+      
+      const analysis = await analyzeCallWithDeepgram(audio_url);
+      
+      if (!analysis) {
+        return jsonResponse(res, 500, { error: 'Analysis failed' });
+      }
+      
+      return jsonResponse(res, 200, {
+        success: true,
+        call_id: call_id || 'unknown',
+        analysis: {
+          transcript: analysis.transcript,
+          speakers: analysis.speakers,
+          topics: analysis.topics,
+          entities: analysis.entities,
+          intents: analysis.intents,
+          sentiment: analysis.sentiment,
+          summary: analysis.summary,
+          language: analysis.language
+        }
+      });
+      
+    } catch (e) {
+      console.log('[SPEECH INTEL API] Error:', e.message);
+      return jsonResponse(res, 500, { error: e.message });
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // ⬡B:TOUCH:API.IMAN.SEND:endpoint:20260216⬡
+  // IMAN Email Send API - Send email via Gmail
+  // POST /api/iman/send-gmail
+  // ═══════════════════════════════════════════════════════════════════════
+  if (path === '/api/iman/send-gmail' && method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      const { to, subject, body: emailBody, confirm } = body;
+      
+      if (!to || !subject || !emailBody) {
+        return jsonResponse(res, 400, { error: 'to, subject, and body required' });
+      }
+      
+      // If draft exists, send it
+      if (confirm) {
+        const result = await IMAN_sendEmailGmail(to, subject, emailBody);
+        return jsonResponse(res, result.success ? 200 : 500, result);
+      }
+      
+      // Otherwise, create draft
+      const draft = await IMAN_draftEmail({
+        to: to,
+        regarding: subject,
+        tone: 'professional'
+      });
+      
+      return jsonResponse(res, 200, {
+        success: true,
+        draft: draft,
+        message: 'Draft created. Call again with confirm=true to send.'
+      });
+      
+    } catch (e) {
+      console.log('[IMAN SEND API] Error:', e.message);
       return jsonResponse(res, 500, { error: e.message });
     }
   }
@@ -6284,6 +6721,40 @@ Phone: (336) 389-8116</p>
           target: transferRequest.target.name,
           type: transferRequest.type
         });
+      }
+      
+      // ═══════════════════════════════════════════════════════════════════
+      // HANDLER 3.5: EMAIL SENDING - "Send an email to Eric about..."
+      // ⬡B:TOUCH:IMAN.VOICE.EMAIL:handler:20260216⬡
+      // ═══════════════════════════════════════════════════════════════════
+      const isEmailRequest = msgLower.includes('send') && msgLower.includes('email') ||
+                            msgLower.includes('email') && msgLower.includes('to');
+      
+      if (isEmailRequest) {
+        console.log('[AIR VOICE TOOL] EMAIL REQUEST DETECTED!');
+        
+        try {
+          const emailResult = await IMAN_voiceEmailCommand(userMessage, callerIdentity);
+          
+          if (emailResult.success && emailResult.awaiting_confirmation) {
+            return jsonResponse(res, 200, {
+              response: emailResult.response,
+              email_draft: emailResult.draft,
+              awaiting_confirmation: true
+            });
+          } else if (emailResult.success) {
+            return jsonResponse(res, 200, {
+              response: emailResult.response,
+              email_sent: true
+            });
+          } else {
+            return jsonResponse(res, 200, {
+              response: emailResult.response
+            });
+          }
+        } catch (e) {
+          console.log('[AIR VOICE TOOL] Email error:', e.message);
+        }
       }
       
       // ═══════════════════════════════════════════════════════════════════
