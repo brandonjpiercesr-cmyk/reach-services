@@ -1,13 +1,13 @@
 # ⬡B:TOUCH:CRON:scheduled.calls.checker:20260216⬡
 # GitHub Actions cron job to check for scheduled ABA calls
-# Runs every minute to catch scheduled calls on time
+# Runs every 5 minutes (GitHub minimum)
 
 name: ABA Scheduled Calls Checker
 
 on:
   schedule:
-    # Run every minute
-    - cron: '* * * * *'
+    # Run every 5 minutes (GitHub minimum interval)
+    - cron: '*/5 * * * *'
   workflow_dispatch: # Allow manual trigger
 
 jobs:
@@ -17,7 +17,7 @@ jobs:
       - name: Check for due scheduled calls
         run: |
           echo "Checking for scheduled calls at $(date)"
-          response=$(curl -s "https://aba-reach.onrender.com/api/cron/scheduled-calls")
+          response=$(curl -s --max-time 30 "https://aba-reach.onrender.com/api/cron/scheduled-calls")
           echo "Response: $response"
           
           # Parse response
