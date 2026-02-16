@@ -514,6 +514,168 @@ function getVoicemailMessage(contactName) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:TOUCH:AGENT.DAWN:Daily.Automated.Wisdom.Notifier:20260216⬡
+// AGENT DAWN - Morning briefing calls
+// Gathers weather, calendar, tasks, and insights for wake-up calls
+// DAWN speaks through ABA/VARA but delivers structured morning content
+// ═══════════════════════════════════════════════════════════════════════════════
+
+async function DAWN_generateBriefing(targetName = 'Brandon') {
+  console.log('[DAWN] Generating morning briefing for:', targetName);
+  
+  const time = getTimeInTimezone('America/New_York');
+  const greeting = time.hour < 12 ? 'Good morning' : 'Good afternoon';
+  
+  let briefing = [];
+  
+  // 1. Time and greeting
+  briefing.push(`${greeting} ${targetName}! This is your DAWN briefing for ${time.dayOfWeek}, ${time.formatted.split(' ')[0]}.`);
+  
+  // 2. Weather (Greensboro, NC)
+  try {
+    const weather = await CLIMATE_getWeather('Greensboro NC');
+    if (weather && !weather.includes('trouble')) {
+      briefing.push(weather);
+    }
+  } catch (e) {
+    console.log('[DAWN] Weather error:', e.message);
+  }
+  
+  // 3. Check calendar via ABACIA
+  try {
+    const calendar = await ABACIA_getCalendar();
+    if (calendar && calendar.events && calendar.events.length > 0) {
+      const eventCount = calendar.events.length;
+      briefing.push(`You have ${eventCount} event${eventCount > 1 ? 's' : ''} on your calendar today.`);
+      // First 2 events
+      for (const event of calendar.events.slice(0, 2)) {
+        briefing.push(`At ${event.time || 'sometime'}: ${event.title || event.summary}`);
+      }
+    } else {
+      briefing.push('Your calendar is clear today.');
+    }
+  } catch (e) {
+    console.log('[DAWN] Calendar error:', e.message);
+  }
+  
+  // 4. Check brain for recent activity/insights
+  try {
+    const recentActivity = await queryBrainRecent(5);
+    if (recentActivity && recentActivity.length > 0) {
+      // Look for any important items from last 24 hours
+      const important = recentActivity.filter(r => r.importance >= 8);
+      if (important.length > 0) {
+        briefing.push(`I noticed ${important.length} important item${important.length > 1 ? 's' : ''} from yesterday.`);
+      }
+    }
+  } catch (e) {
+    console.log('[DAWN] Brain query error:', e.message);
+  }
+  
+  // 5. Motivational close
+  const motivations = [
+    "Let's make today count!",
+    "You've got this, Boss!",
+    "Time to crush it!",
+    "Ready to make moves!",
+    "Let's get after it!"
+  ];
+  briefing.push(motivations[Math.floor(Math.random() * motivations.length)]);
+  
+  // 6. Sign off
+  briefing.push("This has been your DAWN briefing. We are all ABA.");
+  
+  const fullBriefing = briefing.join(' ');
+  console.log('[DAWN] Briefing generated:', fullBriefing.substring(0, 100) + '...');
+  
+  return fullBriefing;
+}
+
+// Query brain for recent entries
+async function queryBrainRecent(limit = 5) {
+  try {
+    const result = await httpsRequest({
+      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+      path: `/rest/v1/aba_memory?order=created_at.desc&limit=${limit}&select=content,importance,memory_type`,
+      method: 'GET',
+      headers: {
+        'apikey': SUPABASE_KEY || SUPABASE_ANON,
+        'Authorization': 'Bearer ' + (SUPABASE_KEY || SUPABASE_ANON)
+      }
+    });
+    
+    if (result.status === 200) {
+      return JSON.parse(result.data.toString());
+    }
+    return [];
+  } catch (e) {
+    return [];
+  }
+}
+
+// Make a DAWN briefing call
+async function DAWN_makeCall(targetPhone, targetName) {
+  console.log('[DAWN] Making briefing call to:', targetName);
+  
+  // Generate the briefing content
+  const briefing = await DAWN_generateBriefing(targetName);
+  
+  // For now, we use ElevenLabs with a custom approach:
+  // We'll trigger the call and have the first webhook interaction deliver the briefing
+  // Store briefing to brain so webhook can retrieve it
+  
+  const briefingId = 'DAWN-' + Date.now();
+  
+  await storeToBrain({
+    content: JSON.stringify({
+      id: briefingId,
+      briefing: briefing,
+      target: targetName,
+      created: new Date().toISOString()
+    }),
+    memory_type: 'dawn_briefing_pending',
+    categories: ['dawn', 'briefing', 'pending'],
+    importance: 8,
+    tags: ['dawn', 'briefing', briefingId]
+  });
+  
+  // Make the call via ElevenLabs
+  // The webhook will need to check for DAWN briefings
+  const ELEVENLABS_KEY = process.env.ELEVENLABS_API_KEY;
+  
+  try {
+    const callResult = await httpsRequest({
+      hostname: 'api.elevenlabs.io',
+      path: '/v1/convai/twilio/outbound-call',
+      method: 'POST',
+      headers: {
+        'xi-api-key': ELEVENLABS_KEY,
+        'Content-Type': 'application/json'
+      }
+    }, JSON.stringify({
+      agent_id: 'agent_0601khe2q0gben08ws34bzf7a0sa',
+      agent_phone_number_id: 'phnum_0001khe3q3nyec1bv04mk2m048v8',
+      to_number: targetPhone,
+      // Note: first_message override doesn't work reliably
+      // We'll update the agent's first_message temporarily or use webhook
+    }));
+    
+    const data = JSON.parse(callResult.data.toString());
+    console.log('[DAWN] Call initiated:', data.conversation_id);
+    
+    return {
+      success: true,
+      conversation_id: data.conversation_id,
+      briefingId: briefingId
+    };
+    
+  } catch (e) {
+    console.log('[DAWN] Call error:', e.message);
+    return { success: false, error: e.message };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // ⬡B:TOUCH:PHASE3:SPURT3.4:call.transfers:20260216⬡
 // CALL TRANSFERS - Warm and cold transfers
 // "Transfer me to Eric" → Connects current caller to Eric
@@ -5550,7 +5712,7 @@ const httpServer = http.createServer(async (req, res) => {
   if (path === '/' || path === '/health') {
     return jsonResponse(res, 200, {
       status: 'ALIVE',
-      service: 'ABA REACH v2.11.0-PHASE3',
+      service: 'ABA REACH v2.11.1-DAWN',
       mode: 'FULL API + VOICE + OMI + GROUP CALLS + SCHEDULED CALLS',
       air: 'ABA Intellectual Role - CENTRAL ORCHESTRATOR',
       models: { primary: 'Gemini Flash 2.0', backup: 'Claude Haiku', speed_fallback: 'Groq' },
@@ -5587,23 +5749,53 @@ const httpServer = http.createServer(async (req, res) => {
       for (const call of dueCalls) {
         console.log('[CRON] Executing scheduled call to:', call.target_name);
         
-        // Make the call via ElevenLabs
         try {
-          const callResult = await httpsRequest({
-            hostname: 'api.elevenlabs.io',
-            path: '/v1/convai/twilio/outbound-call',
-            method: 'POST',
-            headers: {
-              'xi-api-key': ELEVENLABS_KEY,
-              'Content-Type': 'application/json'
-            }
-          }, JSON.stringify({
-            agent_id: 'agent_0601khe2q0gben08ws34bzf7a0sa',
-            agent_phone_number_id: 'phnum_0001khe3q3nyec1bv04mk2m048v8',
-            to_number: call.target_phone
-          }));
+          let callResult;
           
-          const callData = JSON.parse(callResult.data.toString());
+          // ⬡B:TOUCH:AGENT.DAWN:cron.integration:20260216⬡
+          // Check if this is a DAWN briefing call
+          if (call.call_type === 'dawn_briefing') {
+            console.log('[CRON] DAWN BRIEFING CALL - Using DAWN_makeCall');
+            callResult = await DAWN_makeCall(call.target_phone, call.target_name);
+            
+            if (callResult.success) {
+              results.push({
+                target: call.target_name,
+                status: 'dawn_briefing_sent',
+                conversation_id: callResult.conversation_id,
+                briefingId: callResult.briefingId
+              });
+            } else {
+              results.push({
+                target: call.target_name,
+                status: 'error',
+                error: callResult.error
+              });
+            }
+          } else {
+            // Regular scheduled call via ElevenLabs
+            const apiResult = await httpsRequest({
+              hostname: 'api.elevenlabs.io',
+              path: '/v1/convai/twilio/outbound-call',
+              method: 'POST',
+              headers: {
+                'xi-api-key': ELEVENLABS_KEY,
+                'Content-Type': 'application/json'
+              }
+            }, JSON.stringify({
+              agent_id: 'agent_0601khe2q0gben08ws34bzf7a0sa',
+              agent_phone_number_id: 'phnum_0001khe3q3nyec1bv04mk2m048v8',
+              to_number: call.target_phone
+            }));
+            
+            const callData = JSON.parse(apiResult.data.toString());
+            
+            results.push({
+              target: call.target_name,
+              status: 'called',
+              conversation_id: callData.conversation_id
+            });
+          }
           
           // Update memory to mark as completed
           await storeToBrain({
@@ -5612,12 +5804,6 @@ const httpServer = http.createServer(async (req, res) => {
             categories: ['scheduled', 'call', 'completed'],
             importance: 6,
             tags: ['scheduled_call', 'completed', call.target_name.toLowerCase()]
-          });
-          
-          results.push({
-            target: call.target_name,
-            status: 'called',
-            conversation_id: callData.conversation_id
           });
           
         } catch (e) {
