@@ -6275,7 +6275,7 @@ const httpServer = http.createServer(async (req, res) => {
   if (path === '/' || path === '/health') {
     return jsonResponse(res, 200, {
       status: 'ALIVE',
-      service: 'ABA TOUCH v2.12.10-ABACIA-BRAIN',
+      service: 'ABA TOUCH v2.12.11-SAGE-EXTRACT',
       mode: 'FULL API + VOICE + OMI + SMS + SPEECH INTELLIGENCE',
       air: 'ABA Intellectual Role - CENTRAL ORCHESTRATOR',
       models: { primary: 'Gemini Flash 2.0', backup: 'Claude Haiku', speed_fallback: 'Groq' },
@@ -7076,29 +7076,52 @@ Phone: (336) 389-8116</p>
         if (abaciaResult.ok) {
           const abaciaData = await abaciaResult.json();
           console.log('[AIR VOICE TOOL] ABACIA responded:', abaciaData.success ? 'success' : 'error');
+          console.log('[AIR VOICE TOOL] ABACIA agents ran:', (abaciaData.agents || []).length);
           
-          // Extract response from ABACIA
-          // ABACIA returns structured data with agents array
-          if (abaciaData.response) {
-            airResponse = { response: abaciaData.response };
-          } else if (abaciaData.agents && abaciaData.agents.length > 0) {
-            // Build response from agent results
-            const agentResponses = abaciaData.agents
-              .filter(a => a.data && a.data.result)
-              .map(a => a.data.result.message || a.data.result.response || '')
-              .filter(m => m)
-              .join(' ');
+          // ABACIA returns structured data - extract useful info from SAGE
+          // SAGE (Strategic Assessment and Governance Engine) searches the brain
+          const sageAgent = (abaciaData.agents || []).find(a => 
+            a.agent && a.agent.includes('SAGE') || a.data?.agent === 'SAGE'
+          );
+          
+          if (sageAgent && sageAgent.data?.result?.matches) {
+            const matches = sageAgent.data.result.matches;
+            console.log('[AIR VOICE TOOL] SAGE found', matches.length, 'brain entries');
             
-            if (agentResponses) {
-              airResponse = { response: agentResponses };
+            // Build response from brain search results
+            if (matches.length > 0) {
+              let responseText = `I found ${matches.length} relevant entries in my brain. `;
+              
+              // Summarize top 3 matches
+              const topMatches = matches.slice(0, 3);
+              for (let i = 0; i < topMatches.length; i++) {
+                const m = topMatches[i];
+                responseText += `Entry ${i+1}: ${(m.preview || '').substring(0, 150)}... `;
+              }
+              
+              if (matches.length > 3) {
+                responseText += `And ${matches.length - 3} more entries available.`;
+              }
+              
+              airResponse = { response: responseText, source: 'ABACIA_SAGE' };
             }
+          }
+          
+          // If no SAGE results, check TIM for context
+          const timAgent = (abaciaData.agents || []).find(a => 
+            a.agent && a.agent.includes('TIM') || a.data?.agent === 'TIM'
+          );
+          
+          if (!airResponse && timAgent && timAgent.data?.result?.contextFound > 0) {
+            console.log('[AIR VOICE TOOL] TIM found context:', timAgent.data.result.contextFound);
+            // TIM found context but no response - fall through to local AIR
           }
         }
       } catch (e) {
         console.log('[AIR VOICE TOOL] ABACIA error:', e.message);
       }
       
-      // Fallback to local AIR if ABACIA fails
+      // Fallback to local AIR if ABACIA didn't return useful data
       if (!airResponse) {
         console.log('[AIR VOICE TOOL] Falling back to local AIR...');
         airResponse = await AIR_process(
