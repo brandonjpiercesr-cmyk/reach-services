@@ -6162,7 +6162,7 @@ const httpServer = http.createServer(async (req, res) => {
   if (path === '/' || path === '/health') {
     return jsonResponse(res, 200, {
       status: 'ALIVE',
-      service: 'ABA TOUCH v2.12.4-TALKBACK',
+      service: 'ABA TOUCH v2.12.5-REALFIX',
       mode: 'FULL API + VOICE + OMI + SMS + SPEECH INTELLIGENCE',
       air: 'ABA Intellectual Role - CENTRAL ORCHESTRATOR',
       models: { primary: 'Gemini Flash 2.0', backup: 'Claude Haiku', speed_fallback: 'Groq' },
@@ -8605,8 +8605,9 @@ Phone: (336) 389-8116</p>
   // ═══════════════════════════════════════════════════════════════════════
   
   // /api/call/dial - Initiate outbound call
-  // ⬡B:TOUCH:FIX:dial.context.prompt:20260216⬡
-  // Now updates ElevenLabs agent prompt with call context so ABA can have intelligent conversation
+  // ⬡B:TOUCH:FIX:dial.use.elevenlabs:20260216⬡
+  // FIXED: Now uses ElevenLabs outbound-call API (same as DAWN)
+  // This ensures ABA can have intelligent 2-way conversations
   if (path === '/api/call/dial' && method === 'POST') {
     const body = await parseBody(req);
     const { to, purpose, userId, record } = body;
@@ -8622,36 +8623,42 @@ Phone: (336) 389-8116</p>
     const traceId = `DIAL-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     
     try {
-      // ⬡B:TOUCH:FIX:update.agent.before.call:20260216⬡
-      // CRITICAL: Update ElevenLabs agent prompt with call context BEFORE calling
-      // This way ABA knows what the call is about and can have an intelligent conversation
-      const callContextPrompt = `# OUTBOUND CALL MODE
-You are ABA making an outbound call to Brandon.
+      // ⬡B:TOUCH:FIX:dial.elevenlabs.agent:20260216⬡
+      // STEP 1: Update ElevenLabs agent prompt AND first_message with call context
+      // This is the SAME approach that works for DAWN
+      const callContextPrompt = `# OUTBOUND CALL MODE - MEETING AFTER REPORT
+You are ABA delivering information to Brandon via phone call.
 
-## WHY YOU ARE CALLING
+## THE MESSAGE YOU ARE DELIVERING
 ${purpose || 'Just checking in.'}
 
 ## CRITICAL INSTRUCTIONS
-1. You ALREADY delivered the initial message via TTS. Don't repeat it word-for-word.
-2. You KNOW why you called - it's in the "WHY YOU ARE CALLING" section above.
-3. If Brandon asks "what was that?" or "tell me more" - elaborate on the topic.
-4. If Brandon asks questions about the content - ANSWER them intelligently based on the context.
-5. Do NOT say "I don't have context" or "I don't know why I called" - YOU DO KNOW.
-6. Do NOT go silent. If you're not sure, ask clarifying questions.
-7. Be conversational and helpful.
+1. Your FIRST MESSAGE will be the content above. It will be spoken automatically.
+2. After delivering, be ready for Brandon's questions.
+3. You KNOW the content - it's in "THE MESSAGE" section above.
+4. If asked "what was that?" or "tell me more" - elaborate on the topic.
+5. If asked about specifics - answer based on the content provided.
+6. Do NOT say "I don't have context" - YOU DO HAVE IT.
+7. Do NOT go silent. Stay engaged.
+8. Be conversational, warm, helpful.
 
-## EXAMPLE RESPONSES
-- "What came out of our meeting?" → Summarize the key points from the purpose above
-- "Tell me more about that" → Expand on the details
-- "Anything else?" → Mention any other relevant points or ask if they need anything
+## EXAMPLE FOLLOW-UPS
+- "What did we discuss?" → Summarize the message above
+- "Tell me about Dwayne" → Reference what's in the message about Dwayne
+- "When's the LA trip?" → Check the message for dates
+- "Anything else important?" → Highlight key points
 
 ## WHO YOU ARE
-You are ABA - A Better AI, Brandon's personal AI assistant.
+You are ABA - A Better AI. Brandon's personal AI assistant.
 Brandon is your creator (HAM - Human ABA Master).
+Be warm and conversational, not robotic.
 
 We Are All ABA.`;
 
-      console.log('[DIAL] Updating ElevenLabs agent prompt with call context...');
+      // Create the first message from purpose
+      const firstMessage = `Hey Boss, this is ABA calling with your update. ${purpose || 'Just wanted to check in.'} How can I help you?`;
+
+      console.log('[DIAL] Updating ElevenLabs agent with context and first_message...');
       
       await httpsRequest({
         hostname: 'api.elevenlabs.io',
@@ -8666,67 +8673,51 @@ We Are All ABA.`;
           agent: {
             prompt: {
               prompt: callContextPrompt
-            }
+            },
+            first_message: firstMessage
           }
         }
       }));
       
-      console.log('[DIAL] Agent prompt updated with context!');
+      console.log('[DIAL] Agent updated! Now making call via ElevenLabs...');
       
-      // Twilio call initiation
-      const twilioAuth = Buffer.from(`${TWILIO_SID}:${TWILIO_AUTH}`).toString('base64');
+      // STEP 2: Use ElevenLabs outbound-call API (SAME AS DAWN!)
+      // This uses the ElevenLabs conversational agent, NOT Twilio+Deepgram
+      const phoneNumber = to.startsWith('+') ? to : `+1${to.replace(/\D/g, '')}`;
       
-      // Use OUTBOUND endpoint (not twiml) - includes purpose, no consent needed
-      const outboundUrl = `${REACH_URL}/api/call/outbound?trace=${traceId}&purpose=${encodeURIComponent(purpose || 'checking in')}`;
-      
-      const callData = new URLSearchParams({
-        To: to.startsWith('+') ? to : `+1${to.replace(/\D/g, '')}`,
-        From: TWILIO_PHONE,
-        Url: outboundUrl,
-        StatusCallback: `${REACH_URL}/api/call/status?trace=${traceId}`,
-        StatusCallbackEvent: 'initiated ringing answered completed',
-        StatusCallbackMethod: 'POST'
-      });
-      
-      const twilioRes = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Calls.json`, {
+      const callResult = await httpsRequest({
+        hostname: 'api.elevenlabs.io',
+        path: '/v1/convai/twilio/outbound-call',
         method: 'POST',
         headers: {
-          'Authorization': `Basic ${twilioAuth}`,
-          'Content-Type': 'application/x-www-form-urlencoded'
-        },
-        body: callData.toString()
+          'xi-api-key': ELEVENLABS_KEY,
+          'Content-Type': 'application/json'
+        }
+      }, JSON.stringify({
+        agent_id: 'agent_0601khe2q0gben08ws34bzf7a0sa',
+        agent_phone_number_id: 'phnum_0001khe3q3nyec1bv04mk2m048v8',
+        to_number: phoneNumber
+      }));
+      
+      const data = JSON.parse(callResult.data.toString());
+      console.log('[DIAL] ElevenLabs call initiated:', data.conversation_id);
+      
+      // Store call in brain
+      await storeToBrain({
+        content: `DIAL CALL INITIATED via ElevenLabs: ${phoneNumber} | Purpose: ${purpose || 'General'} | ConvID: ${data.conversation_id}`,
+        memory_type: 'call_session',
+        categories: ['dial', 'phone_call', 'active', 'elevenlabs'],
+        importance: 7,
+        is_system: true,
+        source: `dial_${traceId}`,
+        tags: ['dial', 'call', 'active', 'elevenlabs']
       });
       
-      const callResult = await twilioRes.json();
-      
-      if (callResult.sid) {
-        // Store call session in brain
-        await fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
-          method: 'POST',
-          headers: {
-            'apikey': SUPABASE_KEY || SUPABASE_ANON,
-            'Authorization': `Bearer ${SUPABASE_KEY || SUPABASE_ANON}`,
-            'Content-Type': 'application/json',
-            'Prefer': 'return=minimal'
-          },
-          body: JSON.stringify({
-            content: `DIAL CALL INITIATED: ${to} | Purpose: ${purpose || 'General'} | SID: ${callResult.sid}`,
-            memory_type: 'call_session',
-            categories: ['dial', 'phone_call', 'active'],
-            importance: 7,
-            is_system: true,
-            user_id: userId || 'system',
-            source: `dial_${traceId}`,
-            tags: ['dial', 'call', 'active'],
-            air_processed: true
-          })
-        });
-        
-        // Restore normal prompt after 2 minutes
-        setTimeout(async () => {
-          try {
-            console.log('[DIAL] Restoring normal ABA prompt...');
-            const normalPrompt = `# WHO YOU ARE
+      // STEP 3: Restore normal prompt after 2 minutes
+      setTimeout(async () => {
+        try {
+          console.log('[DIAL] Restoring normal ABA prompt...');
+          const normalPrompt = `# WHO YOU ARE
 You are ABA - A Better AI. Not just an assistant. You are the central nervous system of an entire ecosystem called ABACIA. You were created by Brandon Pierce.
 
 # HOW YOU SPEAK
@@ -8738,47 +8729,49 @@ You are ABA - A Better AI. Not just an assistant. You are the central nervous sy
 
 We Are All ABA.`;
 
-            await httpsRequest({
-              hostname: 'api.elevenlabs.io',
-              path: '/v1/convai/agents/agent_0601khe2q0gben08ws34bzf7a0sa',
-              method: 'PATCH',
-              headers: {
-                'xi-api-key': ELEVENLABS_KEY,
-                'Content-Type': 'application/json'
+          await httpsRequest({
+            hostname: 'api.elevenlabs.io',
+            path: '/v1/convai/agents/agent_0601khe2q0gben08ws34bzf7a0sa',
+            method: 'PATCH',
+            headers: {
+              'xi-api-key': ELEVENLABS_KEY,
+              'Content-Type': 'application/json'
+            }
+          }, JSON.stringify({
+            conversation_config: {
+              agent: {
+                prompt: {
+                  prompt: normalPrompt
+                },
+                first_message: "Hey Boss! This is ABA. How can I help you today?"
               }
-            }, JSON.stringify({
-              conversation_config: {
-                agent: {
-                  prompt: {
-                    prompt: normalPrompt
-                  }
-                }
-              }
-            }));
-            
-            console.log('[DIAL] Normal prompt restored!');
-          } catch (e) {
-            console.log('[DIAL] Prompt restore error:', e.message);
-          }
-        }, 120000); // Restore after 2 minutes
-        
-        return jsonResponse(res, 200, {
-          success: true,
-          callSid: callResult.sid,
-          traceId,
-          status: 'initiated',
-          message: 'Call initiated. ABA has context and can converse about the topic.',
-          routing: `USER*AIR*DIAL*TWILIO*${callResult.sid}`
-        });
-      } else {
-        return jsonResponse(res, 500, { success: false, error: callResult.message || 'Twilio error' });
-      }
+            }
+          }));
+          
+          console.log('[DIAL] Normal prompt restored!');
+        } catch (e) {
+          console.log('[DIAL] Prompt restore error:', e.message);
+        }
+      }, 120000); // Restore after 2 minutes
+      
+      return jsonResponse(res, 200, {
+        success: true,
+        conversation_id: data.conversation_id,
+        traceId,
+        status: 'initiated',
+        message: 'Call initiated via ElevenLabs. ABA has full context and can converse.',
+        routing: `USER*AIR*DIAL*ELEVENLABS*${data.conversation_id}`
+      });
+      
     } catch (e) {
-      console.error('[DIAL] Call initiation failed:', e.message);
-      return jsonResponse(res, 500, { success: false, error: e.message });
+      console.log('[DIAL] Call error:', e.message);
+      return jsonResponse(res, 500, { 
+        error: 'Failed to initiate call', 
+        details: e.message,
+        traceId 
+      });
     }
   }
-  
   // /api/call/twiml - TwiML response for call setup with consent gathering
   // ⬡B:TOUCH:REACH.CALL.TWIML:CODE:voice.consent.gather:FIX:20260216⬡
   if (path === '/api/call/twiml' && (method === 'GET' || method === 'POST')) {
