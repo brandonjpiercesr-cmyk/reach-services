@@ -259,7 +259,7 @@ const REACH_URL = process.env.REACH_URL || 'https://aba-reach.onrender.com';
 
 // ⬡B:AIR:REACH.SERVER.STARTUP:CODE:infrastructure.logging.boot:AIR→REACH:T10:v1.5.0:20260213:b0o1t⬡
 console.log('═══════════════════════════════════════════════════════════');
-console.log('[ABA REACH v2.9.7] FULL HIERARCHY + SIGILS + API ROUTES');
+console.log('[ABA REACH v2.9.8] FULL HIERARCHY + SIGILS + API ROUTES');
 console.log('[HIERARCHY] L6:AIR > L5:REACH > L4:VOICE,SMS,EMAIL,OMI > L3:VARA,CARA,IMAN,TASTE');
 console.log('[AIR] Hardcoded agents: LUKE, COLE, JUDE, PACK');
 console.log('[AIR] PRIMARY: Gemini Flash 2.0 | BACKUP: Claude Haiku');
@@ -1241,8 +1241,9 @@ async function PRESS_getNews(query) {
 // Uses ElevenLabs Conversational AI for full 2-way calls
 // ═══════════════════════════════════════════════════════════════════════════════
 // ⬡B:ABCD:ABAOS:AGENT.DIAL⬡
-async function DIAL_callWithElevenLabs(phoneNumber, purpose, callerContext) {
+async function DIAL_callWithElevenLabs(phoneNumber, firstMessage, callerContext) {
   console.log('[DIAL] 2-way outbound call to:', phoneNumber);
+  console.log('[DIAL] First message:', (firstMessage || '').substring(0, 50) + '...');
   
   const ELEVENLABS_KEY = process.env.ELEVENLABS_API_KEY; // ⬡B:ENV:ELEVENLABS⬡
   const AGENT_ID = 'agent_0601khe2q0gben08ws34bzf7a0sa'; // ABA agent
@@ -1252,6 +1253,18 @@ async function DIAL_callWithElevenLabs(phoneNumber, purpose, callerContext) {
     // ⬡B:TOUCH:FIX:elevenlabs.correct.api:20260216⬡
     // CORRECT API: /v1/convai/twilio/outbound-call
     // NOT: /v1/convai/conversation/create-phone-call (404)
+    const requestBody = {
+      agent_id: AGENT_ID,
+      agent_phone_number_id: PHONE_NUMBER_ID,
+      to_number: phoneNumber
+    };
+    
+    // ⬡B:TOUCH:FIX:first_message.override:20260216⬡
+    // Pass first_message to override what ABA says when call connects
+    if (firstMessage) {
+      requestBody.first_message = firstMessage;
+    }
+    
     const result = await httpsRequest({
       hostname: 'api.elevenlabs.io',
       path: '/v1/convai/twilio/outbound-call',
@@ -1260,16 +1273,7 @@ async function DIAL_callWithElevenLabs(phoneNumber, purpose, callerContext) {
         'xi-api-key': ELEVENLABS_KEY,
         'Content-Type': 'application/json'
       }
-    }, JSON.stringify({
-      agent_id: AGENT_ID,
-      agent_phone_number_id: PHONE_NUMBER_ID,
-      to_number: phoneNumber,
-      conversation_initiation_client_data: {
-        purpose: purpose || 'proactive outreach',
-        caller_context: callerContext || 'ABA calling',
-        vara_style: 'warm_butler'
-      }
-    }));
+    }, JSON.stringify(requestBody));
     
     if (result.status === 200 || result.status === 201) {
       const data = JSON.parse(result.data.toString());
@@ -3799,7 +3803,7 @@ async function postCallAutomation(session) {
     '<h3>Conversation Summary</h3>' +
     '<p>' + topicsDiscussed.replace(/\|/g, '<br>') + '</p>' +
     '<hr style="border:1px solid #e5e7eb">' +
-    '<p style="color:#9ca3af;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v2.9.7</p>' +
+    '<p style="color:#9ca3af;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v2.9.8</p>' +
     '</div>';
   
   const emailResult = await sendEmailFromCall(
@@ -3821,7 +3825,7 @@ async function postCallAutomation(session) {
   const notifyResult = await sendSMSFromCall('+13363898116', brandonNotify);
   
   // ALSO email Brandon
-  const brandonEmailHtml = '<div style="font-family:system-ui;max-width:600px;margin:0 auto"><h2>ABA Call Report</h2><p><strong>Caller:</strong> ' + callerName + '</p><p><strong>Phone:</strong> ' + callerNumber + '</p><p><strong>Duration:</strong> ' + turnCount + ' turns</p><p><strong>Topics:</strong> ' + topicsDiscussed.substring(0, 300) + '</p><p style="color:#888;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v2.9.7</p></div>';
+  const brandonEmailHtml = '<div style="font-family:system-ui;max-width:600px;margin:0 auto"><h2>ABA Call Report</h2><p><strong>Caller:</strong> ' + callerName + '</p><p><strong>Phone:</strong> ' + callerNumber + '</p><p><strong>Duration:</strong> ' + turnCount + ' turns</p><p><strong>Topics:</strong> ' + topicsDiscussed.substring(0, 300) + '</p><p style="color:#888;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v2.9.8</p></div>';
   const brandonEmail = await sendEmailFromCall('brandonjpiercesr@gmail.com', 'Brandon', 'ABA Call Report: ' + callerName + ' called', brandonEmailHtml);
   if (brandonEmail.success) console.log('[POST-CALL] Brandon email report sent');
   if (notifyResult.success) {
@@ -4969,7 +4973,7 @@ const httpServer = http.createServer(async (req, res) => {
   if (path === '/' || path === '/health') {
     return jsonResponse(res, 200, {
       status: 'ALIVE',
-      service: 'ABA REACH v2.9.7',
+      service: 'ABA REACH v2.9.8',
       mode: 'FULL API + VOICE + OMI',
       air: 'ABA Intellectual Role - CENTRAL ORCHESTRATOR',
       models: { primary: 'Gemini Flash 2.0', backup: 'Claude Haiku', speed_fallback: 'Groq' },
@@ -5357,6 +5361,48 @@ Phone: (336) 389-8116</p>
       }
       
       console.log('[AIR VOICE TOOL] Caller identified as:', callerIdentity.name, 'Trust:', callerIdentity.trust);
+      
+      // ⬡B:TOUCH:FIX:callback.capability:20260216⬡
+      // Handle "call me back" requests - trigger outbound call
+      const msgLower = userMessage.toLowerCase();
+      if (msgLower.includes('call me back') || msgLower.includes('call back') || 
+          msgLower.includes('hang up and call') || msgLower.includes('callback')) {
+        console.log('[AIR VOICE TOOL] CALLBACK REQUEST DETECTED!');
+        
+        // Trigger outbound call via ElevenLabs API
+        const ELEVENLABS_KEY = process.env.ELEVENLABS_API_KEY;
+        const targetPhone = callerIdentity.phone || '+13363898116'; // Default to Brandon
+        
+        try {
+          const callResult = await httpsRequest({
+            hostname: 'api.elevenlabs.io',
+            path: '/v1/convai/twilio/outbound-call',
+            method: 'POST',
+            headers: {
+              'xi-api-key': ELEVENLABS_KEY,
+              'Content-Type': 'application/json'
+            }
+          }, JSON.stringify({
+            agent_id: 'agent_0601khe2q0gben08ws34bzf7a0sa',
+            agent_phone_number_id: 'phnum_0001khe3q3nyec1bv04mk2m048v8',
+            to_number: targetPhone
+          }));
+          
+          const callData = JSON.parse(callResult.data.toString());
+          console.log('[AIR VOICE TOOL] Callback initiated:', callData.conversation_id);
+          
+          return jsonResponse(res, 200, {
+            response: "Absolutely! I will hang up now and call you right back. Talk to you in just a moment!",
+            callback_initiated: true,
+            conversation_id: callData.conversation_id
+          });
+        } catch (e) {
+          console.log('[AIR VOICE TOOL] Callback error:', e.message);
+          return jsonResponse(res, 200, {
+            response: "I tried to set up the callback but hit a small snag. Let me stay on the line with you instead. What can I help you with?"
+          });
+        }
+      }
       
       // ⬡B:AIR:REACH.VOICE.ROUTING:LOGIC:air.central:v2.4.0:20260214⬡
       // ALL routing goes through AIR_process - AIR dispatches to agents
@@ -7751,7 +7797,7 @@ ccWss.on('connection', (ws, req) => {
   // Send welcome message with system status
   ws.send(JSON.stringify({
     type: 'connected',
-    service: 'ABA REACH v2.9.7 - AUTONOMY LAYER ACTIVE',
+    service: 'ABA REACH v2.9.8 - AUTONOMY LAYER ACTIVE',
     timestamp: new Date().toISOString(),
     agents: ['AIR', 'VARA', 'LUKE', 'COLE', 'JUDE', 'PACK', 'IMAN', 'TASTE', 'DIAL', 'PULSE', 'SAGE'],
     features: ['proactive_email', 'deadline_alerts', 'auto_escalation', 'device_sync']
@@ -8399,7 +8445,7 @@ function getHeartbeatStatus() {
 httpServer.listen(PORT, '0.0.0.0', () => {
   console.log('');
   console.log('═══════════════════════════════════════════════════════════');
-  console.log('[ABA REACH v2.9.7] LIVE on port ' + PORT);
+  console.log('[ABA REACH v2.9.8] LIVE on port ' + PORT);
   console.log('═══════════════════════════════════════════════════════════');
   console.log('[AIR] ABA Intellectual Role - ONLINE');
   console.log('[AIR] PRIMARY: Gemini Flash 2.0');
