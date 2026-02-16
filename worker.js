@@ -4048,18 +4048,27 @@ async function AIR_DISPATCH(lukeAnalysis, judeResult, callerIdentity) {
   // ⬡B:AIR:REACH.DISPATCH.SHADOW:ROUTE:notes.transcripts.vault:v1.0.0:20260216⬡
   // SHADOW Agent - Meeting notes, transcripts, recordings (L3: Manager, VAULT department)
   // This is the consent-based data protection agent
-  if (query.includes('notes') || query.includes('transcript') || query.includes('recording') ||
-      query.includes('meeting') && (query.includes('detail') || query.includes('full') || query.includes('pull up')) ||
-      query.includes('omi') || query.includes('otter') || query.includes('last night') ||
-      agentNames.includes('shadow')) {
+  const needsShadow = query.includes('notes') || 
+                      query.includes('transcript') || 
+                      query.includes('recording') ||
+                      (query.includes('meeting') && (query.includes('detail') || query.includes('full') || query.includes('pull'))) ||
+                      query.includes('omi') || 
+                      query.includes('otter') || 
+                      (query.includes('last') && query.includes('night')) ||
+                      agentNames.includes('shadow');
+  
+  console.log('[AIR DISPATCH] SHADOW check - needsShadow:', needsShadow, '| query:', query.substring(0, 50));
+  
+  if (needsShadow) {
     console.log('[AIR DISPATCH] → L3: SHADOW (Secure Handling And Data Oversight Watch)');
     try {
       const result = await SHADOW_accessVault(query, callerIdentity);
-      if (result) {
+      console.log('[AIR DISPATCH] SHADOW result:', result ? 'got response' : 'null');
+      if (result && result.response) {
         return { handled: true, agent: 'SHADOW', data: result.response, type: 'vault', needsConsent: result.needsConsent };
       }
     } catch (e) {
-      console.log('[AIR DISPATCH] SHADOW error:', e.message);
+      console.log('[AIR DISPATCH] SHADOW error:', e.message, e.stack);
     }
   }
 
@@ -6266,7 +6275,7 @@ const httpServer = http.createServer(async (req, res) => {
   if (path === '/' || path === '/health') {
     return jsonResponse(res, 200, {
       status: 'ALIVE',
-      service: 'ABA TOUCH v2.12.7-SHADOW-AIR',
+      service: 'ABA TOUCH v2.12.8-SHADOW-DEBUG',
       mode: 'FULL API + VOICE + OMI + SMS + SPEECH INTELLIGENCE',
       air: 'ABA Intellectual Role - CENTRAL ORCHESTRATOR',
       models: { primary: 'Gemini Flash 2.0', backup: 'Claude Haiku', speed_fallback: 'Groq' },
