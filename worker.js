@@ -259,7 +259,7 @@ const REACH_URL = process.env.REACH_URL || 'https://aba-reach.onrender.com';
 
 // ⬡B:AIR:REACH.SERVER.STARTUP:CODE:infrastructure.logging.boot:AIR→REACH:T10:v1.5.0:20260213:b0o1t⬡
 console.log('═══════════════════════════════════════════════════════════');
-console.log('[ABA REACH v2.9.3] FULL HIERARCHY + SIGILS + API ROUTES');
+console.log('[ABA REACH v2.9.4] FULL HIERARCHY + SIGILS + API ROUTES');
 console.log('[HIERARCHY] L6:AIR > L5:REACH > L4:VOICE,SMS,EMAIL,OMI > L3:VARA,CARA,IMAN,TASTE');
 console.log('[AIR] Hardcoded agents: LUKE, COLE, JUDE, PACK');
 console.log('[AIR] PRIMARY: Gemini Flash 2.0 | BACKUP: Claude Haiku');
@@ -3798,7 +3798,7 @@ async function postCallAutomation(session) {
     '<h3>Conversation Summary</h3>' +
     '<p>' + topicsDiscussed.replace(/\|/g, '<br>') + '</p>' +
     '<hr style="border:1px solid #e5e7eb">' +
-    '<p style="color:#9ca3af;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v2.9.3</p>' +
+    '<p style="color:#9ca3af;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v2.9.4</p>' +
     '</div>';
   
   const emailResult = await sendEmailFromCall(
@@ -3820,7 +3820,7 @@ async function postCallAutomation(session) {
   const notifyResult = await sendSMSFromCall('+13363898116', brandonNotify);
   
   // ALSO email Brandon
-  const brandonEmailHtml = '<div style="font-family:system-ui;max-width:600px;margin:0 auto"><h2>ABA Call Report</h2><p><strong>Caller:</strong> ' + callerName + '</p><p><strong>Phone:</strong> ' + callerNumber + '</p><p><strong>Duration:</strong> ' + turnCount + ' turns</p><p><strong>Topics:</strong> ' + topicsDiscussed.substring(0, 300) + '</p><p style="color:#888;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v2.9.3</p></div>';
+  const brandonEmailHtml = '<div style="font-family:system-ui;max-width:600px;margin:0 auto"><h2>ABA Call Report</h2><p><strong>Caller:</strong> ' + callerName + '</p><p><strong>Phone:</strong> ' + callerNumber + '</p><p><strong>Duration:</strong> ' + turnCount + ' turns</p><p><strong>Topics:</strong> ' + topicsDiscussed.substring(0, 300) + '</p><p style="color:#888;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v2.9.4</p></div>';
   const brandonEmail = await sendEmailFromCall('brandonjpiercesr@gmail.com', 'Brandon', 'ABA Call Report: ' + callerName + ' called', brandonEmailHtml);
   if (brandonEmail.success) console.log('[POST-CALL] Brandon email report sent');
   if (notifyResult.success) {
@@ -4968,7 +4968,7 @@ const httpServer = http.createServer(async (req, res) => {
   if (path === '/' || path === '/health') {
     return jsonResponse(res, 200, {
       status: 'ALIVE',
-      service: 'ABA REACH v2.9.3',
+      service: 'ABA REACH v2.9.4',
       mode: 'FULL API + VOICE + OMI',
       air: 'ABA Intellectual Role - CENTRAL ORCHESTRATOR',
       models: { primary: 'Gemini Flash 2.0', backup: 'Claude Haiku', speed_fallback: 'Groq' },
@@ -7162,24 +7162,23 @@ Phone: (336) 389-8116</p>
     let twiml;
     
     if (mode === 'twoway') {
-      // ⬡B:TOUCH:FIX:back.to.media.stream:20260216⬡
-      // Use <Start><Stream> to /media-stream - this WORKS!
-      // ConversationRelay was failing with "Unable to connect to websocket URL"
-      // The /media-stream approach handles audio via Deepgram STT + ElevenLabs TTS
+      // ⬡B:TOUCH:FIX:stream.first.then.play:20260216⬡
+      // Start stream FIRST so we're ready to receive audio
+      // Then play greeting - user hears it through the stream
       
       const safeGreeting = msg.replace(/"/g, "'").replace(/&/g, "and").replace(/</g, "").replace(/>/g, "");
       const wsUrl = 'wss://' + req.headers.host + '/media-stream?trace=' + traceId + '-outbound';
       
-      // Play greeting first, then start stream for 2-way conversation
       twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Play>${REACH_URL}/api/voice/tts-stream?text=${encodeURIComponent(safeGreeting)}</Play>
   <Start>
     <Stream url="${wsUrl}" track="both_tracks">
       <Parameter name="outbound" value="true"/>
       <Parameter name="callerNumber" value="aba-outbound"/>
+      <Parameter name="greeting" value="${encodeURIComponent(safeGreeting.substring(0, 200))}"/>
     </Stream>
   </Start>
+  <Play>${REACH_URL}/api/voice/tts-stream?text=${encodeURIComponent(safeGreeting)}</Play>
   <Pause length="3600"/>
 </Response>`;
     } else {
@@ -7766,7 +7765,7 @@ ccWss.on('connection', (ws, req) => {
   // Send welcome message with system status
   ws.send(JSON.stringify({
     type: 'connected',
-    service: 'ABA REACH v2.9.3 - AUTONOMY LAYER ACTIVE',
+    service: 'ABA REACH v2.9.4 - AUTONOMY LAYER ACTIVE',
     timestamp: new Date().toISOString(),
     agents: ['AIR', 'VARA', 'LUKE', 'COLE', 'JUDE', 'PACK', 'IMAN', 'TASTE', 'DIAL', 'PULSE', 'SAGE'],
     features: ['proactive_email', 'deadline_alerts', 'auto_escalation', 'device_sync']
@@ -8073,6 +8072,13 @@ wss.on('connection', (ws) => {
   let session = null;
   
   ws.on('message', async (data) => {
+    // DEBUG: Log IMMEDIATELY before anything else
+    fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
+      method: 'POST',
+      headers: { 'apikey': SUPABASE_KEY || SUPABASE_ANON, 'Authorization': `Bearer ${SUPABASE_KEY || SUPABASE_ANON}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+      body: JSON.stringify({ content: `DEBUG WS RAW MESSAGE RECEIVED`, memory_type: 'debug', source: 'ws_raw_' + Date.now() })
+    }).catch(e => {});
+    
     try {
       const msg = JSON.parse(data.toString());
       
@@ -8407,7 +8413,7 @@ function getHeartbeatStatus() {
 httpServer.listen(PORT, '0.0.0.0', () => {
   console.log('');
   console.log('═══════════════════════════════════════════════════════════');
-  console.log('[ABA REACH v2.9.3] LIVE on port ' + PORT);
+  console.log('[ABA REACH v2.9.4] LIVE on port ' + PORT);
   console.log('═══════════════════════════════════════════════════════════');
   console.log('[AIR] ABA Intellectual Role - ONLINE');
   console.log('[AIR] PRIMARY: Gemini Flash 2.0');
