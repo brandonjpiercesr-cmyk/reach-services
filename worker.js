@@ -1051,6 +1051,36 @@ const NYLAS_API_URI = process.env.NYLAS_API_URI || 'https://api.us.nylas.com';
 const TWILIO_SID = process.env.TWILIO_ACCOUNT_SID;
 const TWILIO_AUTH = process.env.TWILIO_AUTH_TOKEN;
 
+// ⬡B:TOUCH:v2.12.15:CONVERSATION_HISTORY:voice.context.memory:20260217⬡
+// Store conversation history per call - expires after 30 minutes
+const VOICE_CONVERSATIONS = new Map();
+const CONVERSATION_EXPIRY_MS = 30 * 60 * 1000; // 30 minutes
+
+function getConversationHistory(conversationId) {
+  const convo = VOICE_CONVERSATIONS.get(conversationId);
+  if (!convo) return [];
+  // Check if expired
+  if (Date.now() - convo.lastUpdate > CONVERSATION_EXPIRY_MS) {
+    VOICE_CONVERSATIONS.delete(conversationId);
+    return [];
+  }
+  return convo.messages;
+}
+
+function addToConversationHistory(conversationId, role, content) {
+  let convo = VOICE_CONVERSATIONS.get(conversationId);
+  if (!convo) {
+    convo = { messages: [], lastUpdate: Date.now() };
+    VOICE_CONVERSATIONS.set(conversationId, convo);
+  }
+  convo.messages.push({ role, content, timestamp: new Date().toISOString() });
+  convo.lastUpdate = Date.now();
+  // Keep only last 20 messages
+  if (convo.messages.length > 20) {
+    convo.messages = convo.messages.slice(-20);
+  }
+}
+
 // ⬡B:AIR:REACH.CONFIG.CORS:CONFIG:security.origins.allowed:AIR→REACH:T10:v1.5.0:20260213:c1o2r⬡
 const ALLOWED_ORIGINS = [
   'https://1adev2.vercel.app',
@@ -6323,7 +6353,7 @@ const httpServer = http.createServer(async (req, res) => {
   if (path === '/' || path === '/health') {
     return jsonResponse(res, 200, {
       status: 'ALIVE',
-      service: 'ABA TOUCH v2.12.14-PURE-ABACIA',
+      service: 'ABA TOUCH v2.12.15-CONVERSATION-HISTORY',
       mode: 'FULL API + VOICE + OMI + SMS + SPEECH INTELLIGENCE',
       air: 'ABA Intellectual Role - CENTRAL ORCHESTRATOR',
       models: { primary: 'Gemini Flash 2.0', backup: 'Claude Haiku', speed_fallback: 'Groq' },
@@ -7102,10 +7132,18 @@ Phone: (336) 389-8116</p>
         }
       }
       
-      // ⬡B:AIR:REACH.VOICE.ROUTING:PURE_ABACIA:v2.12.14:20260216⬡
+      // ⬡B:AIR:REACH.VOICE.ROUTING:PURE_ABACIA:v2.12.15:20260217⬡
       // ABACIA IS THE BRAIN. Touch does NOT think. 100% passthrough to ABACIA.
-      // All 58 agents live in ABACIA including SHADOW, SAGE, TIM, etc.
-      console.log('[AIR VOICE TOOL] Routing to ABACIA (THE BRAIN - 58 agents)...');
+      // All 76 agents live in ABACIA including SHADOW, SAGE, TIM, etc.
+      // NOW WITH CONVERSATION HISTORY for context across exchanges
+      console.log('[AIR VOICE TOOL] Routing to ABACIA (THE BRAIN - 76 agents)...');
+      
+      // Get conversation history for context
+      const conversationHistory = getConversationHistory(conversationId);
+      console.log('[AIR VOICE TOOL] Conversation history:', conversationHistory.length, 'messages');
+      
+      // Add user message to history
+      addToConversationHistory(conversationId, 'user', userMessage);
       
       let responseText = "I understand. Let me help you with that.";
       
@@ -7117,7 +7155,8 @@ Phone: (336) 389-8116</p>
             query: userMessage,
             caller: callerIdentity,
             source: 'elevenlabs_voice',
-            conversation_id: conversationId
+            conversation_id: conversationId,
+            conversation_history: conversationHistory  // NEW: Send history for context
           })
         });
         
@@ -7152,6 +7191,9 @@ Phone: (336) 389-8116</p>
       }
       
       console.log('[AIR VOICE TOOL] Response:', responseText.substring(0, 100) + '...');
+      
+      // Add ABA response to conversation history
+      addToConversationHistory(conversationId, 'assistant', responseText);
       
       // Broadcast response to Command Center
       broadcastToCommandCenter({
