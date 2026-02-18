@@ -2092,96 +2092,82 @@ async function RADAR_getCalendar(callerIdentity) {
     return { allowed: false, summary: "I can share your schedule once I know who I am speaking with." };
   }
   
-  // TRY ABACIA-SERVICES FIRST (has calendar connected)
-  try {
-    console.log('[RADAR] Trying ABACIA-SERVICES for calendar...');
-    const abaciaResult = await ABACIA_getCalendar();
-    if (abaciaResult.success && abaciaResult.events) {
-      const events = abaciaResult.events;
-      if (events.length === 0) {
-        return { allowed: true, count: 0, summary: "Your calendar is clear today. Nothing scheduled - a good day to focus on what matters most." };
-      }
-      const eventNames = events.slice(0, 3).map(e => e.title || e.summary || 'Event').join(', ');
-      return { allowed: true, count: events.length, summary: 'You have ' + events.length + ' things on your calendar today, including ' + eventNames + '. Want me to walk you through them?' };
-    }
-  } catch (e) {
-    console.log('[RADAR] ABACIA-SERVICES calendar failed, trying fallback:', e.message);
-  }
+  // ⬡B:GRIT.FIX:NYLAS_CALENDAR:20260218⬡
+  // Use Nylas directly - Brandon's calendars are connected via Nylas grants
+  const NYLAS_KEY = process.env.NYLAS_API_KEY || 'nyk_v0_eeBniYFxPAMuK30DejqDNIFfEyMQiH6ATEnTEhMiutJzvwor3c2ZuhC0Oeicl2vn';
+  const BRANDON_GMG_GRANT = 'f781b637-1e38-4af7-96bf-a578f94d3225';
+  const BRANDON_PERSONAL_GRANT = '50053c70-ecbb-487f-a522-d3d03d72f8c5';
   
-  // FALLBACK: Try Google Calendar token from brain
   try {
-    // Check for Google Calendar token in brain
-    const tokenResult = await httpsRequest({
-      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-      path: '/rest/v1/aba_memory?memory_type=eq.google_calendar_token&limit=1&order=created_at.desc',
-      method: 'GET',
-      headers: {
-        'apikey': SUPABASE_ANON,
-        'Authorization': 'Bearer ' + SUPABASE_ANON
+    console.log('[RADAR] Fetching calendar via Nylas...');
+    const allEvents = [];
+    
+    // Get GMG calendar events
+    try {
+      const gmgResult = await httpsRequest({
+        hostname: 'api.us.nylas.com',
+        path: '/v3/grants/' + BRANDON_GMG_GRANT + '/events?calendar_id=brandon@globalmajoritygroup.com&limit=10',
+        method: 'GET',
+        headers: {
+          'Authorization': 'Bearer ' + NYLAS_KEY,
+          'Accept': 'application/json'
+        }
+      });
+      if (gmgResult.status === 200) {
+        const data = JSON.parse(gmgResult.data.toString());
+        if (data.data) allEvents.push(...data.data.map(e => ({ ...e, calendar: 'GMG' })));
       }
+    } catch (e) { console.log('[RADAR] GMG calendar error:', e.message); }
+    
+    // Get personal calendar events
+    try {
+      const personalResult = await httpsRequest({
+        hostname: 'api.us.nylas.com',
+        path: '/v3/grants/' + BRANDON_PERSONAL_GRANT + '/events?calendar_id=brandonjpiercesr@gmail.com&limit=10',
+        method: 'GET',
+        headers: {
+          'Authorization': 'Bearer ' + NYLAS_KEY,
+          'Accept': 'application/json'
+        }
+      });
+      if (personalResult.status === 200) {
+        const data = JSON.parse(personalResult.data.toString());
+        if (data.data) allEvents.push(...data.data.map(e => ({ ...e, calendar: 'Personal' })));
+      }
+    } catch (e) { console.log('[RADAR] Personal calendar error:', e.message); }
+    
+    // Sort by start time
+    allEvents.sort((a, b) => {
+      const aTime = a.when?.start_time || 0;
+      const bTime = b.when?.start_time || 0;
+      return aTime - bTime;
     });
     
-    if (tokenResult.status === 200) {
-      const tokens = JSON.parse(tokenResult.data.toString());
-      if (tokens.length > 0 && tokens[0].content) {
-        let tokenData;
-        try {
-          tokenData = JSON.parse(tokens[0].content);
-        } catch (e) {
-          tokenData = { access_token: tokens[0].content };
-        }
-        
-        const accessToken = tokenData.access_token;
-        if (!accessToken) {
-          return { allowed: true, summary: "I need to connect to your calendar. Would you like me to set that up?" };
-        }
-        
-        // Get today's events
-        const now = new Date();
-        const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
-        const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).toISOString();
-        
-        const calResult = await httpsRequest({
-          hostname: 'www.googleapis.com',
-          path: '/calendar/v3/calendars/primary/events?timeMin=' + encodeURIComponent(startOfDay) + '&timeMax=' + encodeURIComponent(endOfDay) + '&singleEvents=true&orderBy=startTime',
-          method: 'GET',
-          headers: {
-            'Authorization': 'Bearer ' + accessToken,
-            'Accept': 'application/json'
-          }
-        });
-        
-        if (calResult.status === 200) {
-          const calData = JSON.parse(calResult.data.toString());
-          const events = calData.items || [];
-          
-          if (events.length === 0) {
-            return { allowed: true, count: 0, summary: "Your calendar is clear today. Nothing scheduled - a good day to focus on what matters most to you." };
-          }
-          
-          // Build warm summary
-          const eventNames = events.slice(0, 3).map(e => e.summary || 'Untitled').join(', ');
-          if (events.length === 1) {
-            const e = events[0];
-            const time = e.start?.dateTime ? new Date(e.start.dateTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : 'today';
-            return { allowed: true, count: 1, summary: 'You have one thing on your calendar today - "' + e.summary + '" at ' + time + '. Would you like me to tell you more about it?' };
-          } else {
-            return { allowed: true, count: events.length, summary: 'You have ' + events.length + ' things on your calendar today, including ' + eventNames + '. Want me to walk you through them?' };
-          }
-        } else if (calResult.status === 401) {
-          return { allowed: true, needsReauth: true, summary: "My calendar connection needs a refresh. Could you reconnect Google Calendar when you get a chance?" };
-        }
-      }
+    // Filter to upcoming events only
+    const now = Math.floor(Date.now() / 1000);
+    const upcoming = allEvents.filter(e => (e.when?.start_time || 0) >= now - 3600); // Within last hour or future
+    
+    if (upcoming.length === 0) {
+      return { allowed: true, count: 0, summary: "Your calendar is clear. Nothing scheduled - a good day to focus on what matters most." };
     }
     
-    return { allowed: true, summary: "I do not have calendar access set up yet. Would you like me to connect to your Google Calendar?" };
+    // Build warm summary
+    const eventList = upcoming.slice(0, 5).map(e => {
+      const title = e.title || 'Event';
+      const startTime = e.when?.start_time;
+      const timeStr = startTime ? new Date(startTime * 1000).toLocaleString('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit' }) : '';
+      return title + (timeStr ? ' (' + timeStr + ')' : '');
+    });
+    
+    const summary = 'You have ' + upcoming.length + ' upcoming events: ' + eventList.join(', ') + '. Want me to give you details on any of these?';
+    
+    return { allowed: true, count: upcoming.length, summary: summary, events: upcoming };
     
   } catch (e) {
-    console.log('[RADAR] Error:', e.message);
-    return { allowed: true, summary: "I had trouble checking your calendar. Let me try again." };
+    console.log('[RADAR] Nylas calendar error:', e.message);
+    return { allowed: true, summary: "I had a brief hiccup checking your calendar. Let me try that again." };
   }
 }
-
 // ═══════════════════════════════════════════════════════════════════════════════
 // ⬡B:AIR:REACH.AGENTS.PRESS:FUNC:news.search:v2.1.0:20260214⬡
 // PRESS Agent - Proactive Real-time Event and Story Scanner
@@ -8626,10 +8612,176 @@ Phone: (336) 389-8116</p>
         // Only process new messages
         if (!eventType.includes('message.created') && !eventType.includes('message')) continue;
         
+        // ═══════════════════════════════════════════════════════════════════════════
+        // ⬡B:GRIT.FEATURE:EMAIL_REPLY_HANDLER:20260218⬡
+        // INTELLIGENT EMAIL REPLY - ABA responds to replies to Claudette's emails
+        // Flow: Email → Nylas Webhook → AIR → Response → Claudette sends reply
+        // ═══════════════════════════════════════════════════════════════════════════
+        
         const messageData = event.object || event.data || event;
-        const from = (messageData.from || []).map(f => f.email || f).join(', ').toLowerCase();
+        const fromList = messageData.from || [];
+        const fromEmail = fromList.length > 0 ? (fromList[0].email || fromList[0]) : '';
+        const fromName = fromList.length > 0 ? (fromList[0].name || fromEmail.split('@')[0]) : 'Someone';
         const subject = messageData.subject || '';
         const emailBody = messageData.body || messageData.snippet || '';
+        const toList = messageData.to || [];
+        const replyToMessageId = messageData.reply_to_message_id || messageData.in_reply_to || null;
+        const threadId = messageData.thread_id || null;
+        
+        // Check if this is a reply TO Claudette (ABA's email identity)
+        const isToClaudette = toList.some(t => 
+          (t.email || t || '').toLowerCase().includes('claudette@globalmajoritygroup.com')
+        );
+        
+        // Skip if it's FROM Claudette (our own outbound email)
+        const isFromClaudette = fromEmail.toLowerCase().includes('claudette@globalmajoritygroup.com');
+        
+        if (isToClaudette && !isFromClaudette && emailBody) {
+          console.log('[IMAN REPLY] Incoming email TO Claudette from:', fromEmail);
+          
+          // Look up sender in brain to get HAM identity
+          let senderIdentity = { name: fromName, email: fromEmail, trust: 'T5' }; // Default low trust
+          try {
+            const hamLookup = await httpsRequest({
+              hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+              path: '/rest/v1/aba_memory?content=ilike.*' + encodeURIComponent(fromEmail) + '*&memory_type=eq.ham_identity&limit=1',
+              method: 'GET',
+              headers: {
+                'apikey': SUPABASE_ANON,
+                'Authorization': 'Bearer ' + SUPABASE_ANON
+              }
+            });
+            if (hamLookup.status === 200) {
+              const hamData = JSON.parse(hamLookup.data.toString());
+              if (hamData.length > 0) {
+                try {
+                  const ham = JSON.parse(hamData[0].content);
+                  senderIdentity = { ...senderIdentity, ...ham };
+                  console.log('[IMAN REPLY] Found HAM:', ham.name, 'Trust:', ham.trust);
+                } catch (e) {}
+              }
+            }
+          } catch (e) { console.log('[IMAN REPLY] HAM lookup error:', e.message); }
+          
+          // Get conversation history from brain (previous emails in thread)
+          let conversationHistory = [];
+          if (threadId) {
+            try {
+              const historyLookup = await httpsRequest({
+                hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+                path: '/rest/v1/aba_memory?content=ilike.*' + encodeURIComponent(threadId) + '*&memory_type=eq.email_thread&order=created_at.asc&limit=10',
+                method: 'GET',
+                headers: {
+                  'apikey': SUPABASE_ANON,
+                  'Authorization': 'Bearer ' + SUPABASE_ANON
+                }
+              });
+              if (historyLookup.status === 200) {
+                const historyData = JSON.parse(historyLookup.data.toString());
+                conversationHistory = historyData.map(h => {
+                  try { return JSON.parse(h.content); } catch { return null; }
+                }).filter(Boolean);
+                console.log('[IMAN REPLY] Found', conversationHistory.length, 'previous messages in thread');
+              }
+            } catch (e) { console.log('[IMAN REPLY] History lookup error:', e.message); }
+          }
+          
+          // Route through AIR with full context
+          try {
+            const airPrompt = 'You are ABA responding to an email. The sender is ' + fromName + ' (' + fromEmail + '). ' +
+              'Trust level: ' + senderIdentity.trust + '. ' +
+              (conversationHistory.length > 0 ? 'Previous conversation context: ' + JSON.stringify(conversationHistory.slice(-3)) + '. ' : '') +
+              'Subject: ' + subject + '. Their message: ' + emailBody.substring(0, 2000);
+            
+            const airResult = await AIR_text(airPrompt, conversationHistory.map(h => ({
+              role: h.from?.includes('claudette') ? 'assistant' : 'user',
+              content: h.body || h.snippet || ''
+            })));
+            
+            if (airResult && airResult.response) {
+              console.log('[IMAN REPLY] AIR generated response, sending via Claudette...');
+              
+              // Send reply via Nylas (Claudette)
+              const NYLAS_KEY = process.env.NYLAS_API_KEY || 'nyk_v0_eeBniYFxPAMuK30DejqDNIFfEyMQiH6ATEnTEhMiutJzvwor3c2ZuhC0Oeicl2vn';
+              const CLAUDETTE_GRANT = '41a3ace1-1c1e-47f3-b017-e5fd71ea1f3a';
+              
+              // Format response as HTML with signature
+              const responseHtml = '<!DOCTYPE html><html><head><meta charset="utf-8"></head>' +
+                '<body style="font-family: Arial, sans-serif; font-size: 14px; color: #333; line-height: 1.6;">' +
+                airResult.response.split(/\n\n+/).map(p => '<p style="margin: 0 0 16px 0;">' + p.replace(/\n/g, '<br>') + '</p>').join('') +
+                '<br><br>' +
+                '<div style="font-family: Arial, sans-serif; font-size: 14px; color: #333;">' +
+                '<p style="margin: 0; font-weight: bold;">Claudette Aims</p>' +
+                '<p style="margin: 0; color: #666;">Executive Assistant</p>' +
+                '<p style="margin: 0; color: #8B5CF6;">Global Majority Group</p>' +
+                '<p style="margin: 8px 0 0 0; font-size: 12px; color: #888;"><em>Powered by ABA — A Better AI</em> 🟣</p>' +
+                '</div>' +
+                '</body></html>';
+              
+              const replyPayload = {
+                subject: subject.startsWith('Re:') ? subject : 'Re: ' + subject,
+                body: responseHtml,
+                to: [{ email: fromEmail, name: fromName }]
+              };
+              if (replyToMessageId) replyPayload.reply_to_message_id = replyToMessageId;
+              
+              const sendResult = await httpsRequest({
+                hostname: 'api.us.nylas.com',
+                path: '/v3/grants/' + CLAUDETTE_GRANT + '/messages/send',
+                method: 'POST',
+                headers: {
+                  'Authorization': 'Bearer ' + NYLAS_KEY,
+                  'Content-Type': 'application/json'
+                }
+              }, JSON.stringify(replyPayload));
+              
+              const sendData = JSON.parse(sendResult.data.toString());
+              
+              if (sendData.data?.id) {
+                console.log('[IMAN REPLY] Reply sent! Message ID:', sendData.data.id);
+                
+                // Store in brain for thread continuity
+                await httpsRequest({
+                  hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+                  path: '/rest/v1/aba_memory',
+                  method: 'POST',
+                  headers: {
+                    'apikey': SUPABASE_KEY || SUPABASE_ANON,
+                    'Authorization': 'Bearer ' + (SUPABASE_KEY || SUPABASE_ANON),
+                    'Content-Type': 'application/json',
+                    'Prefer': 'return=minimal'
+                  }
+                }, JSON.stringify({
+                  content: JSON.stringify({
+                    thread_id: threadId,
+                    from: 'claudette@globalmajoritygroup.com',
+                    to: fromEmail,
+                    subject: replyPayload.subject,
+                    body: airResult.response,
+                    timestamp: Date.now()
+                  }),
+                  memory_type: 'email_thread',
+                  categories: ['email', 'reply', 'claudette'],
+                  importance: 6,
+                  source: 'iman_reply_' + Date.now(),
+                  tags: ['email', 'thread', threadId || 'no_thread']
+                }));
+                
+                results.push({ type: 'reply_sent', to: fromEmail, subject: replyPayload.subject });
+              } else {
+                console.log('[IMAN REPLY] Send failed:', JSON.stringify(sendData));
+              }
+            }
+          } catch (e) {
+            console.log('[IMAN REPLY] AIR error:', e.message);
+          }
+          
+          continue; // Skip other processing for this email
+        }
+        
+        // ═══════ EXISTING LOGIC BELOW (Idealist, etc) ═══════
+        const from = (messageData.from || []).map(f => f.email || f).join(', ').toLowerCase();
+        
         
         // Check if it's from Idealist
         const isIdealist = from.includes('idealist.org') || 
