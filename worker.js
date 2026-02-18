@@ -1047,6 +1047,18 @@ const NYLAS_API_KEY = process.env.NYLAS_API_KEY;
 const NYLAS_CLIENT_ID = process.env.NYLAS_CLIENT_ID;
 const NYLAS_API_URI = process.env.NYLAS_API_URI || 'https://api.us.nylas.com';
 
+// CLAUDETTE SIGNATURE
+const CLAUDETTE_SIGNATURE = `
+<br><br>
+<div style="font-family: Arial, sans-serif; font-size: 14px; color: #333;">
+  <p style="margin: 0; font-weight: bold;">Claudette Aims</p>
+  <p style="margin: 0; color: #666;">Executive Assistant</p>
+  <p style="margin: 0; color: #8B5CF6;">Global Majority Group</p>
+  <p style="margin: 8px 0 0 0; font-size: 12px; color: #888;">
+    <em>Powered by ABA — A Better AI</em> 🟣
+  </p>
+</div>`;
+
 // ⬡B:AIR:REACH.CONFIG.TWILIO_SMS:CONFIG:sms.outbound.cara:AIR→REACH→CARA:T8:v1.5.0:20260213:s1m2s⬡
 const TWILIO_SID = process.env.TWILIO_ACCOUNT_SID;
 const TWILIO_AUTH = process.env.TWILIO_AUTH_TOKEN;
@@ -5041,7 +5053,7 @@ function getSilenceTimeout(turnCount, lastResponseLength) {
 
 // ⬡B:AIR:REACH.EMAIL.GRANT:CODE:email.nylas.grant_lookup:REACH→BRAIN→NYLAS:T9:v1.8.0:20260214:g1r2a⬡
 async function getActiveNylasGrant() {
-  if (!SUPABASE_KEY) return null;
+  const CLAUDETTE_GRANT = '41a3ace1-1c1e-47f3-b017-e5fd71ea1f3a'; if (!SUPABASE_KEY) return CLAUDETTE_GRANT;
   try {
     const result = await httpsRequest({
       hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
@@ -5060,7 +5072,7 @@ async function getActiveNylasGrant() {
   } catch (e) {
     console.log('[IMAN] Grant lookup error: ' + e.message);
   }
-  return null;
+  return '41a3ace1-1c1e-47f3-b017-e5fd71ea1f3a'; // claudette default
 }
 
 // ⬡B:AIR:REACH.EMAIL.SEND_FROM_CALL:CODE:email.followup.postcall:AIR→IMAN→NYLAS→RECIPIENT:T9:v1.8.0:20260214:e1f2c⬡
@@ -8278,9 +8290,17 @@ Phone: (336) 389-8116</p>
         return jsonResponse(res, 503, { error: 'No email account connected. Visit /api/nylas/connect to authorize.' });
       }
       
+      // Format as HTML with signature
+      const htmlBody = `<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head>
+<body style="font-family: Arial, sans-serif; font-size: 14px; color: #333; line-height: 1.6;">
+${emailBody.split('\n\n').map(p => `<p style="margin: 0 0 16px 0;">${p.replace(/\n/g, '<br>')}</p>`).join('')}
+${CLAUDETTE_SIGNATURE}
+</body></html>`;
+      
       const emailPayload = {
         subject: subject,
-        body: emailBody,
+        body: htmlBody,
         to: Array.isArray(to) ? to.map(e => ({ email: e })) : [{ email: to }],
       };
       if (reply_to_message_id) emailPayload.reply_to_message_id = reply_to_message_id;
