@@ -944,8 +944,8 @@ async function ABACIA_IMAN_getInbox() {
     
     if (result.status === 200) {
       const data = JSON.parse(result.data.toString());
-      if (data.success && data.emails) {
-        console.log('[ABACIA BRIDGE] Found', data.emails.length, 'emails');
+      if (data.success && data.messages) {
+        console.log('[ABACIA BRIDGE] Found', data.messages.length, 'emails');
         return data;
       }
     }
@@ -1927,10 +1927,10 @@ async function IMAN_readEmails(callerIdentity) {
   try {
     console.log('[IMAN] Trying ABACIA-SERVICES for email...');
     const abaciaResult = await ABACIA_IMAN_getInbox();
-    if (abaciaResult.success && abaciaResult.emails && abaciaResult.emails.length > 0) {
-      const emails = abaciaResult.emails;
+    if (abaciaResult.success && abaciaResult.messages && abaciaResult.messages.length > 0) {
+      const emails = abaciaResult.messages;
       const latest = emails[0];
-      const sender = latest.from?.[0]?.name || latest.from?.[0]?.email || 'Someone';
+      const sender = latest.fromName || latest.from || 'Someone';
       const subject = latest.subject || 'No subject';
       
       if (emails.length === 1) {
@@ -6048,6 +6048,7 @@ function jsonResponse(res, status, data) {
  * ╚══════════════════════════════════════════════════════════════════════════════╝
  */
 // ⬡B:AIR:REACH.API.AIR_TEXT:CODE:routing.text.chat:USER→REACH→AIR→AGENTS→MODEL→USER:T8:v1.5.0:20260213:a1t2x⬡
+// ⬡B:AIR:REACH.API.AIR_TEXT:CODE:routing.text.chat:USER→REACH→AIR→AGENTS→MODEL→USER:T8:v1.5.0:20260213:a1t2x⬡
 // AIR for text chat (higher token limits than voice)
 async function AIR_text(userMessage, history) {
   const lukeAnalysis = await LUKE_process(userMessage);
@@ -6056,8 +6057,23 @@ async function AIR_text(userMessage, history) {
   }
   const coleResult = await COLE_scour(lukeAnalysis);
   const judeResult = await JUDE_findAgents(lukeAnalysis);
+  
+  // ⬡B:GRIT.FIX:DISPATCH_BEFORE_LLM:20260218⬡
+  // TRY AGENT DISPATCH FIRST - actually execute calendar/email/etc
+  const dispatchResult = await AIR_DISPATCH(lukeAnalysis, judeResult, { name: 'brandon', trust: 10 });
+  if (dispatchResult && dispatchResult.handled) {
+    console.log('[AIR-TEXT] Agent ' + dispatchResult.agent + ' handled request');
+    return { 
+      response: dispatchResult.data, 
+      isGoodbye: false, 
+      missionNumber: '⬡M:' + dispatchResult.agent + ':' + Date.now() + '⬡',
+      agent: dispatchResult.agent,
+      type: dispatchResult.type
+    };
+  }
+  
+  // No agent handled it - proceed with LLM
   const missionPackage = PACK_assemble(lukeAnalysis, coleResult, judeResult, history || [], null, null);
-
   let response = null;
 
   // PRIMARY: Gemini Flash 2.0
