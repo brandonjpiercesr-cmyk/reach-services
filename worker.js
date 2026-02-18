@@ -8593,6 +8593,19 @@ Phone: (336) 389-8116</p>
   // L6: AIR | L4: EMAIL | L3: IMAN | L2: worker.js | L1: nylasWebhook
   // Nylas sends message.created events here. If from Idealist → auto-parse jobs.
   // ═══════════════════════════════════════════════════════════════════════
+  // ⬡B:GRIT.FIX:NYLAS_WEBHOOK_GET:20260218⬡
+  // Nylas sends challenge verification as GET request
+  if (path === '/api/nylas/webhook' && method === 'GET') {
+    const url = new URL(req.url, 'http://localhost');
+    const challenge = url.searchParams.get('challenge');
+    if (challenge) {
+      console.log('[NYLAS WEBHOOK] Challenge received:', challenge);
+      res.writeHead(200, { 'Content-Type': 'text/plain' });
+      return res.end(challenge);
+    }
+    return jsonResponse(res, 200, { status: 'webhook ready' });
+  }
+
   if (path === '/api/nylas/webhook' && method === 'POST') {
     try {
       const body = await parseBody(req);
