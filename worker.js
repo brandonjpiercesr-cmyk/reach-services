@@ -7404,6 +7404,60 @@ Phone: (336) 389-8116</p>
       }, storeData);
 
       console.log('[TASTE] Transcript stored in brain');
+      // ═══════════════════════════════════════════════════════════════════════════
+      // ⬡B:REACH.MARS.AUTO.TRIGGER:FEATURE:realtime.mars:20260218⬡
+      // AUTO-TRIGGER MARS for completed transcripts 5+ minutes
+      // Route to ABACIA's checkMARSTrigger endpoint
+      // ═══════════════════════════════════════════════════════════════════════════
+      const duration = body.duration_seconds || body.duration || 0;
+      const isCompletedTranscript = body.finished_at || body.id || duration > 0;
+      
+      if (isCompletedTranscript && duration >= 300 && transcript.length >= 500) {
+        console.log('[MARS TRIGGER] Long transcript detected (' + Math.round(duration/60) + ' min), triggering MARS...');
+        
+        try {
+          const marsResult = await httpsRequest({
+            hostname: 'abacia-services.onrender.com',
+            path: '/api/air/process',
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            }
+          }, JSON.stringify({
+            input: 'Generate MARS report',
+            target_agent: 'MARK',
+            transcript: transcript,
+            duration: duration,
+            participants: body.speakers || [],
+            source: 'omi_auto_' + (body.id || Date.now()),
+            auto_email: true
+          }));
+          
+          console.log('[MARS TRIGGER] ABACIA MARK response:', marsResult?.status || 'unknown');
+          
+          // Store MARS trigger event
+          await httpsRequest({
+            hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+            path: '/rest/v1/aba_memory',
+            method: 'POST',
+            headers: {
+              'apikey': SUPABASE_KEY || SUPABASE_ANON,
+              'Authorization': 'Bearer ' + (SUPABASE_KEY || SUPABASE_ANON),
+              'Content-Type': 'application/json',
+              'Prefer': 'return=minimal'
+            }
+          }, JSON.stringify({
+            content: 'MARS AUTO-TRIGGER: Duration ' + Math.round(duration/60) + ' min, Length ' + transcript.length + ' chars',
+            memory_type: 'mars_trigger',
+            source: 'reach_mars_auto_' + Date.now(),
+            importance: 8,
+            tags: ['mars', 'auto_trigger', 'omi']
+          }));
+          
+        } catch (marsError) {
+          console.log('[MARS TRIGGER] Error:', marsError.message);
+        }
+      }
       
       // ═══════════════════════════════════════════════════════════════════════════
       // ⬡B:ABCD:BOTH:OMI.AIR.ROUTING:WIRE:v2.5.1:20260214⬡
@@ -7872,6 +7926,85 @@ Phone: (336) 389-8116</p>
   // Send email via Nylas (from claudette@globalmajoritygroup.com)
   // ROUTING: AIR→IMAN→REACH→NYLAS→SMTP→RECIPIENT
   // ═══════════════════════════════════════════════════════════════════════
+  if (path === '/api/email/send' && method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      const { to, subject, body: emailBody, reply_to_message_id } = body;
+      
+      if (!to || !subject || !emailBody) {
+        return jsonResponse(res, 400, { error: 'to, subject, and body required' });
+      }
+      
+      // Get the active grant ID from brain
+      const grantId = '41a3ace1-1c1e-47f3-b017-e5fd71ea1f3a'; // CLAUDETTE - ABA identity
+      if (!grantId) {
+        return jsonResponse(res, 503, { error: 'No email account connected. Visit /api/nylas/auth to connect.' });
+      }
+      
+      // Send via Nylas
+      const toList = Array.isArray(to) ? to : [{ email: to, name: to.split('@')[0] }];
+      
+      const emailPayload = {
+        subject: subject,
+        body: htmlBody,
+        subject: subject,
+        body: emailBody,
+        to: toList.map(t => typeof t === 'string' ? { email: t } : t),
+        
+      };
+      
+      if (reply_to_message_id) {
+        emailPayload.reply_to_message_id = reply_to_message_id;
+      }
+      
+      const sendResult = await httpsRequest({
+        hostname: 'api.us.nylas.com',
+        path: '/v3/grants/' + grantId + '/messages/send',
+        method: 'POST',
+        headers: {
+          'Authorization': 'Bearer ' + NYLAS_API_KEY,
+          'Content-Type': 'application/json'
+        }
+      }, JSON.stringify(emailPayload));
+      
+      const sendData = JSON.parse(sendResult.data.toString());
+      
+      if (sendData.data?.id || sendData.id) {
+        const msgId = sendData.data?.id || sendData.id;
+        console.log('[IMAN] Email sent! ID: ' + msgId + ' To: ' + JSON.stringify(toList));
+        
+        // Log to brain
+        if (SUPABASE_KEY) {
+          await httpsRequest({
+            hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+            path: '/rest/v1/aba_memory',
+            method: 'POST',
+            headers: {
+              'apikey': SUPABASE_KEY,
+              'Authorization': 'Bearer ' + SUPABASE_KEY,
+              'Content-Type': 'application/json',
+              'Prefer': 'return=minimal'
+            }
+          }, JSON.stringify({
+            content: 'EMAIL SENT via IMAN | From: claudette@globalmajoritygroup.com | To: ' + JSON.stringify(toList) + ' | Subject: ' + subject + ' | Date: ' + new Date().toISOString(),
+            memory_type: 'email_sent',
+            categories: ['email', 'sent', 'iman'],
+            importance: 6,
+            is_system: true,
+            source: 'iman_email_' + msgId,
+            tags: ['email', 'sent', 'iman', 'nylas']
+          }));
+        }
+        
+        return jsonResponse(res, 200, { success: true, message_id: msgId });
+      } else {
+        console.log('[IMAN] Send failed:', JSON.stringify(sendData));
+        return jsonResponse(res, sendResult.status, { error: sendData.error || sendData });
+      }
+    } catch (e) {
+      return jsonResponse(res, 500, { error: e.message });
+    }
+  }
 
   // ═══════════════════════════════════════════════════════════════════════
   // ⬡B:AIR:REACH.API.NYLAS_AUTH:CODE:email.oauth.start:USER→REACH→NYLAS:T9:v1.8.0:20260214:n1a2s⬡
@@ -11497,3 +11630,4 @@ console.log('[AIR-LOOP] ━━━━━━━━━━━━━━━━━━�
 setTimeout(runAutonomousLoop, 30000);
 // Then every 5 minutes
 setInterval(runAutonomousLoop, LOOP_INTERVAL);
+
