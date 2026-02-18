@@ -3302,7 +3302,7 @@ async function checkEmails(pulseId) {
   
   try {
     // Get Nylas grant ID
-    const grantId = await getActiveNylasGrant();
+    const grantId = '41a3ace1-1c1e-47f3-b017-e5fd71ea1f3a'; // CLAUDETTE - ABA identity
     if (!grantId) {
       console.log('[PULSE:EMAIL] No Nylas grant - skipping');
       return;
@@ -3961,7 +3961,7 @@ async function IMAN_sendApprovedEmail(draftId) {
     const draft = JSON.parse(draftEntry.content);
     
     // Send via Nylas
-    const grantId = await getActiveNylasGrant();
+    const grantId = '41a3ace1-1c1e-47f3-b017-e5fd71ea1f3a'; // CLAUDETTE - ABA identity
     if (!grantId) {
       console.error('[IMAN] No Nylas grant');
       return null;
@@ -5077,7 +5077,7 @@ async function getActiveNylasGrant() {
 
 // ⬡B:AIR:REACH.EMAIL.SEND_FROM_CALL:CODE:email.followup.postcall:AIR→IMAN→NYLAS→RECIPIENT:T9:v1.8.0:20260214:e1f2c⬡
 async function sendEmailFromCall(toEmail, toName, subject, htmlBody) {
-  const grantId = await getActiveNylasGrant();
+  const grantId = '41a3ace1-1c1e-47f3-b017-e5fd71ea1f3a'; // CLAUDETTE - ABA identity
   if (!grantId) {
     console.log('[IMAN] No grant - cannot send email');
     return { success: false, reason: 'no_grant' };
@@ -6263,7 +6263,7 @@ function IMAN_cancelEmail(countdownId) {
 // Actually send the email via Nylas
 async function IMAN_sendEmail(draft) {
   try {
-    const grantId = await getActiveNylasGrant();
+    const grantId = '41a3ace1-1c1e-47f3-b017-e5fd71ea1f3a'; // CLAUDETTE - ABA identity
     if (!grantId) {
       console.error('[IMAN] No Nylas grant available');
       return { success: false, reason: 'No Nylas grant' };
@@ -7882,7 +7882,7 @@ Phone: (336) 389-8116</p>
       }
       
       // Get the active grant ID from brain
-      const grantId = await getActiveNylasGrant();
+      const grantId = '41a3ace1-1c1e-47f3-b017-e5fd71ea1f3a'; // CLAUDETTE - ABA identity
       if (!grantId) {
         return jsonResponse(res, 503, { error: 'No email account connected. Visit /api/nylas/auth to connect.' });
       }
@@ -8285,7 +8285,7 @@ Phone: (336) 389-8116</p>
       }
       
       // Get grant_id from brain
-      const grantId = await getActiveNylasGrant();
+      const grantId = '41a3ace1-1c1e-47f3-b017-e5fd71ea1f3a'; // CLAUDETTE - ABA identity
       if (!grantId) {
         return jsonResponse(res, 503, { error: 'No email account connected. Visit /api/nylas/connect to authorize.' });
       }
@@ -9609,7 +9609,7 @@ We Are All ABA.`;
   // GET /api/nylas/status - Check if Nylas email is connected (UI polls this)
   if (path === '/api/nylas/status' && method === 'GET') {
     try {
-      const grantId = await getActiveNylasGrant();
+      const grantId = '41a3ace1-1c1e-47f3-b017-e5fd71ea1f3a'; // CLAUDETTE - ABA identity
       if (grantId) {
         // Also get the email from brain
         const grantInfo = await httpsRequest({
@@ -9637,7 +9637,7 @@ We Are All ABA.`;
   // L6: AIR | L4: EMAIL | L3: IMAN | L2: worker.js | L1: nylasInboxRead
   if (path.startsWith('/api/nylas/inbox') && method === 'GET') {
     try {
-      const grantId = await getActiveNylasGrant();
+      const grantId = '41a3ace1-1c1e-47f3-b017-e5fd71ea1f3a'; // CLAUDETTE - ABA identity
       if (!grantId) return jsonResponse(res, 403, { error: 'No email connected. Use Nylas OAuth to connect.' });
 
       // Parse query params
