@@ -3385,7 +3385,7 @@ async function checkEmails(pulseId) {
           let seededCount = 0;
           for (const jobUrl of jobUrls) {
             const slug = jobUrl.split('/').pop();
-            const titleClean = slug.replace(/^[a-f0-9]{20,}-/, '').replace(/-/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+            const titleClean = slug.replace(/^[a-f0-9]{20}-/, '').replace(/-/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
             
             // Dedup check
             const existing = await httpsRequest({
@@ -4794,7 +4794,7 @@ async function postCallAutomation(session) {
       const emailResults = JSON.parse(emailSearch.data.toString());
       // Extract email if found
       if (emailResults.length > 0) {
-        const emailMatch = emailResults[0].content.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+        const emailMatch = emailResults[0].content.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2}/);
         if (emailMatch) {
           const callerEmail = emailMatch[0];
           const emailHtml = '<div style="font-family:system-ui;max-width:600px;margin:0 auto"><h2 style="color:#333">Hey ' + callerName + '!</h2><p>It was so great talking with you on the phone. Brandon wanted me to follow up and say thanks for checking us out.</p><p>You are part of something special. ABA is being built to be more than just an AI assistant - a true life partner that actually does the work for you.</p><p>When ABACUS drops, you will be the first to know.</p><p>Talk soon!</p><p style="color:#666"><strong>ABA</strong> (A Better AI)<br>Global Majority Group<br><em>claudette@globalmajoritygroup.com</em></p></div>';
@@ -5084,7 +5084,7 @@ async function sendEmailFromCall(toEmail, toName, subject, htmlBody) {
       subject: subject,
       body: htmlBody,
       to: [{ email: toEmail, name: toName || toEmail.split('@')[0] }],
-      tracking_options: { opens: true }
+      
     }));
     
     const data = JSON.parse(result.data.toString());
@@ -7882,7 +7882,7 @@ Phone: (336) 389-8116</p>
         subject: subject,
         body: emailBody,
         to: toList.map(t => typeof t === 'string' ? { email: t } : t),
-        tracking_options: { opens: true, links: true }
+        
       };
       
       if (reply_to_message_id) {
