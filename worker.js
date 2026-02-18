@@ -7892,6 +7892,8 @@ Phone: (336) 389-8116</p>
       
       const emailPayload = {
         subject: subject,
+        body: htmlBody,
+        subject: subject,
         body: emailBody,
         to: toList.map(t => typeof t === 'string' ? { email: t } : t),
         
@@ -8290,13 +8292,25 @@ Phone: (336) 389-8116</p>
         return jsonResponse(res, 503, { error: 'No email account connected. Visit /api/nylas/connect to authorize.' });
       }
       
-      // Format as HTML with signature
-      const htmlBody = `<!DOCTYPE html>
-<html><head><meta charset="utf-8"></head>
-<body style="font-family: Arial, sans-serif; font-size: 14px; color: #333; line-height: 1.6;">
-${emailBody.split('\n\n').map(p => `<p style="margin: 0 0 16px 0;">${p.replace(/\n/g, '<br>')}</p>`).join('')}
-${CLAUDETTE_SIGNATURE}
-</body></html>`;
+      // Format as HTML with signature - EXPLICIT BUILD
+      let htmlParagraphs = '';
+      const paragraphs = emailBody.split(/\n\n+/);
+      for (let i = 0; i < paragraphs.length; i++) {
+        const p = paragraphs[i].replace(/\n/g, '<br>');
+        htmlParagraphs += '<p style="margin: 0 0 16px 0; font-family: Arial, sans-serif; font-size: 14px; color: #333;">' + p + '</p>';
+      }
+      
+      const htmlBody = '<!DOCTYPE html><html><head><meta charset="utf-8"></head>' +
+        '<body style="font-family: Arial, sans-serif; font-size: 14px; color: #333; line-height: 1.6;">' +
+        htmlParagraphs +
+        '<br><br>' +
+        '<div style="font-family: Arial, sans-serif; font-size: 14px; color: #333;">' +
+        '<p style="margin: 0; font-weight: bold;">Claudette Aims</p>' +
+        '<p style="margin: 0; color: #666;">Executive Assistant</p>' +
+        '<p style="margin: 0; color: #8B5CF6;">Global Majority Group</p>' +
+        '<p style="margin: 8px 0 0 0; font-size: 12px; color: #888;"><em>Powered by ABA — A Better AI</em> 🟣</p>' +
+        '</div>' +
+        '</body></html>';
       
       const emailPayload = {
         subject: subject,
