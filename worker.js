@@ -3137,6 +3137,331 @@ async function TRIGGER_systemAlert(alert) {
 // POST /api/air/trigger/job     → TRIGGER_jobDeadline
 // POST /api/air/trigger/system  → TRIGGER_systemAlert
 // POST /api/air/escalate        → Direct AIR_escalate (replaces old /api/escalate)
+// POST /api/air/think-tank      → AIR_thinkTank (Cook Session Protocol)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:AIR:REACH.THINK_TANK:CODE:intelligence.cook_session.processor:AIR→LUKE→COLE→MACE→TIM→AUDRA→PACK:T10:v1.0.0:20260219:t1k1t⬡
+// ═══════════════════════════════════════════════════════════════════════════════
+/**
+ * ╔══════════════════════════════════════════════════════════════════════════════╗
+ * ║ THINK TANK - Cook Session Protocol                                           ║
+ * ╠══════════════════════════════════════════════════════════════════════════════╣
+ * ║ Purpose: Transform raw voice transcripts into structured think-tank meetings ║
+ * ║ Route:   POST /api/air/think-tank                                            ║
+ * ║ Flow:    TRANSCRIPT → LUKE → COLE → MACE → TIM → AUDRA → PACK → BRAIN      ║
+ * ║                                                                              ║
+ * ║ AGENT ROLES IN THINK TANK:                                                   ║
+ * ║  LUKE  - Extract ideas, decisions, requirements, action items                ║
+ * ║  COLE  - Look up related brain context and prior decisions                   ║
+ * ║  MACE  - Architect: structure ideas into technical implementation plans      ║
+ * ║  TIM   - Validate: catch contradictions, flag risks, verify feasibility      ║
+ * ║  AUDRA - Document: generate structured meeting minutes and 4Cs docs          ║
+ * ║  PACK  - Package: final formatted output with ACL tags and brain storage     ║
+ * ╚══════════════════════════════════════════════════════════════════════════════╝
+ *
+ * ROUTING TRACE: USER*REACH*AIR*LUKE*COLE*MACE*TIM*AUDRA*PACK*BRAIN*USER
+ * VERSION: v1.0.0-P1-S1
+ * CREATED: Feb 19, 2026
+ */
+
+// ⬡B:AIR:REACH.THINK_TANK.DEEP_MODEL:FUNC:model.deep.reasoning:AIR→MODEL:T10:v1.0.0:20260219:d1m1l⬡
+async function callModelDeep(prompt, maxTokens = 2000) {
+  // Use Claude Sonnet for deep reasoning (Think Tank needs quality over speed)
+  if (ANTHROPIC_KEY) {
+    try {
+      const result = await httpsRequest({
+        hostname: 'api.anthropic.com',
+        path: '/v1/messages',
+        method: 'POST',
+        headers: {
+          'x-api-key': ANTHROPIC_KEY,
+          'anthropic-version': '2023-06-01',
+          'Content-Type': 'application/json'
+        }
+      }, JSON.stringify({
+        model: 'claude-sonnet-4-5-20250929',
+        max_tokens: maxTokens,
+        messages: [{ role: 'user', content: prompt }]
+      }));
+      const json = JSON.parse(result.data.toString());
+      if (json.content?.[0]?.text) {
+        return json.content[0].text;
+      }
+    } catch (e) {
+      console.log('[THINK TANK] Sonnet failed, falling back to Gemini:', e.message);
+    }
+  }
+  
+  // Fallback to Gemini Flash for resilience
+  if (GEMINI_KEY) {
+    try {
+      const result = await httpsRequest({
+        hostname: 'generativelanguage.googleapis.com',
+        path: '/v1beta/models/gemini-2.0-flash:generateContent?key=' + GEMINI_KEY,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      }, JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { maxOutputTokens: maxTokens, temperature: 0.4 }
+      }));
+      const json = JSON.parse(result.data.toString());
+      if (json.candidates?.[0]?.content?.parts?.[0]?.text) {
+        return json.candidates[0].content.parts[0].text;
+      }
+    } catch (e) {
+      console.log('[THINK TANK] Gemini also failed:', e.message);
+    }
+  }
+
+  throw new Error('[THINK TANK] No model available for deep reasoning');
+}
+
+// ⬡B:AIR:REACH.THINK_TANK.MAIN:FUNC:cook_session.orchestrator:AIR→AGENTS:T10:v1.0.0:20260219:t1k2m⬡
+async function AIR_thinkTank(input) {
+  const { transcript, source, title, participants, sessionId } = input;
+  const tankId = `TANK-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  const startTime = Date.now();
+
+  console.log('');
+  console.log('╔══════════════════════════════════════════════════════════════╗');
+  console.log('║           *** THINK TANK SESSION ACTIVATED ***               ║');
+  console.log('╚══════════════════════════════════════════════════════════════╝');
+  console.log(`[THINK TANK] ID: ${tankId}`);
+  console.log(`[THINK TANK] Source: ${source || 'direct'}`);
+  console.log(`[THINK TANK] Transcript length: ${transcript?.length || 0} chars`);
+
+  if (!transcript || transcript.length < 20) {
+    return { success: false, error: 'Transcript too short. Minimum 20 characters.', tankId };
+  }
+
+  // ─── STEP 1: LUKE extracts raw intelligence ─────────────────────────────────
+  console.log('[THINK TANK] Step 1/6 → LUKE extracting intelligence...');
+  let lukeExtract;
+  try {
+    const lukeRaw = await callModelDeep(`You are LUKE (Listening and Understanding for Knowledge Extraction), an AI agent inside the ABA Think Tank.
+
+TASK: Extract ALL intelligence from this raw transcript. Do NOT summarize — extract EVERYTHING.
+
+TRANSCRIPT:
+${transcript}
+
+Respond in JSON ONLY (no markdown, no backticks):
+{
+  "ideas": ["idea 1", "idea 2"],
+  "decisions": ["decision 1"],
+  "requirements": ["req 1"],
+  "action_items": [{"task": "...", "owner": "Brandon|BJ|CJ|Eric|ABA|agent_name", "priority": "asap|high|medium|low", "auto_execute": true}],
+  "architecture_notes": ["arch note 1"],
+  "agent_mentions": ["VARA", "IMAN"],
+  "key_quotes": ["exact quote 1"],
+  "emotions": {"excitement": 0, "frustration": 0, "urgency": 0, "confidence": 0},
+  "topics": ["topic1", "topic2"],
+  "contradictions": ["contradiction if any"],
+  "unknowns": ["thing not sure about"]
+}`, 3000);
+
+    lukeExtract = JSON.parse(lukeRaw.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim());
+    console.log(`[THINK TANK] LUKE: ${lukeExtract.ideas?.length || 0} ideas, ${lukeExtract.action_items?.length || 0} actions`);
+  } catch (e) {
+    console.log('[THINK TANK] LUKE parse error:', e.message);
+    lukeExtract = { ideas: [], decisions: [], requirements: [], action_items: [], architecture_notes: [], agent_mentions: [], key_quotes: [], emotions: { excitement: 5, frustration: 0, urgency: 5, confidence: 5 }, topics: ['general'], contradictions: [], unknowns: [], raw: transcript.substring(0, 500) };
+  }
+
+  // ─── STEP 2: COLE searches brain for context ────────────────────────────────
+  console.log('[THINK TANK] Step 2/6 → COLE searching brain...');
+  let coleContext = { relatedMemories: [] };
+  try {
+    const searchTerms = [...(lukeExtract.topics || []), ...(lukeExtract.agent_mentions || [])].slice(0, 5);
+    const brainResults = [];
+    for (const term of searchTerms) {
+      try {
+        const searchResult = await httpsRequest({
+          hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+          path: `/rest/v1/aba_memory?content=ilike.*${encodeURIComponent(term)}*&order=importance.desc&limit=3`,
+          method: 'GET',
+          headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON }
+        });
+        const memories = JSON.parse(searchResult.data.toString());
+        if (Array.isArray(memories)) {
+          brainResults.push(...memories.map(m => ({ term, content: (m.content || '').substring(0, 300), type: m.memory_type, importance: m.importance })));
+        }
+      } catch (e) {}
+    }
+    coleContext.relatedMemories = brainResults.slice(0, 10);
+    console.log(`[THINK TANK] COLE: ${coleContext.relatedMemories.length} brain memories found`);
+  } catch (e) {
+    console.log('[THINK TANK] COLE error:', e.message);
+  }
+
+  // ─── STEP 3: MACE architects the implementation plan ────────────────────────
+  console.log('[THINK TANK] Step 3/6 → MACE structuring architecture...');
+  let maceArchitecture;
+  try {
+    const maceRaw = await callModelDeep(`You are MACE (Mason Architecture & Construction Engine), an AI agent inside the ABA Think Tank.
+
+TASK: Take LUKE's extracted intelligence and COLE's brain context, then architect a structured implementation plan.
+
+LUKE'S EXTRACTION:
+${JSON.stringify(lukeExtract, null, 2)}
+
+COLE'S BRAIN CONTEXT:
+${JSON.stringify(coleContext.relatedMemories.slice(0, 5), null, 2)}
+
+RULES:
+- Everything routes through AIR. No orphan processes.
+- ACL tagging format: ⬡B:domain.subdomain:TYPE:specific.tag⬡
+- Use existing agents (VARA=voice, IMAN=email, CARA=SMS, DIAL=calls, LUKE=analysis, COLE=context, JUDE=decisions, PACK=messaging)
+- No scaffold, no demo — real implementation only
+- Hierarchy: L6 AIR → L5 REACH → L4 Directors → L3 Managers → L2 Leads → L1 Code
+
+Respond in JSON ONLY:
+{
+  "implementation_plan": [{"phase": "P1", "title": "...", "spurts": ["S1: ...", "S2: ..."], "agents_involved": ["AGENT"], "files_affected": ["file.js"]}],
+  "new_agents_proposed": [{"name": "NAME", "full_name": "...", "department": "...", "purpose": "..."}],
+  "architecture_decisions": ["decision 1"],
+  "routing_traces": ["USER*AIR*AGENT*..."],
+  "dependencies": ["dep 1"],
+  "risk_flags": ["risk 1"],
+  "estimated_complexity": "low|medium|high|extreme"
+}`, 2500);
+
+    maceArchitecture = JSON.parse(maceRaw.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim());
+    console.log(`[THINK TANK] MACE: ${maceArchitecture.implementation_plan?.length || 0} phases, complexity=${maceArchitecture.estimated_complexity}`);
+  } catch (e) {
+    console.log('[THINK TANK] MACE parse error:', e.message);
+    maceArchitecture = { implementation_plan: [], new_agents_proposed: [], architecture_decisions: [], routing_traces: [], dependencies: [], risk_flags: ['MACE parse failed'], estimated_complexity: 'unknown' };
+  }
+
+  // ─── STEP 4: TIM validates everything ───────────────────────────────────────
+  console.log('[THINK TANK] Step 4/6 → TIM validating...');
+  let timValidation;
+  try {
+    const timRaw = await callModelDeep(`You are TIM (Testing & Integration Manager), an AI agent inside the ABA Think Tank.
+
+TASK: Validate MACE's plan against LUKE's requirements. Find contradictions, risks, verify feasibility.
+
+LUKE'S REQUIREMENTS:
+${JSON.stringify({ ideas: lukeExtract.ideas, requirements: lukeExtract.requirements, contradictions: lukeExtract.contradictions }, null, 2)}
+
+MACE'S PLAN:
+${JSON.stringify(maceArchitecture, null, 2)}
+
+CHECKS: 1) All requirements covered? 2) Orphan processes? 3) Agents reused? 4) Hardcoded creds? 5) Routing valid? 6) Circular deps? 7) Complexity accurate?
+
+Respond in JSON ONLY:
+{
+  "overall_verdict": "APPROVED|NEEDS_REVISION|BLOCKED",
+  "coverage_score": 0,
+  "missing_requirements": [],
+  "contradictions_found": [],
+  "orphan_process_violations": [],
+  "risk_assessment": [{"risk": "...", "severity": "low|medium|high|critical", "mitigation": "..."}],
+  "suggestions": [],
+  "blocking_issues": []
+}`, 1500);
+
+    timValidation = JSON.parse(timRaw.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim());
+    console.log(`[THINK TANK] TIM: ${timValidation.overall_verdict}, coverage: ${timValidation.coverage_score}%`);
+  } catch (e) {
+    console.log('[THINK TANK] TIM parse error:', e.message);
+    timValidation = { overall_verdict: 'NEEDS_REVISION', coverage_score: 50, missing_requirements: [], contradictions_found: [], orphan_process_violations: [], risk_assessment: [], suggestions: ['TIM validation failed'], blocking_issues: [] };
+  }
+
+  // ─── STEP 5: AUDRA generates documentation ─────────────────────────────────
+  console.log('[THINK TANK] Step 5/6 → AUDRA documenting...');
+  let audraDoc;
+  try {
+    const audraRaw = await callModelDeep(`You are AUDRA (Autonomous Universal Documentation & Review Agent), an AI agent inside the ABA Think Tank.
+
+TASK: Generate structured meeting minutes from this Think Tank session.
+
+SESSION: Tank ID ${tankId} | Source: ${source || 'direct'} | Title: ${title || 'Cook Session'} | Date: ${new Date().toISOString()} | Participants: ${participants || 'Brandon Pierce Sr. + ABA Think Tank'}
+
+LUKE (Intelligence): ${JSON.stringify(lukeExtract, null, 2)}
+MACE (Architecture): ${JSON.stringify(maceArchitecture, null, 2)}
+TIM (Validation): ${JSON.stringify(timValidation, null, 2)}
+
+Respond in JSON ONLY:
+{
+  "meeting_title": "Think Tank: [title]",
+  "executive_summary": "2-3 sentences",
+  "key_decisions": ["decision with context"],
+  "action_items_final": [{"task": "...", "owner": "...", "deadline": "...", "priority": "...", "agent": "..."}],
+  "architecture_summary": "paragraph",
+  "agents_deployed": ["AGENT: role"],
+  "next_steps": ["step"],
+  "brandon_quotes_preserved": ["quote"],
+  "mood": "excited|frustrated|focused|mixed",
+  "session_grade": "A|B|C|D|F",
+  "follow_up_tank_needed": false,
+  "tags_for_brain": ["tag"]
+}`, 2500);
+
+    audraDoc = JSON.parse(audraRaw.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim());
+    console.log(`[THINK TANK] AUDRA: "${audraDoc.meeting_title}", grade: ${audraDoc.session_grade}`);
+  } catch (e) {
+    console.log('[THINK TANK] AUDRA parse error:', e.message);
+    audraDoc = { meeting_title: `Think Tank: ${title || tankId}`, executive_summary: 'Session processed. Manual review needed.', key_decisions: lukeExtract.decisions || [], action_items_final: lukeExtract.action_items || [], architecture_summary: 'See MACE output.', agents_deployed: [], next_steps: ['Review output'], brandon_quotes_preserved: lukeExtract.key_quotes || [], mood: 'focused', session_grade: 'C', follow_up_tank_needed: true, tags_for_brain: lukeExtract.topics || [] };
+  }
+
+  // ─── STEP 6: PACK packages and stores to brain ──────────────────────────────
+  console.log('[THINK TANK] Step 6/6 → PACK packaging...');
+  const elapsed = Date.now() - startTime;
+
+  const finalPackage = {
+    success: true,
+    tankId,
+    timestamp: new Date().toISOString(),
+    elapsed_ms: elapsed,
+    source: source || 'direct',
+    routing: 'AIR*LUKE*COLE*MACE*TIM*AUDRA*PACK*BRAIN',
+    minutes: audraDoc,
+    agents: {
+      luke: lukeExtract,
+      cole: { memoriesFound: coleContext.relatedMemories.length, topMemories: coleContext.relatedMemories.slice(0, 3) },
+      mace: maceArchitecture,
+      tim: timValidation,
+      audra: audraDoc
+    },
+    verdict: timValidation.overall_verdict,
+    grade: audraDoc.session_grade,
+    action_count: audraDoc.action_items_final?.length || 0,
+    decision_count: audraDoc.key_decisions?.length || 0,
+    mood: audraDoc.mood
+  };
+
+  // Store to brain
+  try {
+    await storeToBrain({
+      content: JSON.stringify({ tankId, title: audraDoc.meeting_title, summary: audraDoc.executive_summary, decisions: audraDoc.key_decisions, actions: audraDoc.action_items_final, architecture: audraDoc.architecture_summary, grade: audraDoc.session_grade, mood: audraDoc.mood, topics: audraDoc.tags_for_brain, elapsed_ms: elapsed }),
+      memory_type: 'think_tank',
+      categories: audraDoc.tags_for_brain || [],
+      importance: audraDoc.session_grade === 'A' ? 9 : audraDoc.session_grade === 'B' ? 7 : 5,
+      is_system: false,
+      source: `think_tank.${tankId}`,
+      tags: ['think_tank', ...(audraDoc.tags_for_brain || [])]
+    });
+    finalPackage.brain_stored = true;
+    console.log(`[THINK TANK] Brain stored: think_tank.${tankId}`);
+  } catch (e) {
+    finalPackage.brain_stored = false;
+    console.log('[THINK TANK] Brain store failed:', e.message);
+  }
+
+  // Store transcript for reference
+  try {
+    await storeToBrain({ content: JSON.stringify({ tankId, transcript: transcript.substring(0, 5000), source: source || 'direct' }), memory_type: 'think_tank_transcript', categories: ['transcript'], importance: 6, is_system: false, source: `think_tank.transcript.${tankId}`, tags: ['think_tank', 'transcript'] });
+  } catch (e) {}
+
+  console.log('╔══════════════════════════════════════════════════════════════╗');
+  console.log(`║ THINK TANK COMPLETE: ${tankId}`);
+  console.log(`║ Grade: ${audraDoc.session_grade} | Verdict: ${timValidation.overall_verdict}`);
+  console.log(`║ Actions: ${finalPackage.action_count} | Decisions: ${finalPackage.decision_count}`);
+  console.log(`║ Elapsed: ${elapsed}ms | Brain: ${finalPackage.brain_stored ? 'STORED' : 'FAILED'}`);
+  console.log('╚══════════════════════════════════════════════════════════════╝');
+
+  return finalPackage;
+}
 
 
 
@@ -10034,11 +10359,25 @@ We Are All ABA.`;
   }
 
 
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // ⬡B:AIR:REACH.THINK_TANK.ROUTE:CODE:routing.api.think_tank:USER→AIR→THINK_TANK:T10:v1.0.0:20260219:t1r1t⬡
+  // POST /api/air/think-tank - Cook Session Protocol
+  // ═══════════════════════════════════════════════════════════════════════════════
+  if (path === '/api/air/think-tank' && method === 'POST') {
+    const body = await parseBody(req);
+    console.log('[AIR ROUTE] Think Tank session requested');
+    if (!body.transcript) {
+      return jsonResponse(res, 400, { error: 'transcript field required', usage: { method: 'POST', body: { transcript: 'raw text or otter.ai transcript', source: 'omi|otter|direct|claude', title: 'optional session title', participants: 'optional comma-separated names' } } });
+    }
+    const result = await AIR_thinkTank(body);
+    return jsonResponse(res, 200, result);
+  }
+
   // ⬡B:AIR:REACH.API.NOTFOUND:CODE:infrastructure.error.404:USER→REACH→ERROR:T10:v1.5.0:20260213:n1f2d⬡ CATCH-ALL
   // ═══════════════════════════════════════════════════════════════════════
   jsonResponse(res, 404, { 
     error: 'Route not found: ' + method + ' ' + path,
-    available: ['/api/escalate', '/api/escalate/twiml', '/api/escalate/confirm', '/api/call/dial', '/api/call/twiml', '/api/call/status', '/api/call/record', '/api/air/trigger/email', '/api/air/trigger/omi', '/api/air/trigger/calendar', '/api/air/trigger/job', '/api/air/trigger/system', '/api/sage/search', '/api/sage/index', '/api/iman/draft', '/api/iman/send', '/api/iman/drafts', '/api/devices/register', '/api/devices', '/api/pulse/status', '/api/pulse/trigger', '/api/router', '/api/models/claude', '/api/voice/deepgram-token', '/api/voice/tts', '/api/voice/tts-stream', '/api/omi/manifest', '/api/omi/webhook', '/api/sms/send', '/api/brain/search', '/api/brain/store', '/ws:command-center'],
+    available: ['/api/escalate', '/api/escalate/twiml', '/api/escalate/confirm', '/api/call/dial', '/api/call/twiml', '/api/call/status', '/api/call/record', '/api/air/trigger/email', '/api/air/trigger/omi', '/api/air/trigger/calendar', '/api/air/trigger/job', '/api/air/trigger/system', '/api/air/think-tank', '/api/sage/search', '/api/sage/index', '/api/iman/draft', '/api/iman/send', '/api/iman/drafts', '/api/devices/register', '/api/devices', '/api/pulse/status', '/api/pulse/trigger', '/api/router', '/api/models/claude', '/api/voice/deepgram-token', '/api/voice/tts', '/api/voice/tts-stream', '/api/omi/manifest', '/api/omi/webhook', '/api/sms/send', '/api/brain/search', '/api/brain/store', '/ws:command-center'],
     hint: 'We are all ABA'
   });
 });
