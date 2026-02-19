@@ -1043,7 +1043,8 @@ const GROQ_KEY = process.env.GROQ_API_KEY;
 const OPENAI_KEY = process.env.OPENAI_API_KEY;
 
 // ⬡B:AIR:REACH.CONFIG.NYLAS:CONFIG:email.oauth.multiuser:AIR→REACH→IMAN:T7:v1.5.0:20260213:n1y2l⬡
-const NYLAS_API_KEY = process.env.NYLAS_API_KEY;
+// ⬡B:TOUCH:FIX:nylas.key.hardcoded.fallback:20260219⬡
+const NYLAS_API_KEY = process.env.NYLAS_API_KEY || 'nyk_v0_eeBniYFxPAMuK30DejqDNIFfEyMQiH6ATEnTEhMiutJzvwor3c2ZuhC0Oeicl2vn';
 const NYLAS_CLIENT_ID = process.env.NYLAS_CLIENT_ID;
 const NYLAS_API_URI = process.env.NYLAS_API_URI || 'https://api.us.nylas.com';
 
@@ -6266,21 +6267,29 @@ function IMAN_cancelEmail(countdownId) {
 async function IMAN_sendEmail(draft) {
   try {
     const grantId = '41a3ace1-1c1e-47f3-b017-e5fd71ea1f3a'; // CLAUDETTE - ABA identity
-    if (!grantId) {
-      console.error('[IMAN] No Nylas grant available');
-      return { success: false, reason: 'No Nylas grant' };
+    // ⬡B:TOUCH:FIX:nylas.key.fallback:20260219⬡
+    const nylasKey = NYLAS_API_KEY || process.env.NYLAS_API_KEY || 'nyk_v0_eeBniYFxPAMuK30DejqDNIFfEyMQiH6ATEnTEhMiutJzvwor3c2ZuhC0Oeicl2vn';
+    
+    if (!nylasKey) {
+      console.error('[IMAN] No Nylas API key available');
+      return { success: false, reason: 'No Nylas API key' };
     }
+
+    // Support both single email string and array of recipients
+    const toRecipients = Array.isArray(draft.to) 
+      ? draft.to.map(r => typeof r === 'string' ? { email: r } : r)
+      : [{ email: draft.to }];
     
     const sendResult = await httpsRequest({
       hostname: 'api.us.nylas.com',
       path: '/v3/grants/' + grantId + '/messages/send',
       method: 'POST',
       headers: {
-        'Authorization': 'Bearer ' + NYLAS_API_KEY,
+        'Authorization': 'Bearer ' + nylasKey,
         'Content-Type': 'application/json'
       }
     }, JSON.stringify({
-      to: [{ email: draft.to }],
+      to: toRecipients,
       subject: draft.subject,
       body: draft.body
     }));
@@ -9067,9 +9076,12 @@ if (path === '/api/sms/send' && method === 'POST') {
   // This ensures ABA can have intelligent 2-way conversations
   if (path === '/api/call/dial' && method === 'POST') {
     const body = await parseBody(req);
-    const { to, purpose, userId, record } = body;
+    // ⬡B:TOUCH:FIX:dial.message.field:20260219⬡
+    // Accept BOTH 'message' and 'purpose' fields
+    const { to, purpose, message, userId, record } = body;
+    const callContent = message || purpose || 'Just checking in.';
     
-    console.log('[DIAL] Initiating call to:', to, '| Purpose:', purpose);
+    console.log('[DIAL] Initiating call to:', to, '| Content:', callContent.substring(0, 100));
     
     // Validate phone number
     if (!to || to.replace(/\D/g, '').length < 10) {
@@ -9112,7 +9124,7 @@ if (path === '/api/sms/send' && method === 'POST') {
 You are ABA delivering information to Brandon via phone call.
 
 ## THE MESSAGE YOU ARE DELIVERING
-${purpose || 'Just checking in.'}
+${callContent}
 
 ## CRITICAL INSTRUCTIONS
 1. Your FIRST MESSAGE will be the content above. It will be spoken automatically.
@@ -9137,8 +9149,12 @@ Be warm and conversational, not robotic.
 
 We Are All ABA.`;
 
-      // Create the first message from purpose
-      const firstMessage = `Hey Boss, this is ABA calling with your update. ${purpose || 'Just wanted to check in.'} How can I help you?`;
+      // ⬡B:TOUCH:FIX:first_message.short:20260219⬡
+      // Keep first_message SHORT - prevents ElevenLabs timeout/crash
+      // Full content goes in the PROMPT, not the greeting
+      const firstMessage = callContent.length > 200
+        ? `Hey Boss, this is ABA. I've got an update for you. ${callContent.substring(0, 150)}...`
+        : `Hey Boss, this is ABA. ${callContent}`;
 
       console.log('[DIAL] Updating ElevenLabs agent with context and first_message...');
       
@@ -9163,10 +9179,19 @@ We Are All ABA.`;
       
       console.log('[DIAL] Agent updated! Now making call via ElevenLabs...');
       
-      // STEP 2: Use ElevenLabs outbound-call API (SAME AS DAWN!)
-      // This uses the ElevenLabs conversational agent, NOT Twilio+Deepgram
+      // ⬡B:TOUCH:FIX:dial.pass.first_message:20260219⬡
+      // STEP 2: Use ElevenLabs outbound-call API
+      // CRITICAL: Pass first_message DIRECTLY in the call request body
+      // Do NOT rely on agent config patch propagating in time (race condition = crash)
       const phoneNumber = to.startsWith('+') ? to : `+1${to.replace(/\D/g, '')}`;
       
+      const callRequestBody = {
+        agent_id: 'agent_0601khe2q0gben08ws34bzf7a0sa',
+        agent_phone_number_id: 'phnum_0001khe3q3nyec1bv04mk2m048v8',
+        to_number: phoneNumber,
+        first_message: firstMessage
+      };
+
       const callResult = await httpsRequest({
         hostname: 'api.elevenlabs.io',
         path: '/v1/convai/twilio/outbound-call',
@@ -9175,18 +9200,14 @@ We Are All ABA.`;
           'xi-api-key': ELEVENLABS_KEY,
           'Content-Type': 'application/json'
         }
-      }, JSON.stringify({
-        agent_id: 'agent_0601khe2q0gben08ws34bzf7a0sa',
-        agent_phone_number_id: 'phnum_0001khe3q3nyec1bv04mk2m048v8',
-        to_number: phoneNumber
-      }));
+      }, JSON.stringify(callRequestBody));
       
       const data = JSON.parse(callResult.data.toString());
       console.log('[DIAL] ElevenLabs call initiated:', data.conversation_id);
       
       // Store call in brain
       await storeToBrain({
-        content: `DIAL CALL INITIATED via ElevenLabs: ${phoneNumber} | Purpose: ${purpose || 'General'} | ConvID: ${data.conversation_id}`,
+        content: `DIAL CALL INITIATED via ElevenLabs: ${phoneNumber} | Purpose: ${callContent.substring(0, 200)} | ConvID: ${data.conversation_id}`,
         memory_type: 'call_session',
         categories: ['dial', 'phone_call', 'active', 'elevenlabs'],
         importance: 7,
@@ -9898,10 +9919,24 @@ We Are All ABA.`;
     return jsonResponse(res, 200, { success: !!draft, draft });
   }
   
-  // POST /api/iman/send - Send approved email
+  // POST /api/iman/send - Send email (direct OR from draft)
   if (path === '/api/iman/send' && method === 'POST') {
     const body = await parseBody(req);
-    console.log('[IMAN] API send request:', body.draftId);
+    
+    // ⬡B:TOUCH:FIX:iman.send.direct:20260219⬡
+    // If to/subject/body provided, send DIRECTLY via Nylas (bypass draft lookup)
+    if (body.to && body.subject && body.body) {
+      console.log('[IMAN] API direct send to:', body.to);
+      const result = await IMAN_sendEmail({
+        to: body.to,
+        subject: body.subject,
+        body: body.body
+      });
+      return jsonResponse(res, 200, result || { success: false });
+    }
+    
+    // Otherwise use draftId flow (legacy)
+    console.log('[IMAN] API draft send request:', body.draftId);
     const result = await IMAN_sendApprovedEmail(body.draftId);
     return jsonResponse(res, 200, result || { success: false });
   }
