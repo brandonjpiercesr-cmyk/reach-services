@@ -623,33 +623,8 @@ async function DAWN_makeCall(targetPhone, targetName) {
   const briefingId = 'DAWN-' + Date.now();
   const ELEVENLABS_KEY = process.env.ELEVENLABS_API_KEY;
   
-  // ⬡B:TOUCH:FIX:dawn.preserve.shadow:20260216⬡
-  // GET current agent config FIRST (to preserve SHADOW and other base config)
-  console.log('[DAWN] Getting current agent config to preserve...');
-  
-  let originalPrompt = null;
-  let originalFirstMessage = null;
-  
-  try {
-    const getResult = await httpsRequest({
-      hostname: 'api.elevenlabs.io',
-      path: '/v1/convai/agents/agent_0601khe2q0gben08ws34bzf7a0sa',
-      method: 'GET',
-      headers: {
-        'xi-api-key': ELEVENLABS_KEY
-      }
-    });
-    
-    const agentConfig = JSON.parse(getResult.data.toString());
-    originalPrompt = agentConfig?.conversation_config?.agent?.prompt?.prompt || null;
-    originalFirstMessage = agentConfig?.conversation_config?.agent?.first_message || "Hey Boss! This is ABA. How can I help you today?";
-    console.log('[DAWN] Original config saved! (includes SHADOW if present)');
-  } catch (e) {
-    console.log('[DAWN] Could not get original config:', e.message);
-  }
-  
-  // ⬡B:TOUCH:FIX:dawn.prompt.update:20260216⬡
-  // Update the ElevenLabs agent's first_message to deliver the DAWN briefing
+  // ⬡B:TOUCH:FIX:dawn.conversation_initiation_client_data:20260219⬡
+  // REWRITTEN: Same fix as DIAL - use conversation_initiation_client_data, no PATCH race condition
   const dawnPrompt = `# DAWN BRIEFING MODE
 You are ABA delivering a DAWN (Daily Automated Wisdom Notifier) briefing.
 
@@ -665,32 +640,15 @@ Do NOT say "I don't know why I'm calling" - YOU DO KNOW. This is a DAWN briefing
 Do NOT make up fake information like Q1 projections.
 Do NOT ask "Why are you calling me?" - YOU called THEM with the briefing above.`;
 
+  // Keep first_message short - full briefing goes in prompt
+  const dawnFirstMessage = briefing.length > 150
+    ? `Good morning Boss! This is ABA with your DAWN briefing.`
+    : briefing;
+
   try {
-    // Step 1: Update the agent's prompt with DAWN briefing
-    console.log('[DAWN] Updating agent prompt with briefing...');
+    // SINGLE STEP: Call with conversation_initiation_client_data - no PATCH needed
+    console.log('[DAWN v2] Calling with conversation_initiation_client_data (no PATCH)...');
     
-    await httpsRequest({
-      hostname: 'api.elevenlabs.io',
-      path: '/v1/convai/agents/agent_0601khe2q0gben08ws34bzf7a0sa',
-      method: 'PATCH',
-      headers: {
-        'xi-api-key': ELEVENLABS_KEY,
-        'Content-Type': 'application/json'
-      }
-    }, JSON.stringify({
-      conversation_config: {
-        agent: {
-          prompt: {
-            prompt: dawnPrompt
-          },
-          first_message: briefing
-        }
-      }
-    }));
-    
-    console.log('[DAWN] Agent prompt updated!');
-    
-    // Step 2: Make the call
     const callResult = await httpsRequest({
       hostname: 'api.elevenlabs.io',
       path: '/v1/convai/twilio/outbound-call',
@@ -702,45 +660,52 @@ Do NOT ask "Why are you calling me?" - YOU called THEM with the briefing above.`
     }, JSON.stringify({
       agent_id: 'agent_0601khe2q0gben08ws34bzf7a0sa',
       agent_phone_number_id: 'phnum_0001khe3q3nyec1bv04mk2m048v8',
-      to_number: targetPhone
+      to_number: targetPhone,
+      conversation_initiation_client_data: {
+        conversation_config_override: {
+          agent: {
+            first_message: dawnFirstMessage,
+            prompt: {
+              prompt: dawnPrompt
+            }
+          }
+        }
+      }
     }));
     
-    const data = JSON.parse(callResult.data.toString());
-    console.log('[DAWN] Call initiated:', data.conversation_id);
+    const responseText = callResult.data.toString();
+    console.log('[DAWN v2] Response:', callResult.status, responseText.substring(0, 200));
     
-    // Step 3: Restore ORIGINAL prompt after a delay (preserves SHADOW!)
-    if (originalPrompt) {
-      setTimeout(async () => {
-        try {
-          console.log('[DAWN] Restoring ORIGINAL agent config (with SHADOW)...');
-          
-          await httpsRequest({
-            hostname: 'api.elevenlabs.io',
-            path: '/v1/convai/agents/agent_0601khe2q0gben08ws34bzf7a0sa',
-            method: 'PATCH',
-            headers: {
-              'xi-api-key': ELEVENLABS_KEY,
-              'Content-Type': 'application/json'
-            }
-          }, JSON.stringify({
-            conversation_config: {
-              agent: {
-                prompt: {
-                  prompt: originalPrompt
-                },
-                first_message: originalFirstMessage
-              }
-            }
-          }));
-          
-          console.log('[DAWN] Original config restored! SHADOW preserved.');
-        } catch (e) {
-          console.log('[DAWN] Restore error:', e.message);
+    // If override rejected, try with dynamic_variables
+    if (callResult.status === 400 || callResult.status === 403) {
+      console.log('[DAWN v2] Override rejected. Trying dynamic_variables fallback...');
+      const fallbackResult = await httpsRequest({
+        hostname: 'api.elevenlabs.io',
+        path: '/v1/convai/twilio/outbound-call',
+        method: 'POST',
+        headers: {
+          'xi-api-key': ELEVENLABS_KEY,
+          'Content-Type': 'application/json'
         }
-      }, 120000); // Restore after 2 minutes
-    } else {
-      console.log('[DAWN] No original config saved, skipping restore');
+      }, JSON.stringify({
+        agent_id: 'agent_0601khe2q0gben08ws34bzf7a0sa',
+        agent_phone_number_id: 'phnum_0001khe3q3nyec1bv04mk2m048v8',
+        to_number: targetPhone,
+        conversation_initiation_client_data: {
+          dynamic_variables: {
+            briefing_content: briefing.substring(0, 500),
+            caller_name: targetName
+          }
+        }
+      }));
+      const fallbackData = JSON.parse(fallbackResult.data.toString());
+      console.log('[DAWN v2] Fallback call initiated:', fallbackData.conversation_id);
     }
+    
+    const data = JSON.parse(responseText);
+    console.log('[DAWN v2] Call initiated:', data.conversation_id);
+    
+    // NO RESTORE NEEDED - we never mutated global agent config!
     
     // Store briefing record
     await storeToBrain({
@@ -9065,133 +9030,80 @@ if (path === '/api/sms/send' && method === 'POST') {
   // ═══════════════════════════════════════════════════════════════════════
 
   // ═══════════════════════════════════════════════════════════════════════
-  // ⬡B:DIAL:REACH.API.CALL_DIAL:CODE:voice.phone.outbound:USER→AIR→DIAL→TWILIO:T8:v1.0.0:20260214:d1a2l⬡
+  // ⬡B:DIAL:REACH.API.CALL_DIAL:CODE:voice.phone.outbound:USER→AIR→DIAL→TWILIO:T8:v2.0.0:20260219:d1a2l⬡
   // DIAL (Direct Intelligence Auditory Link) - Phone Call Mode
   // Agent #64 - Initiates outbound calls with real-time transcription
+  // ⬡B:TOUCH:FIX:dial.conversation_initiation_client_data:20260219⬡
+  // COMPLETE REWRITE: Research found root cause of "Hey boss this is Ab-" crash:
+  // 1. first_message is NOT a valid top-level param on outbound-call endpoint (silently ignored)
+  // 2. PATCH-then-call creates race condition (config not propagated before call fires)
+  // 3. CORRECT approach: conversation_initiation_client_data with conversation_config_override
+  // 4. This is ATOMIC per-conversation - no global agent config mutation needed
   // ═══════════════════════════════════════════════════════════════════════
   
-  // /api/call/dial - Initiate outbound call
-  // ⬡B:TOUCH:FIX:dial.use.elevenlabs:20260216⬡
-  // FIXED: Now uses ElevenLabs outbound-call API (same as DAWN)
-  // This ensures ABA can have intelligent 2-way conversations
   if (path === '/api/call/dial' && method === 'POST') {
     const body = await parseBody(req);
-    // ⬡B:TOUCH:FIX:dial.message.field:20260219⬡
-    // Accept BOTH 'message' and 'purpose' fields
     const { to, purpose, message, userId, record } = body;
     const callContent = message || purpose || 'Just checking in.';
     
-    console.log('[DIAL] Initiating call to:', to, '| Content:', callContent.substring(0, 100));
+    console.log('[DIAL v2] Initiating call to:', to, '| Content:', callContent.substring(0, 100));
     
     // Validate phone number
     if (!to || to.replace(/\D/g, '').length < 10) {
       return jsonResponse(res, 400, { error: 'Invalid phone number' });
     }
     
-    // Generate trace ID
     const traceId = `DIAL-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const phoneNumber = to.startsWith('+') ? to : `+1${to.replace(/\D/g, '')}`;
     
     try {
-      // ⬡B:TOUCH:FIX:preserve.shadow:20260216⬡
-      // STEP 0: GET current agent config FIRST (to preserve SHADOW and other base config)
-      console.log('[DIAL] Getting current agent config to preserve...');
-      
-      let originalPrompt = null;
-      let originalFirstMessage = null;
-      
-      try {
-        const getResult = await httpsRequest({
-          hostname: 'api.elevenlabs.io',
-          path: '/v1/convai/agents/agent_0601khe2q0gben08ws34bzf7a0sa',
-          method: 'GET',
-          headers: {
-            'xi-api-key': ELEVENLABS_KEY
-          }
-        });
-        
-        const agentConfig = JSON.parse(getResult.data.toString());
-        originalPrompt = agentConfig?.conversation_config?.agent?.prompt?.prompt || null;
-        originalFirstMessage = agentConfig?.conversation_config?.agent?.first_message || "Hey Boss! This is ABA. How can I help you today?";
-        console.log('[DIAL] Original config saved! (includes SHADOW if present)');
-      } catch (e) {
-        console.log('[DIAL] Could not get original config:', e.message);
-      }
-      
-      // ⬡B:TOUCH:FIX:dial.elevenlabs.agent:20260216⬡
-      // STEP 1: Update ElevenLabs agent prompt AND first_message with call context
-      // This is the SAME approach that works for DAWN
-      const callContextPrompt = `# OUTBOUND CALL MODE - MEETING AFTER REPORT
+      // Build the per-call prompt with full context
+      const callContextPrompt = `# OUTBOUND CALL MODE
 You are ABA delivering information to Brandon via phone call.
 
 ## THE MESSAGE YOU ARE DELIVERING
 ${callContent}
 
 ## CRITICAL INSTRUCTIONS
-1. Your FIRST MESSAGE will be the content above. It will be spoken automatically.
-2. After delivering, be ready for Brandon's questions.
-3. You KNOW the content - it's in "THE MESSAGE" section above.
-4. If asked "what was that?" or "tell me more" - elaborate on the topic.
-5. If asked about specifics - answer based on the content provided.
-6. Do NOT say "I don't have context" - YOU DO HAVE IT.
-7. Do NOT go silent. Stay engaged.
-8. Be conversational, warm, helpful.
-
-## EXAMPLE FOLLOW-UPS
-- "What did we discuss?" → Summarize the message above
-- "Tell me about Dwayne" → Reference what's in the message about Dwayne
-- "When's the LA trip?" → Check the message for dates
-- "Anything else important?" → Highlight key points
+1. Greet Brandon warmly, then deliver the message above.
+2. After delivering, be ready for follow-up questions.
+3. You KNOW the content - answer from THE MESSAGE section.
+4. Do NOT say "I don't have context" - YOU DO.
+5. Do NOT go silent. Stay engaged.
+6. Be conversational, warm, helpful. Never robotic.
 
 ## WHO YOU ARE
 You are ABA - A Better AI. Brandon's personal AI assistant.
 Brandon is your creator (HAM - Human ABA Master).
-Be warm and conversational, not robotic.
-
 We Are All ABA.`;
 
-      // ⬡B:TOUCH:FIX:first_message.short:20260219⬡
-      // Keep first_message SHORT - prevents ElevenLabs timeout/crash
-      // Full content goes in the PROMPT, not the greeting
-      const firstMessage = callContent.length > 200
-        ? `Hey Boss, this is ABA. I've got an update for you. ${callContent.substring(0, 150)}...`
+      // Keep first_message SHORT and clean
+      const firstMessage = callContent.length > 150
+        ? `Hey Boss, this is ABA. I have an update for you.`
         : `Hey Boss, this is ABA. ${callContent}`;
 
-      console.log('[DIAL] Updating ElevenLabs agent with context and first_message...');
-      
-      await httpsRequest({
-        hostname: 'api.elevenlabs.io',
-        path: '/v1/convai/agents/agent_0601khe2q0gben08ws34bzf7a0sa',
-        method: 'PATCH',
-        headers: {
-          'xi-api-key': ELEVENLABS_KEY,
-          'Content-Type': 'application/json'
-        }
-      }, JSON.stringify({
-        conversation_config: {
-          agent: {
-            prompt: {
-              prompt: callContextPrompt
-            },
-            first_message: firstMessage
-          }
-        }
-      }));
-      
-      console.log('[DIAL] Agent updated! Now making call via ElevenLabs...');
-      
-      // ⬡B:TOUCH:FIX:dial.pass.first_message:20260219⬡
-      // STEP 2: Use ElevenLabs outbound-call API
-      // CRITICAL: Pass first_message DIRECTLY in the call request body
-      // Do NOT rely on agent config patch propagating in time (race condition = crash)
-      const phoneNumber = to.startsWith('+') ? to : `+1${to.replace(/\D/g, '')}`;
-      
+      // ⬡B:TOUCH:FIX:conversation_initiation_client_data:20260219⬡
+      // THE FIX: Use conversation_initiation_client_data instead of PATCH + top-level first_message
+      // This is the ONLY correct way per ElevenLabs docs to override per-call config
+      // No race condition, no global agent mutation, atomic per-conversation
       const callRequestBody = {
         agent_id: 'agent_0601khe2q0gben08ws34bzf7a0sa',
         agent_phone_number_id: 'phnum_0001khe3q3nyec1bv04mk2m048v8',
         to_number: phoneNumber,
-        first_message: firstMessage
+        conversation_initiation_client_data: {
+          conversation_config_override: {
+            agent: {
+              first_message: firstMessage,
+              prompt: {
+                prompt: callContextPrompt
+              }
+            }
+          }
+        }
       };
 
+      console.log('[DIAL v2] Calling ElevenLabs with conversation_initiation_client_data (no PATCH needed)...');
+      
       const callResult = await httpsRequest({
         hostname: 'api.elevenlabs.io',
         path: '/v1/convai/twilio/outbound-call',
@@ -9202,65 +9114,117 @@ We Are All ABA.`;
         }
       }, JSON.stringify(callRequestBody));
       
-      const data = JSON.parse(callResult.data.toString());
-      console.log('[DIAL] ElevenLabs call initiated:', data.conversation_id);
+      const responseText = callResult.data.toString();
+      console.log('[DIAL v2] ElevenLabs response status:', callResult.status, 'body:', responseText.substring(0, 300));
+      
+      // Handle potential override-not-allowed error
+      if (callResult.status === 400 || callResult.status === 403) {
+        console.log('[DIAL v2] Override may not be enabled in agent Security tab. Trying without override...');
+        
+        // Fallback: try with just dynamic_variables instead of full override
+        const fallbackBody = {
+          agent_id: 'agent_0601khe2q0gben08ws34bzf7a0sa',
+          agent_phone_number_id: 'phnum_0001khe3q3nyec1bv04mk2m048v8',
+          to_number: phoneNumber,
+          conversation_initiation_client_data: {
+            dynamic_variables: {
+              call_purpose: callContent,
+              caller_name: 'Brandon'
+            }
+          }
+        };
+        
+        const fallbackResult = await httpsRequest({
+          hostname: 'api.elevenlabs.io',
+          path: '/v1/convai/twilio/outbound-call',
+          method: 'POST',
+          headers: {
+            'xi-api-key': ELEVENLABS_KEY,
+            'Content-Type': 'application/json'
+          }
+        }, JSON.stringify(fallbackBody));
+        
+        const fallbackText = fallbackResult.data.toString();
+        console.log('[DIAL v2] Fallback response:', fallbackResult.status, fallbackText.substring(0, 300));
+        
+        if (fallbackResult.status === 200 || fallbackResult.status === 201) {
+          const fallbackData = JSON.parse(fallbackText);
+          
+          await storeToBrain({
+            content: `DIAL CALL (fallback/dynamic_vars): ${phoneNumber} | Purpose: ${callContent.substring(0, 200)} | ConvID: ${fallbackData.conversation_id} | NOTE: Override not enabled, used dynamic_variables`,
+            memory_type: 'call_session',
+            categories: ['dial', 'phone_call', 'active', 'elevenlabs'],
+            importance: 7,
+            is_system: true,
+            source: `dial_${traceId}`,
+            tags: ['dial', 'call', 'active', 'elevenlabs', 'fallback']
+          });
+          
+          broadcastToCommandCenter({
+            type: 'outbound_call',
+            source: 'dial_v2_fallback',
+            phone: phoneNumber,
+            purpose: callContent.substring(0, 200),
+            conversation_id: fallbackData.conversation_id,
+            timestamp: new Date().toISOString()
+          });
+          
+          return jsonResponse(res, 200, {
+            success: true,
+            conversation_id: fallbackData.conversation_id,
+            traceId,
+            status: 'initiated_fallback',
+            message: 'Call initiated with dynamic_variables. Enable overrides in ElevenLabs Security tab for full control.',
+            routing: `USER*AIR*DIAL*ELEVENLABS*${fallbackData.conversation_id}`,
+            action_needed: 'Enable first_message and system_prompt overrides in ElevenLabs agent Security tab'
+          });
+        }
+        
+        // Both failed
+        return jsonResponse(res, 500, { 
+          error: 'Call failed - override rejected and fallback failed',
+          details: fallbackText,
+          action_needed: 'Enable overrides in ElevenLabs agent Security tab for agent_0601khe2q0gben08ws34bzf7a0sa',
+          traceId 
+        });
+      }
+      
+      const data = JSON.parse(responseText);
+      console.log('[DIAL v2] Call initiated successfully:', data.conversation_id);
       
       // Store call in brain
       await storeToBrain({
-        content: `DIAL CALL INITIATED via ElevenLabs: ${phoneNumber} | Purpose: ${callContent.substring(0, 200)} | ConvID: ${data.conversation_id}`,
+        content: `DIAL CALL v2 (conversation_initiation_client_data): ${phoneNumber} | Purpose: ${callContent.substring(0, 200)} | ConvID: ${data.conversation_id}`,
         memory_type: 'call_session',
         categories: ['dial', 'phone_call', 'active', 'elevenlabs'],
         importance: 7,
         is_system: true,
         source: `dial_${traceId}`,
-        tags: ['dial', 'call', 'active', 'elevenlabs']
+        tags: ['dial', 'call', 'active', 'elevenlabs', 'v2']
       });
       
-      // STEP 3: Restore ORIGINAL prompt after 2 minutes (preserves SHADOW!)
-      if (originalPrompt) {
-        setTimeout(async () => {
-          try {
-            console.log('[DIAL] Restoring ORIGINAL agent config (with SHADOW)...');
-            
-            await httpsRequest({
-              hostname: 'api.elevenlabs.io',
-              path: '/v1/convai/agents/agent_0601khe2q0gben08ws34bzf7a0sa',
-              method: 'PATCH',
-              headers: {
-                'xi-api-key': ELEVENLABS_KEY,
-                'Content-Type': 'application/json'
-              }
-            }, JSON.stringify({
-              conversation_config: {
-                agent: {
-                  prompt: {
-                    prompt: originalPrompt
-                  },
-                  first_message: originalFirstMessage
-                }
-              }
-            }));
-            
-            console.log('[DIAL] Original config restored! SHADOW preserved.');
-          } catch (e) {
-            console.log('[DIAL] Restore error:', e.message);
-          }
-        }, 120000); // Restore after 2 minutes
-      } else {
-        console.log('[DIAL] No original config saved, skipping restore');
-      }
+      broadcastToCommandCenter({
+        type: 'outbound_call',
+        source: 'dial_v2',
+        phone: phoneNumber,
+        purpose: callContent.substring(0, 200),
+        conversation_id: data.conversation_id,
+        timestamp: new Date().toISOString()
+      });
+      
+      // NO MORE PATCH RESTORE NEEDED - we never mutated the global agent config!
       
       return jsonResponse(res, 200, {
         success: true,
         conversation_id: data.conversation_id,
         traceId,
         status: 'initiated',
-        message: 'Call initiated via ElevenLabs. ABA has full context and can converse.',
+        message: 'Call initiated via conversation_initiation_client_data. No race condition.',
         routing: `USER*AIR*DIAL*ELEVENLABS*${data.conversation_id}`
       });
       
     } catch (e) {
-      console.log('[DIAL] Call error:', e.message);
+      console.log('[DIAL v2] Call error:', e.message);
       return jsonResponse(res, 500, { 
         error: 'Failed to initiate call', 
         details: e.message,
