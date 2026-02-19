@@ -7376,8 +7376,8 @@ Phone: (336) 389-8116</p>
         return jsonResponse(res, 200, { status: 'skipped', reason: 'no transcript text found' });
       }
       
-      // Don't process empty transcripts
-      if (!transcript || transcript.length < 5) {
+      // Don't process empty transcripts or raw binary
+      if (!transcript || transcript.length < 5 || transcript.startsWith('{"raw"')) {
         return jsonResponse(res, 200, { status: 'skipped', reason: 'empty transcript' });
       }
       const timestamp = body.timestamp || new Date().toISOString();
@@ -7509,7 +7509,37 @@ Phone: (336) 389-8116</p>
   // ⬡B:AIR:REACH.API.SMS_SEND:CODE:outreach.sms.twilio:AIR→CARA→REACH→TWILIO→USER:T8:v1.5.0:20260213:s1m2t⬡ /api/sms/send
   // ROUTING: CARA*AIR*TWILIO*USER
   // ═══════════════════════════════════════════════════════════════════════
-  if (path === '/api/sms/send' && method === 'POST') {
+  
+  // /api/heartbeat/ping - CARA contact registration  
+  // ⬡B:HEARTBEAT:CARA.PING:CODE:autonomous.contact.register:v1.0.0:20260219⬡
+  if (path === '/api/heartbeat/ping' && (method === 'POST' || method === 'GET')) {
+    try {
+      const body = method === 'POST' ? await parseBody(req) : {};
+      const source = body.source || 'api';
+      const ts = new Date().toISOString();
+      await httpsRequest({
+        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+        path: '/rest/v1/aba_memory',
+        method: 'POST',
+        headers: {
+          'apikey': SUPABASE_KEY || SUPABASE_ANON,
+          'Authorization': 'Bearer ' + (SUPABASE_KEY || SUPABASE_ANON),
+          'Content-Type': 'application/json',
+          'Prefer': 'return=minimal'
+        }
+      }, JSON.stringify({
+        content: JSON.stringify({ status: 'active', source, timestamp: ts }),
+        memory_type: 'heartbeat_state',
+        source: 'cara_last_contact',
+        importance: 5,
+        tags: ['heartbeat', 'cara', 'ping', 'contact']
+      }));
+      console.log('[HEARTBEAT] CARA ping registered from:', source);
+      return jsonResponse(res, 200, { success: true, timestamp: ts, source });
+    } catch(e) { return jsonResponse(res, 500, { error: e.message }); }
+  }
+
+if (path === '/api/sms/send' && method === 'POST') {
     try {
       const body = await parseBody(req);
       const { to, message } = body;
@@ -8433,7 +8463,7 @@ Phone: (336) 389-8116</p>
     // ⬡B:AIR:REACH.VOICE.CALLER_ID:CODE:voice.identity.lookup:TWILIO→REACH→AIR:T9:v1.6.0:20260213:c1i2d⬡
     // Pass caller number to WebSocket so AIR knows WHO is calling
     // v1.9.0 - SCRIBE: Record=record-from-answer-dual for full recording
-    const twiml = '<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n  <Start>\n    <Stream url="wss://' + host + '/media-stream">\n      <Parameter name="greeting" value="true"/>\n      <Parameter name="callerNumber" value="' + callerNumber + '"/>\n    </Stream>\n  </Start>\n  <Record recordingStatusCallback="https://' + host + '/webhook/recording" recordingStatusCallbackEvent="completed" maxLength="3600" trim="trim-silence"/>\n  <Pause length="3600"/>\n</Response>';
+    const twiml = '<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n  <Connect>\n    <Stream url="wss://' + host + '/media-stream">\n      <Parameter name="greeting" value="true"/>\n      <Parameter name="callerNumber" value="' + callerNumber + '"/>\n    </Stream>\n  </Connect>\n  <Pause length="3600"/>\n</Response>';
     res.writeHead(200, { 'Content-Type': 'text/xml' });
     return res.end(twiml);
   }
@@ -9270,9 +9300,9 @@ We Are All ABA.`;
       const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Play>${REACH_URL}/api/voice/tts-stream?text=${encodeURIComponent('Perfect. How can I help you today?')}</Play>
-  <Start>
+  <Connect>
     <Stream url="wss://${req.headers.host}/api/call/conversation?trace=${traceId}" track="both_tracks"/>
-  </Start>
+  </Connect>
   <Pause length="3600"/>
 </Response>`;
       
@@ -9315,9 +9345,9 @@ We Are All ABA.`;
 <Response>
   <Play>${REACH_URL}/api/voice/tts-stream?text=${encodeURIComponent('Hey, this is ABA calling. ' + greeting)}</Play>
   <Pause length="1"/>
-  <Start>
+  <Connect>
     <Stream url="wss://${req.headers.host}/api/call/conversation?trace=${traceId}" track="both_tracks"/>
-  </Start>
+  </Connect>
   <Pause length="3600"/>
 </Response>`;
     
@@ -9543,13 +9573,13 @@ We Are All ABA.`;
       
       twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Start>
+  <Connect>
     <Stream url="${wsUrl}" track="both_tracks">
       <Parameter name="outbound" value="true"/>
       <Parameter name="callerNumber" value="aba-outbound"/>
       <Parameter name="greeting" value="${encodeURIComponent(safeGreeting.substring(0, 200))}"/>
     </Stream>
-  </Start>
+  </Connect>
   <Play>${REACH_URL}/api/voice/tts-stream?text=${encodeURIComponent(safeGreeting)}</Play>
   <Pause length="3600"/>
 </Response>`;
