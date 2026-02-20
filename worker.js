@@ -3556,8 +3556,8 @@ async function CACA_executeChain(chainDef) {
             
           case 'EMAIL':
             // Send email via Nylas
-            const NYLAS_GRANT = process.env.NYLAS_GRANT_ID || '';
-            const NYLAS_KEY = process.env.NYLAS_API_KEY || '';
+            const NYLAS_GRANT = process.env.NYLAS_GRANT_ID || '41a3ace1-1c1e-47f3-b017-e5fd71ea1f3a';
+            const NYLAS_KEY = process.env.NYLAS_API_KEY || NYLAS_API_KEY;
             if (NYLAS_GRANT && NYLAS_KEY) {
               await httpsRequest({
                 hostname: 'api.us.nylas.com',
@@ -3817,8 +3817,8 @@ Respond with ONLY the code block. No explanation needed.`;
     });
     
     // Email Brandon for review
-    const NYLAS_GRANT = process.env.NYLAS_GRANT_ID || '';
-    const NYLAS_KEY = process.env.NYLAS_API_KEY || '';
+    const NYLAS_GRANT = process.env.NYLAS_GRANT_ID || '41a3ace1-1c1e-47f3-b017-e5fd71ea1f3a';
+    const NYLAS_KEY = process.env.NYLAS_API_KEY || NYLAS_API_KEY;
     if (NYLAS_GRANT && NYLAS_KEY) {
       await httpsRequest({
         hostname: 'api.us.nylas.com',
@@ -3981,8 +3981,8 @@ async function generateProgressReport(pulseId) {
     };
     
     // Send via Nylas
-    const NYLAS_GRANT = process.env.NYLAS_GRANT_ID || '';
-    const NYLAS_KEY = process.env.NYLAS_API_KEY || '';
+    const NYLAS_GRANT = process.env.NYLAS_GRANT_ID || '41a3ace1-1c1e-47f3-b017-e5fd71ea1f3a';
+    const NYLAS_KEY = process.env.NYLAS_API_KEY || NYLAS_API_KEY;
     const BRANDON_EMAIL = 'brandonjpierce2@gmail.com';
     
     if (NYLAS_GRANT && NYLAS_KEY) {
@@ -8361,8 +8361,8 @@ Phone: (336) 389-8116</p>
           console.log(`[COOK SESSION] Think Tank complete: ${tankResult.tankId} | Grade: ${tankResult.grade}`);
           
           // Email Brandon the summary
-          const NYLAS_GRANT = process.env.NYLAS_GRANT_ID || '';
-          const NYLAS_KEY = process.env.NYLAS_API_KEY || '';
+          const NYLAS_GRANT = process.env.NYLAS_GRANT_ID || '41a3ace1-1c1e-47f3-b017-e5fd71ea1f3a';
+          const NYLAS_KEY = process.env.NYLAS_API_KEY || NYLAS_API_KEY;
           if (NYLAS_GRANT && NYLAS_KEY && tankResult.minutes) {
             await httpsRequest({
               hostname: 'api.us.nylas.com',
