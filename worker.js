@@ -8590,6 +8590,33 @@ Respond as this agent specifically — stay in character.`;
           
           console.log('[OMI→AIR] AIR response status:', airResult?.status);
           
+          // ═══════════════════════════════════════════════════════════════════════════
+          // ⬡B:REACH.OMI.DELIVERY:FIX:send_response_to_brandon:20260220⬡
+          // DELIVERY: Actually send AIR's response to Brandon via SMS
+          // ═══════════════════════════════════════════════════════════════════════════
+          try {
+            const airData = airResult?.data ? (typeof airResult.data === 'string' ? JSON.parse(airResult.data) : airResult.data) : airResult;
+            const responseMsg = airData?.response || airData?.message || 'ABA processed your command.';
+            
+            const BRANDON_PHONE = process.env.BRANDON_PHONE || '+13363898116';
+            const twilioAuth = Buffer.from((process.env.TWILIO_ACCOUNT_SID || '') + ':' + (process.env.TWILIO_AUTH_TOKEN || '')).toString('base64');
+            
+            if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_PHONE_NUMBER) {
+              const smsBody = 'To=' + encodeURIComponent(BRANDON_PHONE) + '&From=' + encodeURIComponent(process.env.TWILIO_PHONE_NUMBER) + '&Body=' + encodeURIComponent('[ABA] ' + responseMsg.substring(0, 140));
+              
+              await httpsRequest({
+                hostname: 'api.twilio.com',
+                path: '/2010-04-01/Accounts/' + process.env.TWILIO_ACCOUNT_SID + '/Messages.json',
+                method: 'POST',
+                headers: { 'Authorization': 'Basic ' + twilioAuth, 'Content-Type': 'application/x-www-form-urlencoded' }
+              }, smsBody);
+              
+              console.log('[OMI→DELIVERY] SMS sent to Brandon:', responseMsg.substring(0, 50));
+            }
+          } catch (deliveryErr) {
+            console.log('[OMI→DELIVERY] Delivery error:', deliveryErr.message);
+          }
+          
           // Store wake word event
           await httpsRequest({
             hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
