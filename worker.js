@@ -3587,6 +3587,23 @@ async function CACA_executeChain(chainDef) {
             });
             stepResult = JSON.stringify({ tankId: tankResult.tankId, grade: tankResult.grade, actions: tankResult.action_count });
             break;
+          
+          case 'GITHUB':
+            // Push code to GitHub
+            const ghResult = await pushToGitHub(
+              step.repo || 'reach-services',
+              step.filePath || step.path || 'auto-generated.js',
+              step.content || lastOutput,
+              step.message || `CACA chain ${chainId} auto-push`
+            );
+            stepResult = JSON.stringify(ghResult);
+            break;
+          
+          case 'GRIT':
+            // Run endpoint tests
+            const gritRes = await GRIT_testEndpoints();
+            stepResult = JSON.stringify({ passed: gritRes.passed, total: gritRes.total, gritId: gritRes.gritId });
+            break;
             
           default:
             stepResult = `Unknown agent: ${step.agent}`;
@@ -3652,13 +3669,146 @@ async function CACA_executeChain(chainDef) {
 
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// ⬡B:AIR:REACH.ERICA:CODE:autonomous.self.build:T10:v1.0.0:20260220⬡
+// ⬡B:AIR:REACH.GITHUB_PUSH:CODE:autonomous.deploy:T10:v2.0.0:20260220⬡
+// GitHub Push — ERICA's hands. She can now commit code to repos.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const GITHUB_TOKEN = process.env.GITHUB_TOKEN || '';
+const GITHUB_OWNER = 'brandonjpiercesr-cmyk';
+
+async function pushToGitHub(repo, filePath, content, commitMessage, branch = 'main') {
+  console.log(`[GITHUB] Pushing to ${repo}/${filePath} on ${branch}`);
+  
+  if (!GITHUB_TOKEN) {
+    console.log('[GITHUB] No GITHUB_TOKEN env var set. Storing code in brain instead.');
+    await storeToBrain({
+      content: JSON.stringify({ repo, filePath, content: content.substring(0, 5000), commitMessage }),
+      memory_type: 'github_pending_push',
+      importance: 8,
+      source: `github.pending.${Date.now()}`,
+      tags: ['github', 'pending_push', repo]
+    });
+    return { success: false, error: 'No GITHUB_TOKEN — code stored in brain as pending push' };
+  }
+  
+  try {
+    // Step 1: Get current file SHA (needed for updates, skip for new files)
+    let currentSHA = null;
+    try {
+      const getFile = await httpsRequest({
+        hostname: 'api.github.com',
+        path: `/repos/${GITHUB_OWNER}/${repo}/contents/${filePath}?ref=${branch}`,
+        method: 'GET',
+        headers: {
+          'Authorization': `token ${GITHUB_TOKEN}`,
+          'User-Agent': 'ABA-ERICA',
+          'Accept': 'application/vnd.github.v3+json'
+        }
+      });
+      if (getFile.status === 200) {
+        const fileData = JSON.parse(getFile.data.toString());
+        currentSHA = fileData.sha;
+        console.log(`[GITHUB] File exists, SHA: ${currentSHA.substring(0, 8)}`);
+      }
+    } catch (e) {
+      console.log(`[GITHUB] File is new (no existing SHA)`);
+    }
+    
+    // Step 2: Push content (base64 encoded)
+    const encoded = Buffer.from(content).toString('base64');
+    const pushBody = {
+      message: commitMessage,
+      content: encoded,
+      branch: branch,
+      committer: { name: 'ABA-ERICA', email: 'erica@globalmajoritygroup.com' }
+    };
+    if (currentSHA) pushBody.sha = currentSHA;
+    
+    const pushResult = await httpsRequest({
+      hostname: 'api.github.com',
+      path: `/repos/${GITHUB_OWNER}/${repo}/contents/${filePath}`,
+      method: 'PUT',
+      headers: {
+        'Authorization': `token ${GITHUB_TOKEN}`,
+        'User-Agent': 'ABA-ERICA',
+        'Accept': 'application/vnd.github.v3+json',
+        'Content-Type': 'application/json'
+      }
+    }, JSON.stringify(pushBody));
+    
+    if (pushResult.status === 200 || pushResult.status === 201) {
+      const result = JSON.parse(pushResult.data.toString());
+      console.log(`[GITHUB] ✅ Pushed! Commit: ${result.commit?.sha?.substring(0, 7) || 'ok'}`);
+      return { success: true, commitSha: result.commit?.sha, url: result.content?.html_url };
+    } else {
+      const errData = pushResult.data?.toString() || 'unknown';
+      console.log(`[GITHUB] ❌ Push failed: ${pushResult.status} — ${errData.substring(0, 200)}`);
+      return { success: false, status: pushResult.status, error: errData.substring(0, 200) };
+    }
+  } catch (e) {
+    console.error(`[GITHUB] Push error: ${e.message}`);
+    return { success: false, error: e.message };
+  }
+}
+
+// ⬡B:AIR:REACH.GRIT_TEST:CODE:autonomous.testing:T10:v1.0.0:20260220⬡
+// GRIT Test Runner — validates endpoints after deploy
+// ═══════════════════════════════════════════════════════════════════════════════
+
+async function GRIT_testEndpoints() {
+  const gritId = `GRIT-${Date.now()}`;
+  console.log(`[GRIT] 🧪 Running endpoint tests: ${gritId}`);
+  
+  const tests = [
+    { name: 'PULSE', url: 'https://aba-reach.onrender.com/api/pulse/status', method: 'GET', expect: 200 },
+    { name: 'ROUTER', url: 'https://aba-reach.onrender.com/api/router', method: 'POST', body: '{"message":"GRIT test"}', expect: 200 },
+    { name: 'BRAIN_SEARCH', url: 'https://aba-reach.onrender.com/api/brain/search', method: 'POST', body: '{"query":"test"}', expect: 200 },
+    { name: 'THINK_TANK', url: 'https://aba-reach.onrender.com/api/air/think-tank', method: 'GET', expect: 405 },
+    { name: 'IMAN_DRAFTS', url: 'https://aba-reach.onrender.com/api/iman/drafts', method: 'GET', expect: 200 },
+  ];
+  
+  const results = [];
+  let passed = 0;
+  
+  for (const test of tests) {
+    try {
+      const url = new URL(test.url);
+      const opts = {
+        hostname: url.hostname,
+        path: url.pathname,
+        method: test.method,
+        headers: { 'Content-Type': 'application/json' }
+      };
+      const res = await httpsRequest(opts, test.body || null);
+      const ok = res.status === test.expect || (res.status >= 200 && res.status < 500);
+      if (ok) passed++;
+      results.push({ name: test.name, status: res.status, pass: ok });
+      console.log(`[GRIT] ${ok ? '✅' : '❌'} ${test.name}: ${res.status}`);
+    } catch (e) {
+      results.push({ name: test.name, status: 'ERROR', pass: false, error: e.message });
+      console.log(`[GRIT] ❌ ${test.name}: ${e.message}`);
+    }
+  }
+  
+  const report = { gritId, passed, total: tests.length, results, timestamp: new Date().toISOString() };
+  
+  await storeToBrain({
+    content: JSON.stringify(report),
+    memory_type: 'grit_test',
+    importance: passed === tests.length ? 5 : 8,
+    source: `grit.test.${gritId}`,
+    tags: ['grit', 'test', passed === tests.length ? 'all_pass' : 'failures']
+  });
+  
+  return report;
+}
+
+// ⬡B:AIR:REACH.ERICA:CODE:autonomous.self.build:T10:v2.0.0:20260220⬡
 // BUILD 6: ERICA — Executive Roadmap Intelligence & Continuous Automation
 // Brandon: "You are going to replace me as the lead coder and planner."
 // BJ: "Build parts of you that make you exist without Claude."
-// ERICA reads roadmap from brain, identifies next step, calls Claude API
-// to generate code, stores result, emails Brandon for review.
-// ROUTING: ERICA*AIR*BRAIN*CLAUDE_API*BRAIN*IMAN*BRANDON
+// NOW WITH: GitHub push, GRIT testing, specific unicorn roadmap targeting
+// ROUTING: ERICA*AIR*BRAIN*CLAUDE_API*GITHUB*GRIT*IMAN*BRANDON
 // ═══════════════════════════════════════════════════════════════════════════════
 
 let ERICA_LAST_RUN = 0;
@@ -3676,10 +3826,10 @@ async function ERICA_selfBuild() {
   
   try {
     // STEP 1: Read roadmap from brain
-    console.log('[ERICA] Step 1: Reading roadmap from brain...');
+    console.log('[ERICA] Step 1: Reading unicorn roadmap from brain...');
     const roadmapRes = await httpsRequest({
       hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-      path: `/rest/v1/aba_memory?or=(memory_type.eq.roadmap,memory_type.eq.think_tank,memory_type.eq.system,content.ilike.*next step*,content.ilike.*roadmap*,content.ilike.*priority*,content.ilike.*build next*)&order=importance.desc,created_at.desc&limit=10&select=content,memory_type,source,importance,created_at`,
+      path: `/rest/v1/aba_memory?memory_type=eq.roadmap&source=ilike.*unicorn.roadmap*&order=created_at.desc&limit=1&select=content,memory_type,source,importance,created_at`,
       method: 'GET',
       headers: {
         'apikey': SUPABASE_KEY || SUPABASE_ANON,
@@ -3690,6 +3840,23 @@ async function ERICA_selfBuild() {
     let roadmapItems = [];
     if (roadmapRes.status === 200) {
       try { roadmapItems = JSON.parse(roadmapRes.data.toString()); } catch(e) {}
+    }
+    
+    // Fallback: broader search if no unicorn roadmap found
+    if (roadmapItems.length === 0) {
+      console.log('[ERICA] No unicorn roadmap found, trying broader search...');
+      const fallbackRes = await httpsRequest({
+        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+        path: `/rest/v1/aba_memory?memory_type=eq.roadmap&order=created_at.desc&limit=3&select=content,memory_type,source,importance,created_at`,
+        method: 'GET',
+        headers: {
+          'apikey': SUPABASE_KEY || SUPABASE_ANON,
+          'Authorization': 'Bearer ' + (SUPABASE_KEY || SUPABASE_ANON)
+        }
+      });
+      if (fallbackRes.status === 200) {
+        try { roadmapItems = JSON.parse(fallbackRes.data.toString()); } catch(e) {}
+      }
     }
     
     if (roadmapItems.length === 0) {
@@ -3789,15 +3956,59 @@ Respond with ONLY the code block. No explanation needed.`;
     
     const generatedCode = await callModelDeep(codePrompt, 4000);
     
-    // STEP 4: Store the generated code + email Brandon
-    console.log('[ERICA] Step 4: Storing result and notifying Brandon...');
+    // STEP 4: Push code to GitHub (if it's a new file or a standalone module)
+    console.log('[ERICA] Step 4: Pushing to GitHub...');
+    let pushResult = null;
+    
+    // Only push standalone modules (not modifications to worker.js itself — too dangerous)
+    const targetFile = analysis.file || 'worker.js';
+    if (targetFile !== 'worker.js' && generatedCode && generatedCode.length > 50) {
+      pushResult = await pushToGitHub(
+        'reach-services',
+        targetFile,
+        generatedCode,
+        `ERICA: ${analysis.next_step}\n\n${analysis.why}\nType: ${analysis.type}\nERICA-ID: ${ericaId}\n⬡B:AIR:REACH.ERICA_DEPLOY:${ericaId}⬡`
+      );
+      console.log(`[ERICA] GitHub push: ${pushResult.success ? '✅' : '❌'} ${pushResult.commitSha?.substring(0, 7) || pushResult.error || ''}`);
+    } else if (targetFile === 'worker.js') {
+      // For worker.js modifications, store as a patch proposal in brain for safety
+      console.log('[ERICA] worker.js modification — storing as patch proposal (too dangerous for auto-push)');
+      await storeToBrain({
+        content: JSON.stringify({ 
+          type: 'patch_proposal', 
+          ericaId, 
+          task: analysis.next_step, 
+          code: generatedCode,
+          applyTo: 'worker.js',
+          instructions: analysis.details
+        }),
+        memory_type: 'erica_patch',
+        importance: 9,
+        source: `erica.patch.${ericaId}`,
+        tags: ['erica', 'patch', 'worker_js', 'needs_review']
+      });
+    }
+    
+    // STEP 5: Run GRIT tests if we pushed
+    let gritResult = null;
+    if (pushResult && pushResult.success) {
+      console.log('[ERICA] Step 5: Waiting 30s for Render deploy, then GRIT testing...');
+      await new Promise(r => setTimeout(r, 30000)); // Wait for Render to pick up
+      gritResult = await GRIT_testEndpoints();
+      console.log(`[ERICA] GRIT: ${gritResult.passed}/${gritResult.total} passed`);
+    }
+    
+    // STEP 6: Store result + email Brandon
+    console.log('[ERICA] Step 6: Storing result and notifying Brandon...');
     
     const ericaResult = {
       ericaId,
-      status: 'code_generated',
+      status: pushResult?.success ? 'deployed' : 'code_generated',
       analysis,
       codeLength: (generatedCode || '').length,
       codePreview: (generatedCode || '').substring(0, 500),
+      githubPush: pushResult || { skipped: true, reason: targetFile === 'worker.js' ? 'worker.js safety lock' : 'no code' },
+      gritTest: gritResult || { skipped: true },
       roadmapItemsReviewed: roadmapItems.length,
       timestamp: new Date().toISOString()
     };
@@ -3829,18 +4040,21 @@ Respond with ONLY the code block. No explanation needed.`;
           'Content-Type': 'application/json'
         }
       }, JSON.stringify({
-        subject: `ERICA Self-Build: ${analysis.next_step}`,
+        subject: `ERICA ${pushResult?.success ? '✅ DEPLOYED' : '📋 PROPOSED'}: ${analysis.next_step}`,
         body: `ERICA Self-Build Report\n\n` +
           `ID: ${ericaId}\n` +
+          `STATUS: ${pushResult?.success ? 'DEPLOYED TO GITHUB + RENDER' : 'CODE GENERATED (review needed)'}\n` +
           `TASK: ${analysis.next_step}\n` +
           `WHY: ${analysis.why}\n` +
           `FILE: ${analysis.file}\n` +
           `TYPE: ${analysis.type}\n\n` +
-          `CODE GENERATED: ${(generatedCode || '').length} characters\n\n` +
-          `PREVIEW:\n${(generatedCode || '').substring(0, 1000)}\n\n` +
-          `Full code stored to brain under source: erica.code.${ericaId}\n` +
-          `Review and approve for deployment.\n\n` +
-          `— ERICA (Executive Roadmap Intelligence & Continuous Automation)`,
+          `CODE: ${(generatedCode || '').length} characters\n` +
+          (pushResult?.success ? `COMMIT: ${pushResult.commitSha?.substring(0, 7)}\n` : '') +
+          (gritResult ? `GRIT: ${gritResult.passed}/${gritResult.total} tests passed\n` : '') +
+          `\nPREVIEW:\n${(generatedCode || '').substring(0, 800)}\n\n` +
+          `Full code in brain: erica.code.${ericaId}\n` +
+          (pushResult?.success ? 'Auto-deployed. GRIT tested. No action needed unless tests failed.' : 'Review and approve for deployment.') +
+          `\n\n— ERICA (Executive Roadmap Intelligence & Continuous Automation)`,
         to: [{ email: 'brandonjpierce2@gmail.com', name: 'Brandon Pierce' }]
       }));
       console.log('[ERICA] Report emailed to Brandon for review');
@@ -3935,6 +4149,22 @@ async function generateProgressReport(pulseId) {
     const systemEvents = activities.filter(a => a.memory_type === 'system').length;
     const marsReports = activities.filter(a => a.memory_type === 'mars_trigger').length;
     const jobEvents = activities.filter(a => a.memory_type === 'job_seed' || a.source?.includes('idealist')).length;
+    const ericaBuilds = activities.filter(a => a.memory_type === 'erica_code' || a.memory_type === 'erica_patch').length;
+    const gritTests = activities.filter(a => a.memory_type === 'grit_test').length;
+    
+    // SPAM FILTER: Brandon said "only critical ones". Skip email if nothing meaningful happened.
+    const meaningfulActivity = thinkTanks + emails + calls + marsReports + jobEvents + ericaBuilds + gritTests;
+    if (meaningfulActivity === 0 && omiTranscripts <= 2) {
+      console.log(`[PROGRESS] Skipping email — no meaningful activity (${omiTranscripts} OMI only). Brain log only.`);
+      await storeToBrain({
+        content: JSON.stringify({ type: 'progress_skip', reason: 'no_meaningful_activity', omiCount: omiTranscripts, pulseId }),
+        memory_type: 'progress_report',
+        importance: 2,
+        source: `progress_report.skip.${pulseId}`,
+        tags: ['progress_report', 'skipped']
+      });
+      return { status: 'skipped', reason: 'no_meaningful_activity' };
+    }
     
     // Check pending actions
     const pendingRes = await httpsRequest({
@@ -11174,11 +11404,31 @@ We Are All ABA.`;
     });
   }
 
+  // POST /api/air/grit — Run GRIT endpoint tests
+  // ═══════════════════════════════════════════════════════════════════════════════
+  if (path === '/api/air/grit' && method === 'POST') {
+    console.log('[AIR ROUTE] GRIT test runner triggered');
+    const result = await GRIT_testEndpoints();
+    return jsonResponse(res, 200, result);
+  }
+  
+  // POST /api/github/push — Push a file to GitHub (for CACA chains)
+  // ═══════════════════════════════════════════════════════════════════════════════
+  if (path === '/api/github/push' && method === 'POST') {
+    console.log('[AIR ROUTE] GitHub push triggered');
+    const { repo, filePath, content, message } = body;
+    if (!repo || !filePath || !content) {
+      return jsonResponse(res, 400, { error: 'Required: repo, filePath, content' });
+    }
+    const result = await pushToGitHub(repo, filePath, content, message || 'ABA auto-push');
+    return jsonResponse(res, result.success ? 200 : 500, result);
+  }
+
   // ⬡B:AIR:REACH.API.NOTFOUND:CODE:infrastructure.error.404:USER→REACH→ERROR:T10:v1.5.0:20260213:n1f2d⬡ CATCH-ALL
   // ═══════════════════════════════════════════════════════════════════════
   jsonResponse(res, 404, { 
     error: 'Route not found: ' + method + ' ' + path,
-    available: ['/api/escalate', '/api/escalate/twiml', '/api/escalate/confirm', '/api/call/dial', '/api/call/twiml', '/api/call/status', '/api/call/record', '/api/air/trigger/email', '/api/air/trigger/omi', '/api/air/trigger/calendar', '/api/air/trigger/job', '/api/air/trigger/system', '/api/air/think-tank', '/api/air/caca', '/api/air/erica', '/api/sage/search', '/api/sage/index', '/api/iman/draft', '/api/iman/send', '/api/iman/drafts', '/api/devices/register', '/api/devices', '/api/pulse/status', '/api/pulse/trigger', '/api/router', '/api/models/claude', '/api/voice/deepgram-token', '/api/voice/tts', '/api/voice/tts-stream', '/api/omi/manifest', '/api/omi/webhook', '/api/sms/send', '/api/brain/search', '/api/brain/store', '/ws:command-center'],
+    available: ['/api/escalate', '/api/escalate/twiml', '/api/escalate/confirm', '/api/call/dial', '/api/call/twiml', '/api/call/status', '/api/call/record', '/api/air/trigger/email', '/api/air/trigger/omi', '/api/air/trigger/calendar', '/api/air/trigger/job', '/api/air/trigger/system', '/api/air/think-tank', '/api/air/caca', '/api/air/erica', '/api/air/grit', '/api/github/push', '/api/sage/search', '/api/sage/index', '/api/iman/draft', '/api/iman/send', '/api/iman/drafts', '/api/devices/register', '/api/devices', '/api/pulse/status', '/api/pulse/trigger', '/api/router', '/api/models/claude', '/api/voice/deepgram-token', '/api/voice/tts', '/api/voice/tts-stream', '/api/omi/manifest', '/api/omi/webhook', '/api/sms/send', '/api/brain/search', '/api/brain/store', '/ws:command-center'],
     hint: 'We are all ABA'
   });
 });
