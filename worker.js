@@ -3464,6 +3464,413 @@ Respond in JSON ONLY:
 }
 
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:AIR:REACH.CACA:CODE:autonomous.agent.chain:T10:v1.0.0:20260220⬡
+// BUILD 5: CACA — Connecting Agents for Continuous Autonomy
+// Brandon: "Create connecting agents for a continuous cycle. Call it CACA."
+// When one agent finishes, it triggers the next. First real agent chain.
+// ROUTING: TRIGGER*AIR*CACA*AGENT1*AGENT2*...*BRAIN*REPORT
+// TIM FLAG: Circuit breakers to prevent infinite loops (max 10 steps, 5 min timeout)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const CACA_MAX_STEPS = 10;
+const CACA_TIMEOUT = 5 * 60 * 1000; // 5 min max chain
+const CACA_ACTIVE_CHAINS = new Map();
+
+async function CACA_executeChain(chainDef) {
+  const chainId = `CACA-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
+  const startTime = Date.now();
+  
+  console.log(`[CACA] ⛓ Starting chain: ${chainId} | Steps: ${chainDef.steps?.length || 0}`);
+  
+  if (!chainDef.steps || chainDef.steps.length === 0) {
+    return { chainId, success: false, error: 'No steps defined' };
+  }
+  
+  if (chainDef.steps.length > CACA_MAX_STEPS) {
+    return { chainId, success: false, error: `Too many steps (${chainDef.steps.length}). Max: ${CACA_MAX_STEPS}` };
+  }
+  
+  // Circuit breaker: prevent concurrent chains on same trigger
+  if (CACA_ACTIVE_CHAINS.size >= 3) {
+    return { chainId, success: false, error: 'Too many active chains (max 3). Wait for completion.' };
+  }
+  
+  CACA_ACTIVE_CHAINS.set(chainId, { startTime, status: 'running' });
+  
+  const results = [];
+  let lastOutput = chainDef.initialInput || '';
+  
+  try {
+    for (let i = 0; i < chainDef.steps.length; i++) {
+      // Timeout check
+      if (Date.now() - startTime > CACA_TIMEOUT) {
+        console.log(`[CACA] ⏰ Chain ${chainId} timed out at step ${i + 1}`);
+        results.push({ step: i + 1, agent: chainDef.steps[i].agent, status: 'TIMEOUT' });
+        break;
+      }
+      
+      const step = chainDef.steps[i];
+      console.log(`[CACA] Step ${i + 1}/${chainDef.steps.length}: ${step.agent} — ${step.action}`);
+      
+      try {
+        let stepResult;
+        
+        switch (step.agent) {
+          case 'LLM':
+          case 'CLAUDE':
+            // Call Claude API for reasoning/generation
+            stepResult = await callModelDeep(
+              `${step.prompt || step.action}\n\nContext from previous step:\n${lastOutput}`,
+              step.maxTokens || 2000
+            );
+            break;
+            
+          case 'BRAIN_READ':
+            // Search brain for context
+            const searchRes = await httpsRequest({
+              hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+              path: `/rest/v1/aba_memory?content=ilike.*${encodeURIComponent(step.searchTerm || step.action)}*&limit=5&order=importance.desc&select=content,memory_type,source`,
+              method: 'GET',
+              headers: {
+                'apikey': SUPABASE_KEY || SUPABASE_ANON,
+                'Authorization': 'Bearer ' + (SUPABASE_KEY || SUPABASE_ANON)
+              }
+            });
+            stepResult = searchRes.status === 200 ? searchRes.data.toString() : 'No results';
+            break;
+            
+          case 'BRAIN_WRITE':
+            // Store to brain
+            await storeToBrain({
+              content: step.content || lastOutput,
+              memory_type: step.memoryType || 'caca_chain',
+              categories: ['caca', 'chain', chainId],
+              importance: step.importance || 6,
+              is_system: false,
+              source: `caca.${chainId}.step${i + 1}`,
+              tags: ['caca', 'chain', step.tag || 'auto']
+            });
+            stepResult = 'Stored to brain';
+            break;
+            
+          case 'EMAIL':
+            // Send email via Nylas
+            const NYLAS_GRANT = process.env.NYLAS_GRANT_ID || '';
+            const NYLAS_KEY = process.env.NYLAS_API_KEY || '';
+            if (NYLAS_GRANT && NYLAS_KEY) {
+              await httpsRequest({
+                hostname: 'api.us.nylas.com',
+                path: `/v3/grants/${NYLAS_GRANT}/messages/send`,
+                method: 'POST',
+                headers: {
+                  'Authorization': 'Bearer ' + NYLAS_KEY,
+                  'Content-Type': 'application/json'
+                }
+              }, JSON.stringify({
+                subject: step.subject || `CACA Chain Result: ${chainId}`,
+                body: step.body || lastOutput,
+                to: [{ email: step.to || 'brandonjpierce2@gmail.com', name: 'Brandon Pierce' }]
+              }));
+              stepResult = 'Email sent';
+            } else {
+              stepResult = 'No Nylas credentials';
+            }
+            break;
+            
+          case 'THINK_TANK':
+            // Run through Think Tank
+            const tankResult = await AIR_thinkTank({
+              transcript: lastOutput,
+              source: 'caca_chain',
+              title: step.title || `CACA Chain Step ${i + 1}`
+            });
+            stepResult = JSON.stringify({ tankId: tankResult.tankId, grade: tankResult.grade, actions: tankResult.action_count });
+            break;
+            
+          default:
+            stepResult = `Unknown agent: ${step.agent}`;
+        }
+        
+        results.push({ step: i + 1, agent: step.agent, action: step.action, status: 'COMPLETE', output: (stepResult || '').substring(0, 500) });
+        lastOutput = stepResult || '';
+        
+      } catch (stepErr) {
+        console.error(`[CACA] Step ${i + 1} error:`, stepErr.message);
+        results.push({ step: i + 1, agent: step.agent, status: 'ERROR', error: stepErr.message });
+        
+        // If step is critical, break chain
+        if (step.critical) {
+          console.log(`[CACA] Critical step failed. Breaking chain.`);
+          break;
+        }
+        // Otherwise continue to next step
+      }
+    }
+    
+    const elapsed = Date.now() - startTime;
+    const completedSteps = results.filter(r => r.status === 'COMPLETE').length;
+    
+    const chainResult = {
+      chainId,
+      success: completedSteps > 0,
+      stepsCompleted: completedSteps,
+      totalSteps: chainDef.steps.length,
+      elapsed_ms: elapsed,
+      results,
+      finalOutput: lastOutput?.substring(0, 1000)
+    };
+    
+    // Store chain result to brain
+    await storeToBrain({
+      content: JSON.stringify(chainResult),
+      memory_type: 'caca_chain_result',
+      categories: ['caca', 'chain', 'result'],
+      importance: 7,
+      is_system: false,
+      source: `caca.result.${chainId}`,
+      tags: ['caca', 'chain_result', ...chainDef.tags || []]
+    });
+    
+    console.log(`[CACA] ✅ Chain ${chainId} complete: ${completedSteps}/${chainDef.steps.length} steps | ${elapsed}ms`);
+    
+    broadcastToCommandCenter({
+      type: 'caca_chain_complete',
+      chainId,
+      stepsCompleted: completedSteps,
+      totalSteps: chainDef.steps.length,
+      elapsed_ms: elapsed,
+      timestamp: new Date().toISOString()
+    });
+    
+    return chainResult;
+    
+  } finally {
+    CACA_ACTIVE_CHAINS.delete(chainId);
+  }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:AIR:REACH.ERICA:CODE:autonomous.self.build:T10:v1.0.0:20260220⬡
+// BUILD 6: ERICA — Executive Roadmap Intelligence & Continuous Automation
+// Brandon: "You are going to replace me as the lead coder and planner."
+// BJ: "Build parts of you that make you exist without Claude."
+// ERICA reads roadmap from brain, identifies next step, calls Claude API
+// to generate code, stores result, emails Brandon for review.
+// ROUTING: ERICA*AIR*BRAIN*CLAUDE_API*BRAIN*IMAN*BRANDON
+// ═══════════════════════════════════════════════════════════════════════════════
+
+let ERICA_LAST_RUN = 0;
+const ERICA_COOLDOWN = 30 * 60 * 1000; // 30 min cooldown between runs
+
+async function ERICA_selfBuild() {
+  const now = Date.now();
+  if (now - ERICA_LAST_RUN < ERICA_COOLDOWN) {
+    return { status: 'cooldown', nextRun: new Date(ERICA_LAST_RUN + ERICA_COOLDOWN).toISOString() };
+  }
+  ERICA_LAST_RUN = now;
+  
+  const ericaId = `ERICA-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
+  console.log(`[ERICA] 🔧 Self-build cycle starting: ${ericaId}`);
+  
+  try {
+    // STEP 1: Read roadmap from brain
+    console.log('[ERICA] Step 1: Reading roadmap from brain...');
+    const roadmapRes = await httpsRequest({
+      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+      path: `/rest/v1/aba_memory?or=(memory_type.eq.roadmap,memory_type.eq.think_tank,memory_type.eq.system,content.ilike.*next step*,content.ilike.*roadmap*,content.ilike.*priority*,content.ilike.*build next*)&order=importance.desc,created_at.desc&limit=10&select=content,memory_type,source,importance,created_at`,
+      method: 'GET',
+      headers: {
+        'apikey': SUPABASE_KEY || SUPABASE_ANON,
+        'Authorization': 'Bearer ' + (SUPABASE_KEY || SUPABASE_ANON)
+      }
+    });
+    
+    let roadmapItems = [];
+    if (roadmapRes.status === 200) {
+      try { roadmapItems = JSON.parse(roadmapRes.data.toString()); } catch(e) {}
+    }
+    
+    if (roadmapItems.length === 0) {
+      console.log('[ERICA] No roadmap items found. Storing request for roadmap.');
+      await storeToBrain({
+        content: 'ERICA needs a roadmap. No actionable items found in brain. Brandon should provide next priorities or run a Think Tank session.',
+        memory_type: 'erica_request',
+        importance: 8,
+        source: `erica.request.${ericaId}`,
+        tags: ['erica', 'needs_roadmap']
+      });
+      return { ericaId, status: 'needs_roadmap', message: 'No actionable items in brain. Need roadmap input.' };
+    }
+    
+    // STEP 2: Ask Claude to identify the single most important next step
+    console.log('[ERICA] Step 2: Analyzing roadmap with Claude...');
+    const roadmapContext = roadmapItems.map(r => {
+      const content = typeof r.content === 'string' ? r.content.substring(0, 300) : JSON.stringify(r.content).substring(0, 300);
+      return `[${r.memory_type}|imp:${r.importance}] ${content}`;
+    }).join('\n\n');
+    
+    const analysisPrompt = `You are ERICA (Executive Roadmap Intelligence & Continuous Automation), an autonomous agent for the ABA ecosystem.
+
+Your job: Read the roadmap items below and identify the SINGLE most actionable next step that can be executed RIGHT NOW on the server without human intervention.
+
+RULES:
+- Pick something concrete: a function to write, an endpoint to add, a config to change
+- It must be doable via code generation (you'll write the code next)
+- Prefer server-side improvements (worker.js on Render) over UI work
+- Prefer things that increase ABA's autonomy
+- If nothing is actionable without Brandon, say so
+
+ROADMAP ITEMS FROM BRAIN:
+${roadmapContext}
+
+Respond in JSON:
+{
+  "next_step": "one sentence describing the concrete task",
+  "why": "why this is the priority",
+  "file": "which file to modify",
+  "type": "new_function|modify_existing|new_endpoint|config_change",
+  "actionable_now": true/false,
+  "details": "specific implementation notes"
+}`;
+    
+    const analysisResult = await callModelDeep(analysisPrompt, 1000);
+    
+    let analysis;
+    try {
+      const cleaned = (analysisResult || '').replace(/```json|```/g, '').trim();
+      const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+      analysis = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
+    } catch(e) {
+      analysis = null;
+    }
+    
+    if (!analysis || !analysis.actionable_now) {
+      console.log('[ERICA] No actionable step identified:', analysis?.next_step || 'parse failed');
+      
+      const report = {
+        ericaId,
+        status: 'no_actionable_step',
+        analysis: analysis || { next_step: 'Could not parse', why: 'Analysis failed' },
+        roadmapItemsReviewed: roadmapItems.length
+      };
+      
+      await storeToBrain({
+        content: JSON.stringify(report),
+        memory_type: 'erica_report',
+        importance: 5,
+        source: `erica.report.${ericaId}`,
+        tags: ['erica', 'report', 'no_action']
+      });
+      
+      return report;
+    }
+    
+    // STEP 3: Generate the code/solution
+    console.log(`[ERICA] Step 3: Generating solution for: ${analysis.next_step}`);
+    const codePrompt = `You are ERICA generating code for the ABA REACH server (worker.js on Render, Node.js, no frameworks).
+
+TASK: ${analysis.next_step}
+WHY: ${analysis.why}
+FILE: ${analysis.file}
+TYPE: ${analysis.type}
+DETAILS: ${analysis.details}
+
+Generate the code. Follow these rules:
+- Use existing patterns from REACH (httpsRequest, storeToBrain, callModel, callModelDeep)
+- Route everything through AIR
+- Include ACL tag: ⬡B:AIR:REACH.ERICA_GEN:CODE:...⬡
+- Add console.log for every step
+- No orphan processes
+- Store results to brain
+
+Respond with ONLY the code block. No explanation needed.`;
+    
+    const generatedCode = await callModelDeep(codePrompt, 4000);
+    
+    // STEP 4: Store the generated code + email Brandon
+    console.log('[ERICA] Step 4: Storing result and notifying Brandon...');
+    
+    const ericaResult = {
+      ericaId,
+      status: 'code_generated',
+      analysis,
+      codeLength: (generatedCode || '').length,
+      codePreview: (generatedCode || '').substring(0, 500),
+      roadmapItemsReviewed: roadmapItems.length,
+      timestamp: new Date().toISOString()
+    };
+    
+    // Store to brain
+    await storeToBrain({
+      content: JSON.stringify({
+        ...ericaResult,
+        fullCode: generatedCode
+      }),
+      memory_type: 'erica_code',
+      categories: ['erica', 'code_generation', 'self_build'],
+      importance: 9,
+      is_system: false,
+      source: `erica.code.${ericaId}`,
+      tags: ['erica', 'self_build', 'code', analysis.type]
+    });
+    
+    // Email Brandon for review
+    const NYLAS_GRANT = process.env.NYLAS_GRANT_ID || '';
+    const NYLAS_KEY = process.env.NYLAS_API_KEY || '';
+    if (NYLAS_GRANT && NYLAS_KEY) {
+      await httpsRequest({
+        hostname: 'api.us.nylas.com',
+        path: `/v3/grants/${NYLAS_GRANT}/messages/send`,
+        method: 'POST',
+        headers: {
+          'Authorization': 'Bearer ' + NYLAS_KEY,
+          'Content-Type': 'application/json'
+        }
+      }, JSON.stringify({
+        subject: `ERICA Self-Build: ${analysis.next_step}`,
+        body: `ERICA Self-Build Report\n\n` +
+          `ID: ${ericaId}\n` +
+          `TASK: ${analysis.next_step}\n` +
+          `WHY: ${analysis.why}\n` +
+          `FILE: ${analysis.file}\n` +
+          `TYPE: ${analysis.type}\n\n` +
+          `CODE GENERATED: ${(generatedCode || '').length} characters\n\n` +
+          `PREVIEW:\n${(generatedCode || '').substring(0, 1000)}\n\n` +
+          `Full code stored to brain under source: erica.code.${ericaId}\n` +
+          `Review and approve for deployment.\n\n` +
+          `— ERICA (Executive Roadmap Intelligence & Continuous Automation)`,
+        to: [{ email: 'brandonjpierce2@gmail.com', name: 'Brandon Pierce' }]
+      }));
+      console.log('[ERICA] Report emailed to Brandon for review');
+    }
+    
+    broadcastToCommandCenter({
+      type: 'erica_self_build',
+      ericaId,
+      task: analysis.next_step,
+      codeLength: (generatedCode || '').length,
+      timestamp: new Date().toISOString()
+    });
+    
+    console.log(`[ERICA] ✅ Self-build cycle complete: ${ericaId}`);
+    return ericaResult;
+    
+  } catch (e) {
+    console.error('[ERICA] Self-build error:', e.message);
+    await storeToBrain({
+      content: `ERICA ERROR: ${e.message}`,
+      memory_type: 'erica_error',
+      importance: 7,
+      source: `erica.error.${ericaId}`,
+      tags: ['erica', 'error']
+    });
+    return { ericaId, status: 'error', error: e.message };
+  }
+}
+
+
 
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -3482,6 +3889,148 @@ Respond in JSON ONLY:
 
 const HEARTBEAT_INTERVAL = 5 * 60 * 1000; // 5 minutes
 const COMMAND_CENTER_CLIENTS = new Set();
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:AIR:REACH.PROGRESS_REPORT:CODE:autonomous.checkin:T10:v1.0.0:20260220⬡
+// BUILD 3: PROGRESS REPORT LOOP - Autonomous check-ins every 2 hours
+// Brandon: "keep emailing me progress reports so I know you're active,
+//           include your next check-in time"
+// ROUTING: PULSE*AIR*BRAIN*IMAN*BRANDON
+// ═══════════════════════════════════════════════════════════════════════════════
+const PROGRESS_REPORT_INTERVAL = 2 * 60 * 60 * 1000; // 2 hours
+let lastProgressReport = 0;
+
+async function generateProgressReport(pulseId) {
+  const now = Date.now();
+  if (now - lastProgressReport < PROGRESS_REPORT_INTERVAL) return null;
+  
+  console.log(`[PROGRESS] Generating autonomous progress report... (${pulseId})`);
+  lastProgressReport = now;
+  
+  try {
+    // Query brain for recent activity (last 2 hours)
+    const twoHoursAgo = new Date(now - PROGRESS_REPORT_INTERVAL).toISOString();
+    const recentActivity = await httpsRequest({
+      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+      path: `/rest/v1/aba_memory?created_at=gte.${twoHoursAgo}&order=created_at.desc&limit=20&select=content,memory_type,source,created_at`,
+      method: 'GET',
+      headers: {
+        'apikey': SUPABASE_KEY || SUPABASE_ANON,
+        'Authorization': 'Bearer ' + (SUPABASE_KEY || SUPABASE_ANON)
+      }
+    });
+    
+    let activities = [];
+    if (recentActivity.status === 200) {
+      try {
+        activities = JSON.parse(recentActivity.data.toString());
+      } catch(e) { activities = []; }
+    }
+    
+    // Categorize activity
+    const omiTranscripts = activities.filter(a => a.memory_type === 'omi_transcript').length;
+    const thinkTanks = activities.filter(a => a.memory_type === 'think_tank').length;
+    const emails = activities.filter(a => a.memory_type === 'email_sent' || a.source?.includes('email')).length;
+    const calls = activities.filter(a => a.memory_type === 'call_log' || a.memory_type === 'scheduled_call').length;
+    const systemEvents = activities.filter(a => a.memory_type === 'system').length;
+    const marsReports = activities.filter(a => a.memory_type === 'mars_trigger').length;
+    const jobEvents = activities.filter(a => a.memory_type === 'job_seed' || a.source?.includes('idealist')).length;
+    
+    // Check pending actions
+    const pendingRes = await httpsRequest({
+      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+      path: `/rest/v1/aba_memory?memory_type=eq.pending_action&select=content,created_at&limit=5`,
+      method: 'GET',
+      headers: {
+        'apikey': SUPABASE_KEY || SUPABASE_ANON,
+        'Authorization': 'Bearer ' + (SUPABASE_KEY || SUPABASE_ANON)
+      }
+    });
+    let pendingActions = [];
+    if (pendingRes.status === 200) {
+      try { pendingActions = JSON.parse(pendingRes.data.toString()); } catch(e) {}
+    }
+    
+    const nextCheckIn = new Date(now + PROGRESS_REPORT_INTERVAL);
+    const nextCheckInEST = new Date(nextCheckIn.getTime() - 5 * 60 * 60 * 1000);
+    const checkInTime = nextCheckInEST.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+    
+    const nowEST = new Date(now - 5 * 60 * 60 * 1000);
+    const reportTime = nowEST.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+    
+    // Build report
+    const report = {
+      subject: `ABA Progress Report — ${reportTime} EST`,
+      body: `Progress Report — ${reportTime} EST\n\n` +
+        `ACTIVITY SINCE LAST CHECK-IN:\n` +
+        `• OMI Transcripts Captured: ${omiTranscripts}\n` +
+        `• Think Tank Sessions: ${thinkTanks}\n` +
+        `• Emails Processed: ${emails}\n` +
+        `• Calls Made/Scheduled: ${calls}\n` +
+        `• MARS Reports: ${marsReports}\n` +
+        `• Jobs Seeded: ${jobEvents}\n` +
+        `• System Events: ${systemEvents}\n` +
+        `• Total Brain Writes: ${activities.length}\n\n` +
+        `PENDING ACTIONS: ${pendingActions.length}\n` +
+        (pendingActions.length > 0 ? pendingActions.map(a => `• ${(a.content || '').substring(0, 100)}`).join('\n') + '\n' : '') +
+        `\nSERVER STATUS: PULSE running. All agents responsive.\n` +
+        `\nNEXT CHECK-IN: ${checkInTime} EST\n` +
+        `If I miss this check-in, check PULSE logs or query brain for pulse_error events.\n\n` +
+        `— ABA (Autonomous Progress Report via PULSE)`,
+      nextCheckIn: checkInTime
+    };
+    
+    // Send via Nylas
+    const NYLAS_GRANT = process.env.NYLAS_GRANT_ID || '';
+    const NYLAS_KEY = process.env.NYLAS_API_KEY || '';
+    const BRANDON_EMAIL = 'brandonjpierce2@gmail.com';
+    
+    if (NYLAS_GRANT && NYLAS_KEY) {
+      await httpsRequest({
+        hostname: 'api.us.nylas.com',
+        path: `/v3/grants/${NYLAS_GRANT}/messages/send`,
+        method: 'POST',
+        headers: {
+          'Authorization': 'Bearer ' + NYLAS_KEY,
+          'Content-Type': 'application/json'
+        }
+      }, JSON.stringify({
+        subject: report.subject,
+        body: report.body,
+        to: [{ email: BRANDON_EMAIL, name: 'Brandon Pierce' }]
+      }));
+      console.log(`[PROGRESS] Report emailed to Brandon. Next check-in: ${checkInTime} EST`);
+    } else {
+      console.log('[PROGRESS] No Nylas credentials - storing report to brain only');
+    }
+    
+    // Store to brain
+    await storeToBrain({
+      content: JSON.stringify(report),
+      memory_type: 'progress_report',
+      categories: ['progress', 'autonomous', 'pulse'],
+      importance: 6,
+      is_system: true,
+      source: `progress_report.${pulseId}`,
+      tags: ['progress_report', 'autonomous', 'pulse']
+    });
+    
+    // Broadcast to Command Center
+    broadcastToCommandCenter({
+      type: 'progress_report',
+      id: pulseId,
+      report: report.subject,
+      nextCheckIn: checkInTime,
+      activityCount: activities.length,
+      timestamp: new Date().toISOString()
+    });
+    
+    return report;
+  } catch (e) {
+    console.error('[PROGRESS] Report generation error:', e.message);
+    return null;
+  }
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // ⬡B:AIR:REACH.ESCALATION.THROTTLE:CODE:call.cooldown.protection:T10:v1.0.0:20260214⬡
@@ -3551,6 +4100,19 @@ async function pulseCheck() {
     
     // Check 4: Health check all integrations
     await healthCheck(pulseId);
+    
+    // Check 5: Progress Report (every 2 hours)
+    await generateProgressReport(pulseId);
+    
+    // Check 6: ERICA Self-Build (every 30 min if roadmap items exist)
+    try {
+      const ericaResult = await ERICA_selfBuild();
+      if (ericaResult.status === 'code_generated') {
+        console.log(`[PULSE→ERICA] Self-build completed: ${ericaResult.ericaId}`);
+      }
+    } catch (ericaErr) {
+      console.log('[PULSE→ERICA] Skipped:', ericaErr.message);
+    }
     
     // Broadcast pulse to Command Center
     broadcastToCommandCenter({
@@ -7761,6 +8323,96 @@ Phone: (336) 389-8116</p>
       }
       
       // ═══════════════════════════════════════════════════════════════════════════
+      // ⬡B:AIR:REACH.COOK_SESSION:CODE:omi.auto.think_tank:T10:v1.0.0:20260220⬡
+      // BUILD 4: AUTO-TRIGGER THINK TANK ON COOK SESSIONS
+      // Detect ideation/architecture/scoping conversations → auto-call AIR_thinkTank
+      // ROUTING: OMI*TASTE*THINK_TANK*LUKE*COLE*MACE*TIM*AUDRA*PACK*BRAIN
+      // ═══════════════════════════════════════════════════════════════════════════
+      const COOK_SESSION_SIGNALS = [
+        'cook', 'scope', 'build', 'phase', 'spurt', 'deploy', 'roadmap',
+        'architecture', 'agent', 'air ', 'abacia', 'aba os', 'ccwa',
+        'think tank', 'protocol', 'endpoint', 'api', 'server', 'brain',
+        'firebase', 'supabase', 'render', 'vercel', 'agent chain',
+        'autonomous', 'pulse', 'erica', 'caca', 'mace', 'vara', 'iman',
+        'luke', 'cole', 'pack', 'audra', 'taste', 'dial', 'mars',
+        'we are all aba', 'purple unicorn', 'self-build', 'connecting agents'
+      ];
+      
+      const isCookSession = isCompletedTranscript && 
+        duration >= 180 && // 3+ minutes (shorter than MARS threshold)
+        transcript.length >= 300 && // meaningful content
+        (() => {
+          const lower = transcript.toLowerCase();
+          const signalCount = COOK_SESSION_SIGNALS.filter(s => lower.includes(s)).length;
+          return signalCount >= 3; // Need 3+ signals to confirm cook session
+        })();
+      
+      if (isCookSession) {
+        console.log('[COOK SESSION] Detected! Triggering Think Tank automatically...');
+        
+        try {
+          const tankResult = await AIR_thinkTank({
+            transcript: transcript,
+            source: 'omi_auto',
+            title: 'Auto Cook Session — ' + new Date().toISOString().split('T')[0],
+            participants: (body.speakers || []).map(s => s.name || 'Unknown').join(', ') || 'Brandon + Team'
+          });
+          
+          console.log(`[COOK SESSION] Think Tank complete: ${tankResult.tankId} | Grade: ${tankResult.grade}`);
+          
+          // Email Brandon the summary
+          const NYLAS_GRANT = process.env.NYLAS_GRANT_ID || '';
+          const NYLAS_KEY = process.env.NYLAS_API_KEY || '';
+          if (NYLAS_GRANT && NYLAS_KEY && tankResult.minutes) {
+            await httpsRequest({
+              hostname: 'api.us.nylas.com',
+              path: `/v3/grants/${NYLAS_GRANT}/messages/send`,
+              method: 'POST',
+              headers: {
+                'Authorization': 'Bearer ' + NYLAS_KEY,
+                'Content-Type': 'application/json'
+              }
+            }, JSON.stringify({
+              subject: `Cook Session Processed — Grade ${tankResult.grade} | ${tankResult.action_count} Actions`,
+              body: `Cook Session Auto-Processed via Think Tank\n\n` +
+                `Tank ID: ${tankResult.tankId}\n` +
+                `Grade: ${tankResult.grade}\n` +
+                `Verdict: ${tankResult.verdict}\n` +
+                `Actions: ${tankResult.action_count}\n` +
+                `Decisions: ${tankResult.decision_count}\n` +
+                `Mood: ${tankResult.mood}\n\n` +
+                `SUMMARY:\n${tankResult.minutes?.executive_summary || 'No summary'}\n\n` +
+                `ACTION ITEMS:\n${(tankResult.minutes?.action_items_final || []).map(a => '• ' + a.task + ' (' + a.priority + ')').join('\n') || 'None'}\n\n` +
+                `NEXT STEPS:\n${(tankResult.minutes?.next_steps || []).join('\n• ') || 'None'}\n\n` +
+                `Stored to brain. Full details in Think Tank history.\n\n— ABA (Autonomous Cook Session via OMI → Think Tank)`,
+              to: [{ email: 'brandonjpierce2@gmail.com', name: 'Brandon Pierce' }]
+            }));
+            console.log('[COOK SESSION] Summary emailed to Brandon');
+          }
+          
+          // Broadcast to Command Center
+          broadcastToCommandCenter({
+            type: 'cook_session_processed',
+            tankId: tankResult.tankId,
+            grade: tankResult.grade,
+            actions: tankResult.action_count,
+            mood: tankResult.mood,
+            timestamp: new Date().toISOString()
+          });
+          
+        } catch (cookErr) {
+          console.log('[COOK SESSION] Think Tank error:', cookErr.message);
+          await storeToBrain({
+            content: 'COOK SESSION TRIGGER FAILED: ' + cookErr.message + ' | Transcript length: ' + transcript.length,
+            memory_type: 'system',
+            source: 'cook_session_error_' + Date.now(),
+            importance: 7,
+            tags: ['cook_session', 'error', 'think_tank']
+          });
+        }
+      }
+      
+      // ═══════════════════════════════════════════════════════════════════════════
       // ⬡B:ABCD:BOTH:OMI.AIR.ROUTING:WIRE:v2.5.1:20260214⬡
       // WIRED: If transcript contains "ABA" command, route through AIR
       // Pattern: OMI → processOMIThroughAIR → AIR_process → DISPATCH → Agent
@@ -10373,11 +11025,65 @@ We Are All ABA.`;
     return jsonResponse(res, 200, result);
   }
 
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // ⬡B:AIR:REACH.API.CACA:CODE:autonomous.agent.chain:T10:v1.0.0:20260220⬡
+  // POST /api/air/caca — Execute an agent chain
+  // ═══════════════════════════════════════════════════════════════════════════════
+  if (path === '/api/air/caca' && method === 'POST') {
+    const body = await parseBody(req);
+    console.log('[AIR ROUTE] CACA chain requested');
+    if (!body.steps || !Array.isArray(body.steps) || body.steps.length === 0) {
+      return jsonResponse(res, 400, { 
+        error: 'steps array required',
+        usage: {
+          method: 'POST',
+          body: {
+            steps: [
+              { agent: 'BRAIN_READ', action: 'search for roadmap', searchTerm: 'roadmap' },
+              { agent: 'LLM', action: 'analyze and plan', prompt: 'What should we build next?' },
+              { agent: 'BRAIN_WRITE', action: 'store result', memoryType: 'plan', tag: 'roadmap' },
+              { agent: 'EMAIL', action: 'notify Brandon', subject: 'CACA Result', to: 'brandonjpierce2@gmail.com' }
+            ],
+            initialInput: 'optional starting context',
+            tags: ['optional', 'tags']
+          },
+          agents: ['LLM', 'CLAUDE', 'BRAIN_READ', 'BRAIN_WRITE', 'EMAIL', 'THINK_TANK']
+        }
+      });
+    }
+    const result = await CACA_executeChain(body);
+    return jsonResponse(res, 200, result);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // ⬡B:AIR:REACH.API.ERICA:CODE:autonomous.self.build:T10:v1.0.0:20260220⬡
+  // POST /api/air/erica — Trigger ERICA self-build cycle
+  // GET  /api/air/erica — Get ERICA status
+  // ═══════════════════════════════════════════════════════════════════════════════
+  if (path === '/api/air/erica' && method === 'POST') {
+    console.log('[AIR ROUTE] ERICA self-build triggered');
+    const result = await ERICA_selfBuild();
+    return jsonResponse(res, 200, result);
+  }
+  
+  if (path === '/api/air/erica' && method === 'GET') {
+    const cooldownRemaining = Math.max(0, (ERICA_LAST_RUN + ERICA_COOLDOWN) - Date.now());
+    return jsonResponse(res, 200, {
+      agent: 'ERICA',
+      fullName: 'Executive Roadmap Intelligence & Continuous Automation',
+      status: cooldownRemaining > 0 ? 'cooldown' : 'ready',
+      cooldownRemaining_ms: cooldownRemaining,
+      lastRun: ERICA_LAST_RUN > 0 ? new Date(ERICA_LAST_RUN).toISOString() : 'never',
+      activeChains: CACA_ACTIVE_CHAINS.size,
+      hint: 'POST to trigger self-build cycle'
+    });
+  }
+
   // ⬡B:AIR:REACH.API.NOTFOUND:CODE:infrastructure.error.404:USER→REACH→ERROR:T10:v1.5.0:20260213:n1f2d⬡ CATCH-ALL
   // ═══════════════════════════════════════════════════════════════════════
   jsonResponse(res, 404, { 
     error: 'Route not found: ' + method + ' ' + path,
-    available: ['/api/escalate', '/api/escalate/twiml', '/api/escalate/confirm', '/api/call/dial', '/api/call/twiml', '/api/call/status', '/api/call/record', '/api/air/trigger/email', '/api/air/trigger/omi', '/api/air/trigger/calendar', '/api/air/trigger/job', '/api/air/trigger/system', '/api/air/think-tank', '/api/sage/search', '/api/sage/index', '/api/iman/draft', '/api/iman/send', '/api/iman/drafts', '/api/devices/register', '/api/devices', '/api/pulse/status', '/api/pulse/trigger', '/api/router', '/api/models/claude', '/api/voice/deepgram-token', '/api/voice/tts', '/api/voice/tts-stream', '/api/omi/manifest', '/api/omi/webhook', '/api/sms/send', '/api/brain/search', '/api/brain/store', '/ws:command-center'],
+    available: ['/api/escalate', '/api/escalate/twiml', '/api/escalate/confirm', '/api/call/dial', '/api/call/twiml', '/api/call/status', '/api/call/record', '/api/air/trigger/email', '/api/air/trigger/omi', '/api/air/trigger/calendar', '/api/air/trigger/job', '/api/air/trigger/system', '/api/air/think-tank', '/api/air/caca', '/api/air/erica', '/api/sage/search', '/api/sage/index', '/api/iman/draft', '/api/iman/send', '/api/iman/drafts', '/api/devices/register', '/api/devices', '/api/pulse/status', '/api/pulse/trigger', '/api/router', '/api/models/claude', '/api/voice/deepgram-token', '/api/voice/tts', '/api/voice/tts-stream', '/api/omi/manifest', '/api/omi/webhook', '/api/sms/send', '/api/brain/search', '/api/brain/store', '/ws:command-center'],
     hint: 'We are all ABA'
   });
 });
