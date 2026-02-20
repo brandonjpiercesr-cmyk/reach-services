@@ -8624,8 +8624,8 @@ Respond as this agent specifically — stay in character.`;
             console.log('[OMI→DELIVERY] Delivery error:', deliveryErr.message);
           }
           
-          // Store wake word event
-          await httpsRequest({
+          // Store wake word event WITH ERROR CHECKING
+          const brainWriteResult = await httpsRequest({
             hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
             path: '/rest/v1/aba_memory',
             method: 'POST',
@@ -8642,6 +8642,10 @@ Respond as this agent specifically — stay in character.`;
             importance: 9,
             tags: ['omi', 'wake_word', 'air_routed', 'instant']
           }));
+          console.log('[OMI→BRAIN] Write result status:', brainWriteResult?.status);
+          if (brainWriteResult?.status >= 400) {
+            console.log('[OMI→BRAIN] ERROR:', brainWriteResult?.data?.toString?.() || 'Unknown error');
+          }
           
           // Broadcast to Command Center
           broadcastToCommandCenter({
