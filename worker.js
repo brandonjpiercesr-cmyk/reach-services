@@ -8565,7 +8565,14 @@ Respond as this agent specifically — stay in character.`;
       // FIX: Detect wake words ("Hey ABA", "ABA") in STREAMING and route to AIR IMMEDIATELY
       // Don't wait for session completion - Brandon wants instant response
       // ═══════════════════════════════════════════════════════════════════════════
-      const WAKE_PATTERNS = [/\baba[,\s]/i, /\bhey aba\b/i, /\bok aba\b/i, /^aba\b/i, /\baba\s*,?\s*(send|call|email|text|remind|schedule|check|plan|find|search)/i];
+      const WAKE_PATTERNS = [
+        /\baba[,.\s!?]/i,                                    // "aba," "aba." "aba " "aba!"
+        /\bhey[.\s,!?]*aba\b/i,                              // "hey aba" "hey.aba" "hey, aba" "hey! aba"
+        /\bok[.\s,!?]*aba\b/i,                               // "ok aba" "ok.aba" "ok, aba"
+        /^aba\b/i,                                            // starts with "aba"
+        /\baba[.\s,!?]*(send|call|email|text|remind|schedule|check|plan|find|search)/i,  // "aba send" "aba, send" "aba. send"
+        /\bhey[.\s,!?]*aba[.\s,!?]*/i                        // catch-all for "hey...aba" variations
+      ];
       const lowerText = transcript.toLowerCase();
       const hasWakeWord = WAKE_PATTERNS.some(p => p.test(lowerText));
       
