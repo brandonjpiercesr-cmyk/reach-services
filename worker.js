@@ -8561,6 +8561,75 @@ Respond as this agent specifically — stay in character.`;
 
       console.log('[TASTE] Transcript stored in brain');
       // ═══════════════════════════════════════════════════════════════════════════
+      // ⬡B:REACH.OMI.WAKE_WORD:FIX:instant_aba_commands:20260220⬡
+      // FIX: Detect wake words ("Hey ABA", "ABA") in STREAMING and route to AIR IMMEDIATELY
+      // Don't wait for session completion - Brandon wants instant response
+      // ═══════════════════════════════════════════════════════════════════════════
+      const WAKE_PATTERNS = [/\baba[,\s]/i, /\bhey aba\b/i, /\bok aba\b/i, /^aba\b/i, /\baba\s*,?\s*(send|call|email|text|remind|schedule|check|plan|find|search)/i];
+      const lowerText = transcript.toLowerCase();
+      const hasWakeWord = WAKE_PATTERNS.some(p => p.test(lowerText));
+      
+      if (hasWakeWord) {
+        console.log('[OMI→AIR] WAKE WORD DETECTED! Routing to AIR immediately...');
+        console.log('[OMI→AIR] Transcript:', transcript.substring(0, 100));
+        
+        // Route through AIR immediately - don't wait for session completion
+        try {
+          const airResult = await httpsRequest({
+            hostname: 'abacia-services.onrender.com',
+            path: '/api/air/process',
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+          }, JSON.stringify({
+            input: transcript,
+            userId: body.uid || 'brandon_t10',
+            source: 'omi_wake_word',
+            urgent: true,
+            caller: { name: 'Brandon', trust: 'T10', source: 'omi_instant' }
+          }));
+          
+          console.log('[OMI→AIR] AIR response status:', airResult?.status);
+          
+          // Store wake word event
+          await httpsRequest({
+            hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+            path: '/rest/v1/aba_memory',
+            method: 'POST',
+            headers: {
+              'apikey': SUPABASE_KEY || SUPABASE_ANON,
+              'Authorization': 'Bearer ' + (SUPABASE_KEY || SUPABASE_ANON),
+              'Content-Type': 'application/json',
+              'Prefer': 'return=minimal'
+            }
+          }, JSON.stringify({
+            content: 'OMI WAKE WORD TRIGGERED: ' + transcript.substring(0, 200),
+            memory_type: 'omi_command',
+            source: 'wake_word_' + Date.now(),
+            importance: 9,
+            tags: ['omi', 'wake_word', 'air_routed', 'instant']
+          }));
+          
+          // Broadcast to Command Center
+          broadcastToCommandCenter({
+            type: 'omi_wake_word',
+            transcript: transcript.substring(0, 100),
+            timestamp: new Date().toISOString()
+          });
+          
+          return jsonResponse(res, 200, { 
+            status: 'processed', 
+            agent: 'AIR', 
+            stored: true, 
+            escalated: true,
+            wake_word: true
+          });
+        } catch (airErr) {
+          console.log('[OMI→AIR] AIR routing error:', airErr.message);
+        }
+      }
+
+
+      // ═══════════════════════════════════════════════════════════════════════════
       // ⬡B:REACH.MARS.AUTO.TRIGGER:FEATURE:realtime.mars:20260218⬡
       // AUTO-TRIGGER MARS for completed transcripts 5+ minutes
       // Route to ABACIA's checkMARSTrigger endpoint
