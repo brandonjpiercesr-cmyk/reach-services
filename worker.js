@@ -7640,9 +7640,9 @@ Phone: (336) 389-8116</p>
 
       // If agent_id or agent_name provided, load that agent's JD and route specifically
       if (agent_id || agent_name) {
-        const agentQuery = agent_id 
-          ? `id=eq.${agent_id}` 
-          : `agent_name=ilike.*${encodeURIComponent(agent_name)}*`;
+        // aba_agent_jds columns: agent_id (lowercase), full_name, acronym (uppercase)
+        const searchName = (agent_name || agent_id || '').toLowerCase();
+        const agentQuery = `or=(agent_id.ilike.*${encodeURIComponent(searchName)}*,acronym.ilike.*${encodeURIComponent(searchName)}*,full_name.ilike.*${encodeURIComponent(searchName)}*)`;
         
         console.log(`[ROUTER] Dynamic agent routing: ${agent_name || agent_id}`);
         
@@ -7664,14 +7664,16 @@ Phone: (336) 389-8116</p>
         } catch (e) { console.log('[ROUTER] JD lookup error:', e.message); }
         
         if (agentJD) {
-          console.log(`[ROUTER] Found agent JD: ${agentJD.agent_name} | Dept: ${agentJD.department || 'N/A'}`);
+          console.log(`[ROUTER] Found agent JD: ${agentJD.full_name} (${agentJD.acronym}) | Dept: ${agentJD.department || 'N/A'}`);
           
           // Build system prompt from agent JD
-          const agentSystem = `You are ${agentJD.agent_name} (${agentJD.acronym || ''}), an agent in the ABA ecosystem.
+          const responsibilities = Array.isArray(agentJD.responsibilities) ? agentJD.responsibilities.join(', ') : (agentJD.responsibilities || '');
+          const agentSystem = `You are ${agentJD.full_name} (${agentJD.acronym || ''}), an agent in the ABA ecosystem.
 Department: ${agentJD.department || 'General'}
-Role: ${agentJD.role_summary || agentJD.description || 'ABA Agent'}
-${agentJD.personality ? 'Personality: ' + agentJD.personality : ''}
-${agentJD.instructions ? 'Instructions: ' + agentJD.instructions : ''}
+Tagline: ${agentJD.tagline || ''}
+Responsibilities: ${responsibilities}
+Agent Type: ${agentJD.agent_type || 'standard'}
+${agentJD.preferred_model ? 'Preferred Model: ' + agentJD.preferred_model : ''}
 You work under AIR (ABA Intelligence Router). Route all output back through AIR.
 Respond as this agent specifically — stay in character.`;
           
@@ -7682,10 +7684,11 @@ Respond as this agent specifically — stay in character.`;
           
           return jsonResponse(res, 200, {
             response: agentResult,
-            agent: agentJD.agent_name,
-            agent_id: agentJD.id,
+            agent: agentJD.full_name,
+            acronym: agentJD.acronym,
+            agent_id: agentJD.agent_id,
             source: 'REACH-AIR-AGENT',
-            trace: `USER*AIR*${(agentJD.acronym || agentJD.agent_name || 'AGENT').toUpperCase()}*MODEL*REACH`
+            trace: `USER*AIR*${(agentJD.acronym || agentJD.agent_id || 'AGENT').toUpperCase()}*MODEL*REACH`
           });
         } else {
           console.log(`[ROUTER] Agent not found: ${agent_name || agent_id} — falling back to AIR_text`);
