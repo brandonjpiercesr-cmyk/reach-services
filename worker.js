@@ -7627,12 +7627,72 @@ Phone: (336) 389-8116</p>
   // ⬡B:AIR:REACH.API.ROUTER:CODE:routing.text.chat:USER→REACH→AIR→AGENTS→MODEL→USER:T8:v1.5.0:20260213:r1o2t⬡ /api/router - MAIN AIR CHAT
   // 1A Shell sends { message, history } and gets back { response }
   // ═══════════════════════════════════════════════════════════════════════
+  // ⬡B:AIR:REACH.ROUTER.V2:CODE:dynamic.agent.routing:T10:v2.7.0:20260220⬡
+  // BUILD 7: Router with agent_id support
+  // When agent_id provided → load JD from aba_agent_jds → route through that specific agent
+  // When not provided → default AIR_text behavior (LUKE/COLE/JUDE/PACK)
+  // This fixes heartbeat dynamic agents using their own JDs instead of hardcoded routing
   if (path === '/api/router' && method === 'POST') {
     try {
       const body = await parseBody(req);
-      const { message, history, model, systemPrompt } = body;
+      const { message, history, model, systemPrompt, agent_id, agent_name } = body;
       if (!message) return jsonResponse(res, 400, { error: 'message required' });
 
+      // If agent_id or agent_name provided, load that agent's JD and route specifically
+      if (agent_id || agent_name) {
+        const agentQuery = agent_id 
+          ? `id=eq.${agent_id}` 
+          : `agent_name=ilike.*${encodeURIComponent(agent_name)}*`;
+        
+        console.log(`[ROUTER] Dynamic agent routing: ${agent_name || agent_id}`);
+        
+        let agentJD = null;
+        try {
+          const jdLookup = await httpsRequest({
+            hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+            path: `/rest/v1/aba_agent_jds?${agentQuery}&limit=1`,
+            method: 'GET',
+            headers: {
+              'apikey': SUPABASE_ANON,
+              'Authorization': 'Bearer ' + SUPABASE_ANON
+            }
+          });
+          if (jdLookup.status === 200) {
+            const agents = JSON.parse(jdLookup.data.toString());
+            if (agents.length > 0) agentJD = agents[0];
+          }
+        } catch (e) { console.log('[ROUTER] JD lookup error:', e.message); }
+        
+        if (agentJD) {
+          console.log(`[ROUTER] Found agent JD: ${agentJD.agent_name} | Dept: ${agentJD.department || 'N/A'}`);
+          
+          // Build system prompt from agent JD
+          const agentSystem = `You are ${agentJD.agent_name} (${agentJD.acronym || ''}), an agent in the ABA ecosystem.
+Department: ${agentJD.department || 'General'}
+Role: ${agentJD.role_summary || agentJD.description || 'ABA Agent'}
+${agentJD.personality ? 'Personality: ' + agentJD.personality : ''}
+${agentJD.instructions ? 'Instructions: ' + agentJD.instructions : ''}
+You work under AIR (ABA Intelligence Router). Route all output back through AIR.
+Respond as this agent specifically — stay in character.`;
+          
+          const agentResult = await callModelDeep(
+            `${agentSystem}\n\nUser query: ${message}`,
+            4000
+          );
+          
+          return jsonResponse(res, 200, {
+            response: agentResult,
+            agent: agentJD.agent_name,
+            agent_id: agentJD.id,
+            source: 'REACH-AIR-AGENT',
+            trace: `USER*AIR*${(agentJD.acronym || agentJD.agent_name || 'AGENT').toUpperCase()}*MODEL*REACH`
+          });
+        } else {
+          console.log(`[ROUTER] Agent not found: ${agent_name || agent_id} — falling back to AIR_text`);
+        }
+      }
+      
+      // Default: route through AIR_text (LUKE/COLE/JUDE/PACK)
       console.log('[ROUTER] Routing message through AIR: "' + message.substring(0, 80) + '"');
       const result = await AIR_text(message, history || []);
       return jsonResponse(res, 200, {
@@ -9603,15 +9663,47 @@ if (path === '/api/sms/send' && method === 'POST') {
           
           // Route through AIR with full context
           try {
-            const airPrompt = 'You are ABA responding to an email. The sender is ' + fromName + ' (' + fromEmail + '). ' +
-              'Trust level: ' + senderIdentity.trust + '. ' +
-              (conversationHistory.length > 0 ? 'Previous conversation context: ' + JSON.stringify(conversationHistory.slice(-3)) + '. ' : '') +
-              'Subject: ' + subject + '. Their message: ' + emailBody.substring(0, 2000);
+            // ⬡B:AIR:REACH.IMAN.SMART_REPLY:CODE:email.vip.routing:T10:v2.7.0:20260220⬡
+            // BUILD 8: Smart email routing — VIP detection + IMAN-specific prompting
+            // Fixes: Claudette answering Eric's resume review with sports scores
+            const VIP_SENDERS = {
+              'bryanjpiercejr@gmail.com': { name: 'BJ Pierce', trust: 'T8', role: 'Brother, Marketing Lead, Legacy Prep Academy Director' },
+              'eric@globalmajoritygroup.com': { name: 'Eric Lane', trust: 'T8', role: 'Co-Founder GMG, Strategy Lead' },
+              'brandonjpierce2@gmail.com': { name: 'Brandon Pierce', trust: 'T10', role: 'Founder, HAM' },
+              'brandonjpiercesr@gmail.com': { name: 'Brandon Pierce', trust: 'T10', role: 'Founder, HAM' },
+            };
             
-            const airResult = await AIR_text(airPrompt, conversationHistory.map(h => ({
+            const vipInfo = VIP_SENDERS[fromEmail.toLowerCase()] || null;
+            const isVIP = !!vipInfo;
+            
+            const airPrompt = `You are Claudette Aims, Executive Assistant at Global Majority Group, powered by ABA (A Better AI).
+${isVIP ? `IMPORTANT: This email is from ${vipInfo.name} (${vipInfo.role}), trust level ${vipInfo.trust}. This is a VIP. Be thorough and helpful.` : `The sender is ${fromName} (${fromEmail}). Trust level: ${senderIdentity.trust}.`}
+
+Subject: ${subject}
+Their message: ${emailBody.substring(0, 3000)}
+
+${conversationHistory.length > 0 ? 'Previous conversation context: ' + JSON.stringify(conversationHistory.slice(-3)) : ''}
+
+RULES:
+- Read the email carefully. Understand what they are asking.
+- If they ask about resumes, cover letters, documents → help with that specifically.
+- If they ask about scheduling → check context and help schedule.
+- If they share work for review → give thoughtful, relevant feedback.
+- NEVER give random unrelated information. Stay on topic.
+- Be warm, professional, and helpful. You are Claudette.
+- Sign off as Claudette Aims, Executive Assistant, Global Majority Group.` +
+              (isVIP ? '\n- This is a VIP sender. Prioritize their request. Be extra thorough.' : '');
+            
+            // ⬡B:AIR:REACH.IMAN.DIRECT:CODE:email.bypass.generic.router:T10:v2.7.0:20260220⬡
+            // Direct Claude call with IMAN-specific prompt — bypasses LUKE/COLE/JUDE/PACK
+            const emailHistory = conversationHistory.map(h => ({
               role: h.from?.includes('claudette') ? 'assistant' : 'user',
               content: h.body || h.snippet || ''
-            })));
+            }));
+            emailHistory.push({ role: 'user', content: airPrompt });
+            
+            const claudeResponse = await callModelDeep(airPrompt, 4000);
+            const airResult = { response: claudeResponse };
             
             if (airResult && airResult.response) {
               console.log('[IMAN REPLY] AIR generated response, sending via Claudette...');
