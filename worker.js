@@ -7299,15 +7299,61 @@ async function HAM_identify(context) {
     return { id: ham_id, trust: trustLevel, name: ham_id.split('_')[0] };
   }
   
-  // Try to identify by phone number
+  // Try to identify by phone number from BRAIN
   if (caller_number) {
+    // Normalize phone number (remove + and spaces)
+    const normalizedPhone = caller_number.replace(/[^0-9]/g, '');
+    console.log('[HAM] Looking up phone in brain:', normalizedPhone);
+    
+    try {
+      // Query brain for HAM identity matching this phone
+      const hamQuery = await httpsRequest({
+        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+        path: `/rest/v1/aba_memory?memory_type=eq.ham_identity&content=ilike.*${normalizedPhone}*&limit=1`,
+        method: 'GET',
+        headers: {
+          'apikey': SUPABASE_ANON,
+          'Authorization': 'Bearer ' + SUPABASE_ANON
+        }
+      });
+      
+      if (hamQuery.status === 200) {
+        const identities = JSON.parse(hamQuery.data.toString());
+        if (identities.length > 0) {
+          const identity = identities[0].content;
+          // Parse: "HAM IDENTITY: Brandon Pierce Sr. | Phone: +13363898116 | Email: brandon@... | Trust: T10 | Role: ... | Location: Greensboro NC"
+          const nameMatch = identity.match(/HAM IDENTITY:\s*([^|]+)/);
+          const trustMatch = identity.match(/Trust:\s*(T\d+)/);
+          const locationMatch = identity.match(/Location:\s*([^|]+)/);
+          const emailMatch = identity.match(/Email:\s*([^|]+)/);
+          
+          const name = nameMatch ? nameMatch[1].trim() : 'User';
+          const trust = trustMatch ? trustMatch[1].trim() : 'T5';
+          const location = locationMatch ? locationMatch[1].trim() : null;
+          const email = emailMatch ? emailMatch[1].trim() : null;
+          
+          console.log('[HAM] BRAIN MATCH:', name, '| Trust:', trust, '| Location:', location);
+          return { 
+            id: `ham_${name.toLowerCase().replace(/\s+/g, '_')}_${trust.toLowerCase()}`,
+            trust, 
+            name, 
+            location,
+            email,
+            phone: caller_number
+          };
+        }
+      }
+    } catch (e) {
+      console.log('[HAM] Brain lookup error:', e.message);
+    }
+    
+    // Fallback to hardcoded (legacy)
     const knownNumbers = {
       '+13362037510': { id: 'brandon_t10', trust: 'T10', name: 'Brandon' },
       '+19174099099': { id: 'aba_system', trust: 'T10', name: 'ABA' },
-      // BJ's number would go here
     };
     if (knownNumbers[caller_number]) {
-      console.log('[HAM] Identified by phone:', caller_number, '→', knownNumbers[caller_number].name);
+      console.log('[HAM] Identified by legacy lookup:', caller_number);
       return knownNumbers[caller_number];
     }
   }
