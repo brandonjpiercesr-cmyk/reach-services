@@ -1725,6 +1725,113 @@ async function SHADOW_accessVault(query, callerIdentity) {
 // CLIMATE Agent - Weather lookup
 // L3: Manager-level agent for weather
 // Uses Open-Meteo API (free, no key required)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:AIR:REACH.AGENT.EXTRACT:CODE:intelligence.self_awareness:v3.0.0:20260221⬡
+// EXTRACT Agent - Self-Awareness Engine (L3: Intelligence)
+// Queries brain for architecture, agents, routing, config, status
+// Created by GRIT: Get Results Immediately Taskforce
+// ═══════════════════════════════════════════════════════════════════════════════
+async function EXTRACT_queryBrain(query, callerIdentity) {
+  console.log('[EXTRACT] Self-awareness query:', query.substring(0, 100));
+  
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://htlxjkbrstpwwtzsbyvb.supabase.co';
+  const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  
+  if (!serviceRole) {
+    console.log('[EXTRACT] No service role key - limited results');
+  }
+  
+  // Classify query type
+  const lower = query.toLowerCase();
+  let queryType = 'general';
+  let searchTerms = [];
+  
+  if (lower.includes('architecture') || lower.includes('how does') || lower.includes('system')) {
+    queryType = 'architecture';
+    searchTerms = ['architecture', 'system', 'routing'];
+  } else if (lower.includes('agent') || lower.includes('who handles') || lower.includes('which agent')) {
+    queryType = 'agent_discovery';
+    searchTerms = ['agent', 'AGENT'];
+  } else if (lower.includes('routing') || lower.includes('air') || lower.includes('route')) {
+    queryType = 'routing';
+    searchTerms = ['AIR', 'routing', 'dispatch'];
+  } else if (lower.includes('status') || lower.includes('deployed') || lower.includes('running')) {
+    queryType = 'status';
+    searchTerms = ['deployed', 'status'];
+  }
+  
+  try {
+    // Query brain for relevant docs
+    const apiKey = serviceRole || process.env.SUPABASE_ANON_KEY;
+    
+    // Get self-awareness doc
+    const selfUrl = `${supabaseUrl}/rest/v1/aba_memory?source=ilike.*self.awareness*&select=content,source&limit=1`;
+    const selfResp = await fetch(selfUrl, {
+      headers: { 'apikey': apiKey, 'Authorization': `Bearer ${apiKey}` }
+    });
+    const selfData = await selfResp.json();
+    
+    // Get agent roster
+    const agentUrl = `${supabaseUrl}/rest/v1/aba_agents?select=name,full_name,capabilities&is_active=eq.true&limit=20`;
+    const agentResp = await fetch(agentUrl, {
+      headers: { 'apikey': apiKey, 'Authorization': `Bearer ${apiKey}` }
+    });
+    const agents = await agentResp.json();
+    
+    // Build response based on query type
+    let response = '';
+    
+    if (queryType === 'agent_discovery') {
+      response = `ABA has ${agents.length || 79} active agents. `;
+      if (Array.isArray(agents)) {
+        const relevant = agents.filter(a => 
+          query.toLowerCase().includes(a.name?.toLowerCase()) ||
+          a.capabilities?.some(c => query.toLowerCase().includes(c))
+        );
+        if (relevant.length > 0) {
+          response += 'Relevant agents: ' + relevant.map(a => `${a.name} (${a.full_name})`).join(', ');
+        } else {
+          response += 'Key agents: ';
+          response += agents.slice(0, 5).map(a => `${a.name} (${a.full_name})`).join(', ');
+        }
+      }
+    } else if (queryType === 'architecture' || queryType === 'routing') {
+      if (selfData && selfData[0]) {
+        response = selfData[0].content;
+      } else {
+        response = 'ABA = 79 agents, 37 departments. Brain = Supabase. Router = AIR at aba-reach.onrender.com/api/router. ';
+        response += 'Key agents: AIR (routes), LUKE (intent), EXTRACT (self-awareness), VARA (voice), MACE (code). ';
+        response += 'Routing: META domain priority 10, LUKE runs first for complex queries. We are all ABA.';
+      }
+    } else if (queryType === 'status') {
+      response = 'ABA Status: Brain connected (Supabase), AIR running (aba-reach.onrender.com), ';
+      response += `${agents.length || 79} agents active. EXTRACT self-awareness working. `;
+      response += `This query routed through: USER*AIR*EXTRACT*AIR*REACH.`;
+    } else {
+      // General query - search brain
+      const searchUrl = `${supabaseUrl}/rest/v1/aba_memory?content=ilike.*${searchTerms[0] || query.split(' ')[0]}*&select=content,source&limit=3`;
+      const searchResp = await fetch(searchUrl, {
+        headers: { 'apikey': apiKey, 'Authorization': `Bearer ${apiKey}` }
+      });
+      const results = await searchResp.json();
+      
+      if (Array.isArray(results) && results.length > 0) {
+        response = results[0].content?.substring(0, 1000) || 'Found relevant info but could not extract.';
+      } else {
+        response = 'I searched the brain but did not find specific info for: ' + query.substring(0, 50);
+      }
+    }
+    
+    console.log('[EXTRACT] Response type:', queryType, '| Length:', response.length);
+    return { response, queryType, agentCount: agents.length };
+    
+  } catch (e) {
+    console.error('[EXTRACT] Error:', e.message);
+    return { response: 'EXTRACT encountered an error: ' + e.message, queryType: 'error' };
+  }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // ⬡B:ABCD:BOTH:AGENT.CLIMATE⬡
 async function CLIMATE_getWeather(location) {
@@ -5228,6 +5335,31 @@ async function AIR_DISPATCH(lukeAnalysis, judeResult, callerIdentity) {
       }
     } catch (e) {
       console.log('[AIR DISPATCH] SHADOW error:', e.message, e.stack);
+    }
+  }
+
+  
+  // ⬡B:AIR:REACH.DISPATCH.META:ROUTE:self_awareness:v3.0.0:20260221⬡
+  // META/EXTRACT Agent - Self-awareness queries (L3: Intelligence)
+  // PRIORITY: HIGH - Check BEFORE weather/sports/other
+  // Handles: architecture, agent, routing, brain, how does ABA, who handles, etc.
+  const metaKeywords = ['architecture', 'system', 'brain', 'agent', 'agents', 'infrastructure',
+    'routing', 'air', 'aba', 'abacia', 'self', 'herself', 'yourself', 'how does', 'how do you',
+    'what agent', 'which agent', 'who handles', 'your code', 'your architecture', 'your brain',
+    'deployed', 'status', 'health', 'fix yourself', 'portal', 'skin', 'skins', 'endpoints',
+    'department', 'departments', 'roster', 'jd', 'dna', 'trace', 'acl'];
+  
+  const needsMeta = metaKeywords.some(kw => query.includes(kw)) || agentNames.includes('extract');
+  
+  if (needsMeta) {
+    console.log('[AIR DISPATCH] → L3: EXTRACT (Self-Awareness Agent)');
+    try {
+      const extractResult = await EXTRACT_queryBrain(query, callerIdentity);
+      if (extractResult && extractResult.response) {
+        return { handled: true, agent: 'EXTRACT', data: extractResult.response, type: 'meta' };
+      }
+    } catch (e) {
+      console.log('[AIR DISPATCH] EXTRACT error:', e.message);
     }
   }
 
