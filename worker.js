@@ -7256,6 +7256,244 @@ function jsonResponse(res, status, data) {
 // LAYER 0: ALWAYS ON - These agents run on EVERY request
 // ═══════════════════════════════════════════════════════════════════════════════
 
+
+// ╔══════════════════════════════════════════════════════════════════════════════╗
+// ║                    LAYER 0 CORE AGENTS - ALWAYS ON                           ║
+// ║ These agents run on EVERY request in order: GUARD → HAM → TIME → TRACE      ║
+// ╚══════════════════════════════════════════════════════════════════════════════╝
+// ⬡B:AIR:REACH.LAYER0:CODE:core.agents.all:T10:v1.0.0:20260221⬡
+
+// ════════════════════════════════════════════════════════════════════════════════
+// GUARD - Gateway for Unauthorized Access and Request Defense
+// Validates ALL requests for security threats before any processing
+// ════════════════════════════════════════════════════════════════════════════════
+
+async function GUARD_validateRequest(req, body) {
+  const threats = [];
+  const ip = req?.headers?.['x-forwarded-for'] || 'unknown';
+  
+  console.log('[GUARD] Validating request from IP:', ip);
+  
+  const message = body?.message || '';
+  
+  // SQL Injection
+  if (/(\b(SELECT|INSERT|UPDATE|DELETE|DROP|UNION|ALTER)\b.*\b(FROM|INTO|WHERE|TABLE)\b)/i.test(message)) {
+    threats.push({ type: 'SQL_INJECTION', severity: 'CRITICAL' });
+  }
+  
+  // XSS
+  if (/<script|javascript:|on\w+\s*=/i.test(message)) {
+    threats.push({ type: 'XSS_ATTEMPT', severity: 'HIGH' });
+  }
+  
+  // Prompt Injection
+  if (/ignore previous instructions|forget your instructions|you are now/i.test(message)) {
+    threats.push({ type: 'PROMPT_INJECTION', severity: 'HIGH' });
+  }
+  
+  // Oversized payload
+  if (message.length > 50000) {
+    threats.push({ type: 'OVERSIZED_PAYLOAD', severity: 'MEDIUM' });
+  }
+  
+  if (threats.length > 0) {
+    console.log('[GUARD] ⚠️ THREATS DETECTED:', threats);
+    return { approved: false, threats, action: 'BLOCK' };
+  }
+  
+  console.log('[GUARD] ✅ Request validated');
+  return { approved: true, threats: [] };
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// SHADOW AUDIT - Catches rogue agent creation without BIRTH protocol
+// ════════════════════════════════════════════════════════════════════════════════
+
+async function SHADOW_auditAgentCreation(agentName, hasJD, hasRegistration) {
+  const violations = [];
+  
+  if (!hasJD) violations.push({ type: 'MISSING_JD', severity: 'CRITICAL', message: `Agent "${agentName}" created WITHOUT JD` });
+  if (!hasRegistration) violations.push({ type: 'NOT_IN_ROSTER', severity: 'HIGH', message: `Agent "${agentName}" not in ROSTER` });
+  
+  if (violations.length > 0) {
+    console.log('[SHADOW] ⚠️ BIRTH PROTOCOL VIOLATION:', agentName, violations);
+    return { approved: false, violations };
+  }
+  
+  console.log('[SHADOW] ✅ Agent', agentName, 'passed BIRTH protocol audit');
+  return { approved: true, violations: [] };
+}
+
+async function SHADOW_verifyAgent(agentName) {
+  console.log('[SHADOW] Verifying agent:', agentName);
+  
+  let hasJD = false, hasRegistration = false;
+  
+  try {
+    const jdCheck = await httpsRequest({
+      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+      path: `/rest/v1/aba_memory?memory_type=eq.agent_jd&content=ilike.*${encodeURIComponent(agentName)}*&limit=1`,
+      method: 'GET',
+      headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON }
+    });
+    if (jdCheck.status === 200) hasJD = JSON.parse(jdCheck.data.toString()).length > 0;
+  } catch (e) { console.log('[SHADOW] JD check error:', e.message); }
+  
+  try {
+    const rosterCheck = await httpsRequest({
+      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+      path: `/rest/v1/aba_memory?source=eq.agent.roster.jd.v2.comprehensive&select=content`,
+      method: 'GET',
+      headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON }
+    });
+    if (rosterCheck.status === 200) {
+      const roster = JSON.parse(rosterCheck.data.toString());
+      hasRegistration = roster.length > 0 && roster[0].content.toLowerCase().includes(agentName.toLowerCase());
+    }
+  } catch (e) { console.log('[SHADOW] ROSTER check error:', e.message); }
+  
+  return SHADOW_auditAgentCreation(agentName, hasJD, hasRegistration);
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// TIME - Temporal Intelligence and Moment Executor
+// Provides accurate date/time in user's timezone
+// ════════════════════════════════════════════════════════════════════════════════
+
+function TIME_getContext(hamIdentity) {
+  const locationToTimezone = {
+    'greensboro': 'America/New_York', 'charlotte': 'America/New_York',
+    'los angeles': 'America/Los_Angeles', 'california': 'America/Los_Angeles',
+    'new york': 'America/New_York', 'chicago': 'America/Chicago',
+    'denver': 'America/Denver', 'seattle': 'America/Los_Angeles',
+  };
+  
+  const userLocation = (hamIdentity?.location || '').toLowerCase();
+  let timezone = 'America/New_York';
+  for (const [loc, tz] of Object.entries(locationToTimezone)) {
+    if (userLocation.includes(loc)) { timezone = tz; break; }
+  }
+  
+  console.log('[TIME] Location:', hamIdentity?.location || 'unknown', '→ TZ:', timezone);
+  
+  const now = new Date();
+  const currentTime = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: timezone, hour12: true });
+  const currentDate = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: timezone });
+  const hour = parseInt(now.toLocaleTimeString('en-US', { hour: 'numeric', hour12: false, timeZone: timezone }));
+  const timePeriod = hour < 6 ? 'late night' : hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : hour < 21 ? 'evening' : 'night';
+  
+  return { currentTime, currentDate, hour, timePeriod, timezone, dayOfWeek: now.toLocaleDateString('en-US', { weekday: 'long', timeZone: timezone }), userLocation: hamIdentity?.location || 'unknown' };
+}
+
+function TIME_getPromptInjection(timeContext) {
+  return `CURRENT DATE AND TIME: ${timeContext.dayOfWeek}, ${timeContext.currentDate}, ${timeContext.currentTime} (${timeContext.timezone})
+You MUST use this date/time when asked. Never guess or use outdated information.`;
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// TRACE - Tracking Recent Activity and Cross-channel Execution
+// Maintains conversation state across all channels
+// ════════════════════════════════════════════════════════════════════════════════
+
+async function TRACE_storeState(userId, state) {
+  console.log('[TRACE] Storing state for', userId, ':', state.type || 'general');
+  try {
+    await httpsRequest({
+      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+      path: '/rest/v1/aba_memory',
+      method: 'POST',
+      headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + (process.env.SUPABASE_KEY_ROLE_KEY || SUPABASE_KEY), 'Content-Type': 'application/json', 'Prefer': 'return=minimal' }
+    }, JSON.stringify({
+      source: `trace_state_${userId}_${Date.now()}`,
+      memory_type: 'trace_state',
+      content: JSON.stringify({ userId, ...state, updatedAt: new Date().toISOString() }),
+      importance: 7,
+      tags: ['trace', 'state', userId]
+    }));
+  } catch (e) { console.log('[TRACE] Store error:', e.message); }
+}
+
+async function TRACE_getActiveState(userId) {
+  console.log('[TRACE] Getting active state for', userId);
+  try {
+    const result = await httpsRequest({
+      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+      path: `/rest/v1/aba_memory?memory_type=eq.trace_state&content=ilike.*${encodeURIComponent(userId)}*&order=created_at.desc&limit=1`,
+      method: 'GET',
+      headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON }
+    });
+    if (result.status === 200) {
+      const records = JSON.parse(result.data.toString());
+      if (records.length > 0) {
+        const state = JSON.parse(records[0].content);
+        const ageMinutes = (Date.now() - new Date(state.updatedAt).getTime()) / 60000;
+        if (ageMinutes <= 60) {
+          console.log('[TRACE] Found state:', state.type, '| Age:', Math.round(ageMinutes), 'min');
+          return { ...state, ageMinutes };
+        }
+      }
+    }
+  } catch (e) { console.log('[TRACE] Get error:', e.message); }
+  return null;
+}
+
+async function TRACE_getActiveMissions(userId) {
+  const state = await TRACE_getActiveState(userId);
+  if (!state) return [];
+  const activeTypes = ['directions', 'reminder', 'email_draft', 'task', 'meeting'];
+  if (activeTypes.includes(state.type)) {
+    return [{ type: state.type, channel: state.channel, context: state.activeContext, ageMinutes: state.ageMinutes }];
+  }
+  return [];
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// GREET - Smart contextual greeting for incoming calls
+// ════════════════════════════════════════════════════════════════════════════════
+
+async function GREET_smartGreeting(callerContext) {
+  console.log('[GREET] Smart greeting initiated...');
+  
+  const identity = await HAM_identify(callerContext);
+  console.log('[GREET] Identity:', identity?.name || 'Unknown', '| Trust:', identity?.trust || 'T1');
+  
+  const timeContext = TIME_getContext(identity);
+  console.log('[GREET] TIME:', timeContext.currentTime, timeContext.timePeriod);
+  
+  // Check TRACE for active missions
+  const traceMissions = await TRACE_getActiveMissions(identity?.id || 'guest');
+  const activeMission = traceMissions.length > 0 ? traceMissions[0] : null;
+  console.log('[GREET] Active mission:', activeMission?.type || 'none');
+  
+  const greetingContext = {
+    name: identity?.name || 'friend',
+    firstName: (identity?.name || 'friend').split(' ')[0],
+    trust: identity?.trust || 'T1',
+    timePeriod: timeContext.timePeriod,
+    currentTime: timeContext.currentTime,
+    currentDate: timeContext.currentDate,
+    activeMission,
+    isHighTrust: ['T8', 'T9', 'T10'].includes(identity?.trust)
+  };
+  
+  const greetingPrompt = `Generate a 1-sentence warm greeting for ${greetingContext.firstName}.
+Time: ${greetingContext.timePeriod} (${greetingContext.currentTime})
+Trust: ${greetingContext.trust}
+${greetingContext.activeMission ? `ACTIVE: ${greetingContext.activeMission.type} - continue naturally` : 'No active context'}
+Rules: Be warm, natural. If active mission, reference it. NEVER say "How can I help you?" You already know their life.
+Generate ONLY the greeting:`;
+
+  try {
+    const greeting = await callModelDeep(greetingPrompt, 100);
+    console.log('[GREET] Generated:', greeting.trim());
+    return { greeting: greeting.trim().replace(/^["']|["']$/g, ''), context: greetingContext, trace: 'AIR*HAM,TIME,TRACE,GREET*VARA' };
+  } catch (e) {
+    const fallback = greetingContext.isHighTrust ? `Hey ${greetingContext.firstName}! Good to hear from you.` : `Hello! How can I help?`;
+    return { greeting: fallback, context: greetingContext, trace: 'AIR*GREET_FALLBACK*VARA' };
+  }
+}
+
+
 // HAM - Identify caller FIRST on every request
 // ╔══════════════════════════════════════════════════════════════════════════════╗
 // ║ GREET - Greeting Intelligence and Contextual Welcome Engine                   ║
@@ -8554,6 +8792,24 @@ Phone: (336) 389-8116</p>
       const body = await parseBody(req);
       const { message, history, model, systemPrompt, agent_id, agent_name } = body;
       if (!message) return jsonResponse(res, 400, { error: 'message required' });
+
+      // GUARD - Layer 0 Security Check
+      if (message !== 'GREET_INCOMING_CALL' && !body.source?.includes('internal')) {
+        const guardResult = await GUARD_validateRequest(req, body);
+        if (!guardResult.approved) {
+          console.log('[ROUTER] ⛔ GUARD BLOCKED:', guardResult.threats);
+          return jsonResponse(res, 403, { error: 'Request blocked by security', trace: 'GUARD*BLOCK' });
+        }
+      }
+      
+      // GREET - Smart greeting for incoming calls
+      if (message === 'GREET_INCOMING_CALL' || message.toLowerCase() === 'greet_incoming_call') {
+        console.log('[ROUTER] GREET_INCOMING_CALL triggered');
+        const callerContext = { caller_number: body.caller_number || body.callerNumber, source: body.source || 'livekit_voice', channel: body.channel || 'phone' };
+        const greetResult = await GREET_smartGreeting(callerContext);
+        return jsonResponse(res, 200, { response: greetResult.greeting, source: 'REACH-AIR-GREET', trace: greetResult.trace, agents: ['HAM', 'TIME', 'TRACE', 'GREET'] });
+      }
+
 
       // ⬡B:AIR:REACH.GREET.HANDLER:CODE:smart.greeting.incoming:T10:v1.0.0:20260221⬡
       // SPECIAL: Smart greeting for incoming calls
