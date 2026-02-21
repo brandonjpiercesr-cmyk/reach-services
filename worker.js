@@ -7294,7 +7294,7 @@ async function RETURN_TO_ME(input, output, agents_deployed, hamIdentity, mission
 // ═══════════════════════════════════════════════════════════════════════════════
 
 function JUDE_smartRoute(lukeAnalysis) {
-  const query = (lukeAnalysis.query || '').toLowerCase();
+  const query = (lukeAnalysis?.raw || '').toLowerCase();
   const intent = lukeAnalysis.intent || '';
   const agents = [];
   
