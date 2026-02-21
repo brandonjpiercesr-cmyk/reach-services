@@ -7119,105 +7119,407 @@ function jsonResponse(res, status, data) {
 // ⬡B:AIR:REACH.API.AIR_TEXT:CODE:routing.text.chat:USER→REACH→AIR→AGENTS→MODEL→USER:T8:v1.5.0:20260213:a1t2x⬡
 // ⬡B:AIR:REACH.API.AIR_TEXT:CODE:routing.text.chat:USER→REACH→AIR→AGENTS→MODEL→USER:T8:v1.5.0:20260213:a1t2x⬡
 // AIR for text chat (higher token limits than voice)
-async function AIR_text(userMessage, history) {
-  const lukeAnalysis = await LUKE_process(userMessage);
-  if (lukeAnalysis.isGoodbye) {
-    return { response: "Take care! We are all ABA.", isGoodbye: true };
-  }
-  const coleResult = await COLE_scour(lukeAnalysis);
-  const judeResult = await JUDE_findAgents(lukeAnalysis);
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:AIR:REACH.CORE:CODE:layer0.always.on:T10:v3.0.0:20260221⬡
+// LAYER 0: ALWAYS ON - These agents run on EVERY request
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// HAM - Identify caller FIRST on every request
+async function HAM_identify(context) {
+  const { caller_number, device_id, ham_id, source } = context;
   
-  // ⬡B:GRIT.FIX:DISPATCH_BEFORE_LLM:20260218⬡
-  // TRY AGENT DISPATCH FIRST - actually execute calendar/email/etc
-  const dispatchResult = await AIR_DISPATCH(lukeAnalysis, judeResult, { name: 'brandon', trust: 'T10' });
-  if (dispatchResult && dispatchResult.handled) {
-    console.log('[AIR-TEXT] Agent ' + dispatchResult.agent + ' handled request');
-    return { 
-      response: dispatchResult.data, 
-      isGoodbye: false, 
-      missionNumber: '⬡M:' + dispatchResult.agent + ':' + Date.now() + '⬡',
-      agent: dispatchResult.agent,
-      type: dispatchResult.type
+  // If explicit ham_id, use it
+  if (ham_id) {
+    const trustLevel = ham_id.includes('t10') ? 'T10' : ham_id.includes('t8') ? 'T8' : 'T5';
+    console.log('[HAM] Identified by ham_id:', ham_id, '| Trust:', trustLevel);
+    return { id: ham_id, trust: trustLevel, name: ham_id.split('_')[0] };
+  }
+  
+  // Try to identify by phone number
+  if (caller_number) {
+    const knownNumbers = {
+      '+13362037510': { id: 'brandon_t10', trust: 'T10', name: 'Brandon' },
+      '+19174099099': { id: 'aba_system', trust: 'T10', name: 'ABA' },
+      // BJ's number would go here
     };
+    if (knownNumbers[caller_number]) {
+      console.log('[HAM] Identified by phone:', caller_number, '→', knownNumbers[caller_number].name);
+      return knownNumbers[caller_number];
+    }
   }
   
-  // No agent handled it - proceed with LLM
-  const missionPackage = PACK_assemble(lukeAnalysis, coleResult, judeResult, history || [], null, null);
-  let response = null;
-
-  // PRIMARY: Gemini Flash 2.0
-  if (GEMINI_KEY && !response) {
-    try {
-      const messages = (history || []).map(h => ({
-        role: h.role === 'assistant' ? 'model' : 'user',
-        parts: [{ text: h.content }]
-      }));
-      messages.push({ role: 'user', parts: [{ text: userMessage }] });
-      const result = await httpsRequest({
-        hostname: 'generativelanguage.googleapis.com',
-        path: '/v1beta/models/gemini-2.0-flash:generateContent?key=' + GEMINI_KEY,
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
-      }, JSON.stringify({
-        systemInstruction: { parts: [{ text: missionPackage.systemPrompt }] },
-        contents: messages,
-        generationConfig: { maxOutputTokens: 2048, temperature: 0.7 }
-      }));
-      const json = JSON.parse(result.data.toString());
-      if (json.candidates?.[0]?.content?.parts?.[0]?.text) {
-        response = json.candidates[0].content.parts[0].text;
-      }
-    } catch (e) { console.log('[AIR-TEXT] Gemini error: ' + e.message); }
-  }
-
-  // BACKUP: Claude Haiku
-  if (ANTHROPIC_KEY && !response) {
-    try {
-      const messages = (history || []).map(h => ({ role: h.role, content: h.content }));
-      messages.push({ role: 'user', content: userMessage });
-      const result = await httpsRequest({
-        hostname: 'api.anthropic.com',
-        path: '/v1/messages',
-        method: 'POST',
-        headers: {
-          'x-api-key': ANTHROPIC_KEY,
-          'anthropic-version': '2023-06-01',
-          'Content-Type': 'application/json'
-        }
-      }, JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 2048,
-        system: missionPackage.systemPrompt,
-        messages
-      }));
-      const json = JSON.parse(result.data.toString());
-      if (json.content?.[0]?.text) response = json.content[0].text;
-    } catch (e) { console.log('[AIR-TEXT] Claude error: ' + e.message); }
-  }
-
-  // FALLBACK: Groq
-  if (GROQ_KEY && !response) {
-    try {
-      const messages = [
-        { role: 'system', content: missionPackage.systemPrompt },
-        ...(history || []).map(h => ({ role: h.role, content: h.content })),
-        { role: 'user', content: userMessage }
-      ];
-      const result = await httpsRequest({
-        hostname: 'api.groq.com',
-        path: '/openai/v1/chat/completions',
-        method: 'POST',
-        headers: { 'Authorization': 'Bearer ' + GROQ_KEY, 'Content-Type': 'application/json' }
-      }, JSON.stringify({ model: 'llama-3.3-70b-versatile', max_tokens: 2048, temperature: 0.7, messages }));
-      const json = JSON.parse(result.data.toString());
-      if (json.choices?.[0]?.message?.content) response = json.choices[0].message.content;
-    } catch (e) { console.log('[AIR-TEXT] Groq error: ' + e.message); }
-  }
-
-  if (!response) response = "I'm here and processing. Could you rephrase that?";
-  return { response, isGoodbye: false, missionNumber: missionPackage.missionNumber };
+  // Unknown caller - default to guest
+  console.log('[HAM] Unknown caller - guest access');
+  return { id: 'guest', trust: 'T1', name: 'Guest' };
 }
 
+// SCRIBE - Log EVERYTHING
+async function SCRIBE_log(event, data) {
+  const timestamp = new Date().toISOString();
+  const logEntry = {
+    timestamp,
+    event,
+    ...data,
+    source: 'SCRIBE'
+  };
+  
+  console.log(`[SCRIBE] ${event}:`, JSON.stringify(data).substring(0, 200));
+  
+  // Store to brain
+  try {
+    await httpsRequest({
+      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+      path: '/rest/v1/aba_memory',
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_ANON,
+        'Authorization': 'Bearer ' + SUPABASE_SERVICE,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal'
+      }
+    }, JSON.stringify({
+      source: `scribe_${event.toLowerCase()}_${Date.now()}`,
+      memory_type: 'scribe_log',
+      content: JSON.stringify(logEntry),
+      importance: event === 'ERROR' ? 8 : 3,
+      tags: ['scribe', event.toLowerCase(), data.agent || 'air']
+    }));
+  } catch (e) { console.log('[SCRIBE] Log error:', e.message); }
+  
+  return logEntry;
+}
+
+// PAM - Filter output before sending
+async function PAM_filter(response, hamIdentity) {
+  // Don't filter for T10
+  if (hamIdentity.trust === 'T10') return response;
+  
+  // Filter sensitive content for lower trust levels
+  const filtered = response
+    .replace(/api[_-]?key[s]?\s*[:=]\s*\S+/gi, '[REDACTED]')
+    .replace(/password[s]?\s*[:=]\s*\S+/gi, '[REDACTED]')
+    .replace(/secret[s]?\s*[:=]\s*\S+/gi, '[REDACTED]');
+  
+  console.log('[PAM] Filtered output for', hamIdentity.trust);
+  return filtered;
+}
+
+// SHADOW - Security oversight (runs silently)
+async function SHADOW_oversight(input, output, hamIdentity) {
+  // Check for concerning patterns
+  const concerns = [];
+  
+  if (input.toLowerCase().includes('delete all') || input.toLowerCase().includes('drop table')) {
+    concerns.push('DESTRUCTIVE_COMMAND');
+  }
+  if (output.length > 10000) {
+    concerns.push('LARGE_OUTPUT');
+  }
+  if (hamIdentity.trust === 'T1' && (input.includes('email') || input.includes('call'))) {
+    concerns.push('GUEST_ACTION_ATTEMPT');
+  }
+  
+  if (concerns.length > 0) {
+    console.log('[SHADOW] Security concerns:', concerns);
+    await SCRIBE_log('SHADOW_ALERT', { concerns, ham: hamIdentity.id, input: input.substring(0, 100) });
+  }
+  
+  return { concerns, approved: concerns.length === 0 };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:AIR:REACH.CORE:CODE:return.to.me:T10:v1.0.0:20260221⬡
+// RETURN-TO-ME PROTOCOL - Runs AFTER response generated
+// ═══════════════════════════════════════════════════════════════════════════════
+
+async function RETURN_TO_ME(input, output, agents_deployed, hamIdentity, missionNumber) {
+  const returnProtocol = [];
+  
+  // 1. LOGFUL - Track outcomes
+  try {
+    await SCRIBE_log('LOGFUL_OUTCOME', {
+      mission: missionNumber,
+      ham: hamIdentity.id,
+      agents: agents_deployed,
+      input_length: input.length,
+      output_length: output.length,
+      success: true
+    });
+    returnProtocol.push('LOGFUL');
+  } catch (e) { console.log('[LOGFUL] Error:', e.message); }
+  
+  // 2. MEMOS - Store if important (long conversation, decisions made)
+  if (output.length > 500 || input.toLowerCase().includes('remember') || input.toLowerCase().includes('important')) {
+    try {
+      await httpsRequest({
+        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+        path: '/rest/v1/aba_memory',
+        method: 'POST',
+        headers: {
+          'apikey': SUPABASE_ANON,
+          'Authorization': 'Bearer ' + SUPABASE_SERVICE,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=minimal'
+        }
+      }, JSON.stringify({
+        source: `memo_${Date.now()}`,
+        memory_type: 'memo',
+        content: `HAM: ${hamIdentity.name}\nQ: ${input.substring(0, 200)}\nA: ${output.substring(0, 500)}`,
+        importance: 5,
+        tags: ['memo', hamIdentity.id, ...agents_deployed.map(a => a.toLowerCase())]
+      }));
+      returnProtocol.push('MEMOS');
+    } catch (e) { console.log('[MEMOS] Error:', e.message); }
+  }
+  
+  // 3. SIGIL - Tag/categorize
+  const sigil = `⬡M:${agents_deployed[0] || 'AIR'}:${Date.now()}⬡`;
+  returnProtocol.push('SIGIL');
+  
+  // 4. AGENT_LINK - Link to session
+  returnProtocol.push('AGENT_LINK');
+  
+  console.log('[RETURN-TO-ME] Protocol executed:', returnProtocol.join(' → '));
+  return { executed: returnProtocol, sigil };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:AIR:REACH.JUDE:CODE:smart.agent.routing:T10:v2.0.0:20260221⬡
+// JUDE - Smart agent deployment based on intent
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function JUDE_smartRoute(lukeAnalysis) {
+  const query = (lukeAnalysis.query || '').toLowerCase();
+  const intent = lukeAnalysis.intent || '';
+  const agents = [];
+  
+  // THINKERS - Complex decisions
+  if (query.includes('should i') || query.includes('decide') || query.includes('strategy') || query.includes('think through')) {
+    agents.push('THINK', 'DION');
+  }
+  
+  // GAS - Wins, cooking, hype
+  if (query.includes('cooking') || query.includes('fire') || query.includes('did it') || query.includes('won') || query.includes('crushed')) {
+    agents.push('GAS');
+  }
+  
+  // DOERS
+  if (query.includes('email') || query.includes('send') || query.includes('draft')) {
+    agents.push('IMAN');
+  }
+  if (query.includes('code') || query.includes('build') || query.includes('deploy') || query.includes('fix')) {
+    agents.push('MACE');
+  }
+  if (query.includes('schedule') || query.includes('calendar') || query.includes('remind') || query.includes('navigate')) {
+    agents.push('GUIDE', 'DAWN');
+  }
+  if (query.includes('call') || query.includes('dial') || query.includes('phone')) {
+    agents.push('DIAL');
+  }
+  
+  // RESEARCH
+  if (query.includes('search') || query.includes('find') || query.includes('look up') || query.includes('research')) {
+    agents.push('SAGE', 'CARA');
+  }
+  if (query.includes('what did') || query.includes('remember') || query.includes('yesterday') || query.includes('last')) {
+    agents.push('SAGE', 'COLE');
+  }
+  
+  // SPORTS/PLAY
+  if (query.includes('lakers') || query.includes('dodgers') || query.includes('game') || query.includes('score') || query.includes('sports')) {
+    agents.push('PLAY', 'LUKE');
+  }
+  
+  // PROACTIVE/HUNCH
+  if (query.includes('notice') || query.includes('pattern') || query.includes('predict') || query.includes('might')) {
+    agents.push('HUNCH', 'RADAR');
+  }
+  
+  // Default if nothing matched
+  if (agents.length === 0) {
+    agents.push('LUKE', 'COLE', 'JUDE', 'PACK');
+  }
+  
+  return agents;
+}
+async function AIR_text(userMessage, history, context = {}) {
+  const startTime = Date.now();
+  const agents_deployed = [];
+  
+  // ═══════════════════════════════════════════════════════════════════════════
+  // LAYER 0: ALWAYS ON - Run on EVERY request
+  // ═══════════════════════════════════════════════════════════════════════════
+  
+  // 1. HAM - Identify WHO is calling
+  const hamIdentity = await HAM_identify(context);
+  agents_deployed.push('HAM');
+  console.log(`[AIR] HAM identified: ${hamIdentity.name} (${hamIdentity.trust})`);
+  
+  // 2. SCRIBE - Log the INPUT
+  await SCRIBE_log('REQUEST_IN', {
+    ham: hamIdentity.id,
+    trust: hamIdentity.trust,
+    message: userMessage.substring(0, 200),
+    source: context.source || 'unknown',
+    channel: context.channel || 'chat'
+  });
+  agents_deployed.push('SCRIBE');
+  
+  // 3. Check trust level for certain operations
+  if (hamIdentity.trust === 'T1') {
+    // Guest - limited operations
+    console.log('[AIR] Guest access - limited operations');
+  }
+  
+  // ═══════════════════════════════════════════════════════════════════════════
+  // LAYER 1-4: PROCESS THE REQUEST
+  // ═══════════════════════════════════════════════════════════════════════════
+  
+  const lukeAnalysis = await LUKE_process(userMessage);
+  agents_deployed.push('LUKE');
+  
+  if (lukeAnalysis.isGoodbye) {
+    await SCRIBE_log('GOODBYE', { ham: hamIdentity.id });
+    return { response: "Take care! We are all ABA.", isGoodbye: true, agents: agents_deployed };
+  }
+  
+  const coleResult = await COLE_scour(lukeAnalysis);
+  agents_deployed.push('COLE');
+  
+  // JUDE - Smart routing based on intent
+  const smartAgents = JUDE_smartRoute(lukeAnalysis);
+  agents_deployed.push('JUDE', ...smartAgents);
+  console.log(`[AIR] JUDE routed to: ${smartAgents.join(', ')}`);
+  
+  const judeResult = await JUDE_findAgents(lukeAnalysis);
+  
+  // TRY AGENT DISPATCH FIRST
+  const dispatchResult = await AIR_DISPATCH(lukeAnalysis, judeResult, hamIdentity);
+  
+  let response = null;
+  let missionNumber = null;
+  
+  if (dispatchResult && dispatchResult.handled) {
+    console.log('[AIR] Agent ' + dispatchResult.agent + ' handled request');
+    response = dispatchResult.data;
+    missionNumber = '⬡M:' + dispatchResult.agent + ':' + Date.now() + '⬡';
+    agents_deployed.push(dispatchResult.agent);
+  } else {
+    // No agent handled it - proceed with LLM
+    agents_deployed.push('PACK');
+    const missionPackage = PACK_assemble(lukeAnalysis, coleResult, judeResult, history || [], null, null);
+    missionNumber = missionPackage.missionNumber;
+
+    // PRIMARY: Gemini Flash 2.0
+    if (GEMINI_KEY && !response) {
+      try {
+        const messages = (history || []).map(h => ({
+          role: h.role === 'assistant' ? 'model' : 'user',
+          parts: [{ text: h.content }]
+        }));
+        messages.push({ role: 'user', parts: [{ text: userMessage }] });
+        const result = await httpsRequest({
+          hostname: 'generativelanguage.googleapis.com',
+          path: '/v1beta/models/gemini-2.0-flash:generateContent?key=' + GEMINI_KEY,
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        }, JSON.stringify({
+          systemInstruction: { parts: [{ text: missionPackage.systemPrompt }] },
+          contents: messages,
+          generationConfig: { maxOutputTokens: 2048, temperature: 0.7 }
+        }));
+        const json = JSON.parse(result.data.toString());
+        if (json.candidates?.[0]?.content?.parts?.[0]?.text) {
+          response = json.candidates[0].content.parts[0].text;
+        }
+      } catch (e) { console.log('[AIR] Gemini error: ' + e.message); }
+    }
+
+    // BACKUP: Claude Haiku
+    if (ANTHROPIC_KEY && !response) {
+      try {
+        const messages = (history || []).map(h => ({ role: h.role, content: h.content }));
+        messages.push({ role: 'user', content: userMessage });
+        const result = await httpsRequest({
+          hostname: 'api.anthropic.com',
+          path: '/v1/messages',
+          method: 'POST',
+          headers: {
+            'x-api-key': ANTHROPIC_KEY,
+            'anthropic-version': '2023-06-01',
+            'Content-Type': 'application/json'
+          }
+        }, JSON.stringify({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 2048,
+          system: missionPackage.systemPrompt,
+          messages
+        }));
+        const json = JSON.parse(result.data.toString());
+        if (json.content?.[0]?.text) response = json.content[0].text;
+      } catch (e) { console.log('[AIR] Claude error: ' + e.message); }
+    }
+
+    // FALLBACK: Groq
+    if (GROQ_KEY && !response) {
+      try {
+        const messages = [
+          { role: 'system', content: missionPackage.systemPrompt },
+          ...(history || []).map(h => ({ role: h.role, content: h.content })),
+          { role: 'user', content: userMessage }
+        ];
+        const result = await httpsRequest({
+          hostname: 'api.groq.com',
+          path: '/openai/v1/chat/completions',
+          method: 'POST',
+          headers: { 'Authorization': 'Bearer ' + GROQ_KEY, 'Content-Type': 'application/json' }
+        }, JSON.stringify({ model: 'llama-3.3-70b-versatile', max_tokens: 2048, temperature: 0.7, messages }));
+        const json = JSON.parse(result.data.toString());
+        if (json.choices?.[0]?.message?.content) response = json.choices[0].message.content;
+      } catch (e) { console.log('[AIR] Groq error: ' + e.message); }
+    }
+
+    if (!response) response = "I'm here and processing. Could you rephrase that?";
+  }
+  
+  // ═══════════════════════════════════════════════════════════════════════════
+  // LAYER 0: PAM + SHADOW - Filter and oversight
+  // ═══════════════════════════════════════════════════════════════════════════
+  
+  // PAM - Filter output
+  response = await PAM_filter(response, hamIdentity);
+  agents_deployed.push('PAM');
+  
+  // SHADOW - Security oversight
+  const shadowCheck = await SHADOW_oversight(userMessage, response, hamIdentity);
+  agents_deployed.push('SHADOW');
+  
+  // ═══════════════════════════════════════════════════════════════════════════
+  // RETURN-TO-ME PROTOCOL - Log, memo, link
+  // ═══════════════════════════════════════════════════════════════════════════
+  
+  const returnResult = await RETURN_TO_ME(userMessage, response, agents_deployed, hamIdentity, missionNumber);
+  agents_deployed.push('LOGFUL', 'AGENT_LINK');
+  
+  // Final SCRIBE log
+  await SCRIBE_log('REQUEST_OUT', {
+    ham: hamIdentity.id,
+    agents: agents_deployed,
+    duration_ms: Date.now() - startTime,
+    response_length: response.length,
+    mission: missionNumber
+  });
+  
+  console.log(`[AIR] Complete. Agents deployed: ${agents_deployed.join(' → ')}`);
+  
+  return { 
+    response, 
+    isGoodbye: false, 
+    missionNumber,
+    agents: agents_deployed,
+    trace: `USER*AIR*${agents_deployed.join(',')}*REACH`
+  };
+}
 // ═══════════════════════════════════════════════════════════════════════════
 /**
  * ╔══════════════════════════════════════════════════════════════════════════════╗
@@ -7929,7 +8231,7 @@ Respond as this agent specifically — stay in character.`;
       
       // Default: route through AIR_text (LUKE/COLE/JUDE/PACK)
       console.log('[ROUTER] Routing message through AIR: "' + message.substring(0, 80) + '"');
-      const result = await AIR_text(message, history || []);
+      const result = await AIR_text(message, history || [], { source: body.source || "api", channel: body.channel || "chat", caller_number: body.caller_number, ham_id: body.ham_id });
       return jsonResponse(res, 200, {
         response: result.response,
         isGoodbye: result.isGoodbye,
