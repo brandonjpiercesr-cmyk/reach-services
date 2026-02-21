@@ -8237,7 +8237,7 @@ Respond as this agent specifically — stay in character.`;
         isGoodbye: result.isGoodbye,
         missionNumber: result.missionNumber,
         source: 'REACH-AIR',
-        trace: 'USER*AIR*LUKE,COLE,JUDE,PACK*MODEL*VARA'
+        trace: result.trace || 'USER*AIR*AGENTS*REACH', agents: result.agents
       });
     } catch (e) {
       console.error('[ROUTER] Error:', e.message);
