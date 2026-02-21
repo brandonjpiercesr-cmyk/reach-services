@@ -7769,7 +7769,13 @@ const httpServer = http.createServer(async (req, res) => {
   // ⬡B:AIR:REACH.API.HEALTH:CODE:infrastructure.status.alive:USER→REACH:T10:v1.5.0:20260213:h1l2t⬡ ROOT / HEALTH
   // ═══════════════════════════════════════════════════════════════════════
   if (path === '/' || path === '/health') {
-    return jsonResponse(res, 200, {
+    
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
+      return jsonResponse(res, 200, {
       status: 'ALIVE',
       service: 'ABA TOUCH v2.12.16-OMI-FIX-FEB20',
       mode: 'FULL API + VOICE + OMI + SMS + SPEECH INTELLIGENCE',
@@ -7807,7 +7813,13 @@ const httpServer = http.createServer(async (req, res) => {
       const dueCalls = await checkScheduledCalls();
       
       if (dueCalls.length === 0) {
-        return jsonResponse(res, 200, {
+        
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
+      return jsonResponse(res, 200, {
           status: 'ok',
           message: 'No scheduled calls due',
           checked_at: new Date().toISOString()
@@ -7888,6 +7900,12 @@ const httpServer = http.createServer(async (req, res) => {
         }
       }
       
+      
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, {
         status: 'ok',
         executed: results.length,
@@ -7922,6 +7940,12 @@ const httpServer = http.createServer(async (req, res) => {
         return jsonResponse(res, 500, { error: 'Analysis failed' });
       }
       
+      
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, {
         success: true,
         call_id: call_id || 'unknown',
@@ -7970,6 +7994,12 @@ const httpServer = http.createServer(async (req, res) => {
         tone: 'professional'
       });
       
+      
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, {
         success: true,
         draft: draft,
@@ -8227,7 +8257,13 @@ Respond as this agent specifically — stay in character.`;
             4000
           );
           
-          return jsonResponse(res, 200, {
+          
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
+      return jsonResponse(res, 200, {
             response: agentResult,
             agent: agentJD.full_name,
             acronym: agentJD.acronym,
@@ -8243,6 +8279,12 @@ Respond as this agent specifically — stay in character.`;
       // Default: route through AIR_text (LUKE/COLE/JUDE/PACK)
       console.log('[ROUTER] Routing message through AIR: "' + message.substring(0, 80) + '"');
       const result = await AIR_text(message, history || [], { source: body.source || "api", channel: body.channel || "chat", caller_number: body.caller_number, ham_id: body.ham_id });
+      
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, {
         response: result.response,
         isGoodbye: result.isGoodbye,
@@ -8296,7 +8338,13 @@ Respond as this agent specifically — stay in character.`;
   // ═══════════════════════════════════════════════════════════════════════
   if (path === '/api/voice/deepgram-token' && method === 'GET') {
     if (!DEEPGRAM_KEY) return jsonResponse(res, 503, { error: 'Deepgram not configured' });
-    return jsonResponse(res, 200, {
+    
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
+      return jsonResponse(res, 200, {
       token: DEEPGRAM_KEY,
       model: 'nova-2',
       language: 'en-US',
@@ -8437,14 +8485,26 @@ Respond as this agent specifically — stay in character.`;
           
           if (result.success) {
             const names = groupCallParticipants.map(p => p.name).join(' and ');
-            return jsonResponse(res, 200, {
+            
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
+      return jsonResponse(res, 200, {
               response: `Got it! I'm setting up a group call with ${names}. Everyone should be receiving calls right now to join the conference.`,
               group_call_initiated: true,
               conference: result.conferenceName,
               participants: result.participants
             });
           } else {
-            return jsonResponse(res, 200, {
+            
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
+      return jsonResponse(res, 200, {
               response: "I tried to set up the group call but hit a snag. Let me try individual calls instead.",
               error: result.error
             });
@@ -8469,14 +8529,26 @@ Respond as this agent specifically — stay in character.`;
           const result = await scheduleCall(userMessage, callerIdentity);
           
           if (result.success) {
-            return jsonResponse(res, 200, {
+            
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
+      return jsonResponse(res, 200, {
               response: `Done! I've scheduled a call to ${result.target} for ${result.scheduledTime}. I'll make sure that happens.`,
               scheduled_call: true,
               scheduledTime: result.scheduledTime,
               target: result.target
             });
           } else {
-            return jsonResponse(res, 200, {
+            
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
+      return jsonResponse(res, 200, {
               response: "I had trouble understanding when you'd like me to call. Could you say something like 'call me at 8am tomorrow'?"
             });
           }
@@ -8494,7 +8566,13 @@ Respond as this agent specifically — stay in character.`;
         
         // Note: For ElevenLabs calls, we don't have direct call SID access
         // This would need integration with the current call context
-        return jsonResponse(res, 200, {
+        
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
+      return jsonResponse(res, 200, {
           response: `I understand you'd like to be transferred to ${transferRequest.target.name}. For now, let me call them and add you both to a conference.`,
           transfer_requested: true,
           target: transferRequest.target.name,
@@ -8516,18 +8594,36 @@ Respond as this agent specifically — stay in character.`;
           const emailResult = await IMAN_voiceEmailCommand(userMessage, callerIdentity);
           
           if (emailResult.success && emailResult.awaiting_confirmation) {
-            return jsonResponse(res, 200, {
+            
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
+      return jsonResponse(res, 200, {
               response: emailResult.response,
               email_draft: emailResult.draft,
               awaiting_confirmation: true
             });
           } else if (emailResult.success) {
-            return jsonResponse(res, 200, {
+            
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
+      return jsonResponse(res, 200, {
               response: emailResult.response,
               email_sent: true
             });
           } else {
-            return jsonResponse(res, 200, {
+            
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
+      return jsonResponse(res, 200, {
               response: emailResult.response
             });
           }
@@ -8601,7 +8697,13 @@ Respond as this agent specifically — stay in character.`;
             ? "Absolutely! I will hang up now and call you right back. Talk to you in just a moment!"
             : `Got it! I am calling ${targetName} right now. They should be getting my call any second.`;
           
-          return jsonResponse(res, 200, {
+          
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
+      return jsonResponse(res, 200, {
             response: responseMsg,
             outbound_call_initiated: true,
             target: targetName,
@@ -8609,7 +8711,13 @@ Respond as this agent specifically — stay in character.`;
           });
         } catch (e) {
           console.log('[AIR VOICE TOOL] Outbound call error:', e.message);
-          return jsonResponse(res, 200, {
+          
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
+      return jsonResponse(res, 200, {
             response: "I tried to place that call but hit a small snag. Let me stay on the line with you instead. What else can I help with?"
           });
         }
@@ -8697,6 +8805,12 @@ Respond as this agent specifically — stay in character.`;
       }).catch(e => console.log('[BRAIN] Store error:', e.message));
       
       // Return response for ElevenLabs to speak
+      
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, {
         response: responseText,
         conversation_id: conversationId
@@ -8707,6 +8821,12 @@ Respond as this agent specifically — stay in character.`;
       console.error('[AIR VOICE TOOL] Error name:', e.name);
       console.error('[AIR VOICE TOOL] Error message:', e.message);
       console.error('[AIR VOICE TOOL] Error stack:', e.stack);
+      
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, {
         response: "I apologize, I had a brief moment of confusion. Could you repeat that?",
         debug_error: e.message,
@@ -8753,10 +8873,22 @@ Respond as this agent specifically — stay in character.`;
         tags: ['voice', 'transcript', 'call_complete']
       }).catch(e => console.log('[BRAIN] Store error:', e.message));
       
+      
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, { received: true, conversation_id: conversationId });
       
     } catch (e) {
       console.error('[POST-CALL] Error:', e.message);
+      
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, { received: true, error: e.message });
     }
   }
@@ -8766,7 +8898,13 @@ Respond as this agent specifically — stay in character.`;
   // ████████████████████████████████████████████████████████████████████████████
   if (path === '/api/omi/auth') {
     console.log('[OMI AUTH] Health check at ' + new Date().toISOString());
-    return jsonResponse(res, 200, {
+    
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
+      return jsonResponse(res, 200, {
       authenticated: true,
       app_id: OMI_APP_ID || 'aba-intelligence-layer',
       status: 'active',
@@ -8775,7 +8913,13 @@ Respond as this agent specifically — stay in character.`;
   }
 
   if (path === '/api/omi/manifest' || path === '/api/omi/manifest.json') {
-    return jsonResponse(res, 200, {
+    
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
+      return jsonResponse(res, 200, {
       id: OMI_APP_ID,
       name: 'ABA Intelligence Layer',
       description: 'ABA (A Better AI) processes ambient conversations through TASTE (Transcript Analysis and Semantic Tagging Engine) and stores insights in the ABA Brain.',
@@ -8842,12 +8986,24 @@ Respond as this agent specifically — stay in character.`;
       } else {
         // This is likely session metadata, not a transcript - skip
         console.log('[OMI] Received non-transcript data, skipping:', Object.keys(body).join(', '));
-        return jsonResponse(res, 200, { status: 'skipped', reason: 'no transcript text found' });
+        
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
+      return jsonResponse(res, 200, { status: 'skipped', reason: 'no transcript text found' });
       }
       
       // Don't process empty transcripts or raw binary
       if (!transcript || transcript.length < 5 || transcript.startsWith('{"raw"')) {
-        return jsonResponse(res, 200, { status: 'skipped', reason: 'empty transcript' });
+        
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
+      return jsonResponse(res, 200, { status: 'skipped', reason: 'empty transcript' });
       }
       const timestamp = body.timestamp || new Date().toISOString();
 
@@ -8969,7 +9125,13 @@ Respond as this agent specifically — stay in character.`;
             timestamp: new Date().toISOString()
           });
           
-          return jsonResponse(res, 200, { 
+          
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
+      return jsonResponse(res, 200, { 
             status: 'processed', 
             agent: 'AIR', 
             stored: true, 
@@ -9155,7 +9317,13 @@ Respond as this agent specifically — stay in character.`;
       
       if (omiResult.success) {
         console.log('[TASTE] Urgent content detected, AIR escalation triggered');
-        return jsonResponse(res, 200, { 
+        
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
+      return jsonResponse(res, 200, { 
           status: 'processed', 
           agent: 'TASTE', 
           stored: true, 
@@ -9164,9 +9332,21 @@ Respond as this agent specifically — stay in character.`;
         });
       }
       
+      
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, { status: 'processed', agent: 'TASTE', stored: true, escalated: false });
     } catch (e) {
       console.error('[OMI] Webhook error:', e.message);
+      
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, { status: 'received', error: e.message });
     }
   }
@@ -9201,6 +9381,12 @@ Respond as this agent specifically — stay in character.`;
         tags: ['heartbeat', 'cara', 'ping', 'contact']
       }));
       console.log('[HEARTBEAT] CARA ping registered from:', source);
+      
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, { success: true, timestamp: ts, source });
     } catch(e) { return jsonResponse(res, 500, { error: e.message }); }
   }
@@ -9394,6 +9580,12 @@ if (path === '/api/sms/send' && method === 'POST') {
         });
       }
       
+      
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, { 
         success: true, 
         message: 'Webhook processed',
@@ -9404,6 +9596,12 @@ if (path === '/api/sms/send' && method === 'POST') {
       
     } catch (e) {
       console.log('[ELEVENLABS WEBHOOK] Error:', e.message);
+      
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, { success: false, error: e.message });
     }
   }
@@ -9435,7 +9633,13 @@ if (path === '/api/sms/send' && method === 'POST') {
         const data = JSON.parse(result.data.toString());
         if (data.length > 0) {
           const intelligence = JSON.parse(data[0].content);
-          return jsonResponse(res, 200, {
+          
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
+      return jsonResponse(res, 200, {
             success: true,
             conversation_id: conversationId,
             intelligence: intelligence
@@ -9493,13 +9697,25 @@ if (path === '/api/sms/send' && method === 'POST') {
           }
         }).filter(Boolean);
         
-        return jsonResponse(res, 200, {
+        
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
+      return jsonResponse(res, 200, {
           success: true,
           count: calls.length,
           calls: calls
         });
       }
       
+      
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, { success: true, count: 0, calls: [] });
       
     } catch (e) {
@@ -9684,6 +9900,12 @@ if (path === '/api/sms/send' && method === 'POST') {
       });
 
       const json = JSON.parse(result.data.toString());
+      
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, { results: json, count: json.length });
     } catch (e) {
       return jsonResponse(res, 500, { error: e.message });
@@ -9764,6 +9986,12 @@ if (path === '/api/sms/send' && method === 'POST') {
       });
 
       console.log('[AIR*SAGE*SEMANTIC] Query: "' + query + '" → ' + (Array.isArray(matchResult) ? matchResult.length : 0) + ' matches');
+      
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, { results: matchResult, query, method: 'semantic_pgvector' });
     } catch (e) {
       console.error('[SEMANTIC] Error:', e.message);
@@ -9796,7 +10024,13 @@ if (path === '/api/sms/send' && method === 'POST') {
       });
 
       if (!Array.isArray(unembedded) || unembedded.length === 0) {
-        return jsonResponse(res, 200, { message: 'All memories embedded', count: 0 });
+        
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
+      return jsonResponse(res, 200, { message: 'All memories embedded', count: 0 });
       }
 
       let embedded = 0;
@@ -9832,6 +10066,12 @@ if (path === '/api/sms/send' && method === 'POST') {
       }
 
       console.log('[AIR*SAGE*EMBED] Backfilled ' + embedded + ' embeddings');
+      
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, { embedded, total_unembedded: unembedded.length });
     } catch (e) {
       return jsonResponse(res, 500, { error: e.message });
@@ -10006,7 +10246,13 @@ if (path === '/api/sms/send' && method === 'POST') {
       
       if (json.data?.id) {
         console.log('[IMAN] Email sent to ' + (Array.isArray(to) ? to.join(', ') : to) + ' | Subject: ' + subject);
-        return jsonResponse(res, 200, { success: true, message_id: json.data.id, subject: subject });
+        
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
+      return jsonResponse(res, 200, { success: true, message_id: json.data.id, subject: subject });
       } else {
         console.log('[IMAN] Email send failed: ' + JSON.stringify(json));
         return jsonResponse(res, result.status, { error: json.error?.message || 'Send failed', details: json });
@@ -10201,6 +10447,12 @@ if (path === '/api/sms/send' && method === 'POST') {
       const text = aiData.content?.[0]?.text || '';
       const jsonMatch = text.match(/\{[\s\S]*\}/);
       const jobData = jsonMatch ? JSON.parse(jsonMatch[0]) : { title: '', company: '' };
+      
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, { ...jobData, source: url, method: 'server_scrape', scrapedAt: new Date().toISOString() });
     } catch (e) { return jsonResponse(res, 500, { error: e.message }); }
   }
@@ -10220,7 +10472,13 @@ if (path === '/api/sms/send' && method === 'POST') {
       res.writeHead(200, { 'Content-Type': 'text/plain' });
       return res.end(challenge);
     }
-    return jsonResponse(res, 200, { status: 'webhook ready' });
+    
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
+      return jsonResponse(res, 200, { status: 'webhook ready' });
   }
 
   if (path === '/api/nylas/webhook' && method === 'POST') {
@@ -10229,7 +10487,13 @@ if (path === '/api/sms/send' && method === 'POST') {
       
       // Nylas webhook verification (challenge response)
       if (body.challenge) {
-        return jsonResponse(res, 200, { challenge: body.challenge });
+        
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
+      return jsonResponse(res, 200, { challenge: body.challenge });
       }
       
       // Process webhook events
@@ -10604,9 +10868,21 @@ RULES:
         }
       }
       
+      
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, { processed: results.length, results });
     } catch (e) {
       console.error('[Nylas Webhook] Error:', e.message);
+      
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, { error: e.message }); // 200 so Nylas doesn't retry forever
     }
   }
@@ -10640,6 +10916,12 @@ RULES:
         catch { return { id: m.id, raw: m.content, storedAt: m.created_at }; }
       });
       
+      
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, { jobs, total: jobs.length });
     } catch (e) {
       return jsonResponse(res, 500, { error: e.message });
@@ -10664,7 +10946,13 @@ RULES:
         .slice(0, 10);
 
       if (urls.length === 0) {
-        return jsonResponse(res, 200, { jobs: [], errors: [], summary: { emailSubject, urlsFound: 0, message: 'No Idealist job URLs found' } });
+        
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
+      return jsonResponse(res, 200, { jobs: [], errors: [], summary: { emailSubject, urlsFound: 0, message: 'No Idealist job URLs found' } });
       }
 
       if (!ANTHROPIC_KEY) return jsonResponse(res, 503, { error: 'No AI key for extraction' });
@@ -10708,6 +10996,12 @@ RULES:
       }
 
       const verified = jobs.filter(j => j.verified).length;
+      
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, {
         jobs, errors,
         summary: { emailSubject, urlsFound: urls.length, jobsParsed: jobs.length, jobsVerified: verified, jobsFailed: errors.length, accuracy: jobs.length > 0 ? Math.round((verified / jobs.length) * 100) + '%' : 'N/A' }
@@ -10747,6 +11041,12 @@ RULES:
       const text = aiData.content?.[0]?.text || '';
       const jsonMatch = text.match(/\{[\s\S]*\}/);
       const result = jsonMatch ? JSON.parse(jsonMatch[0]) : { verified: false };
+      
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, { ...result, url, verifiedAt: new Date().toISOString() });
     } catch (e) { return jsonResponse(res, 500, { error: e.message }); }
   }
@@ -10893,7 +11193,13 @@ We Are All ABA.`;
             timestamp: new Date().toISOString()
           });
           
-          return jsonResponse(res, 200, {
+          
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
+      return jsonResponse(res, 200, {
             success: true,
             conversation_id: fallbackData.conversation_id,
             traceId,
@@ -10938,6 +11244,12 @@ We Are All ABA.`;
       
       // NO MORE PATCH RESTORE NEEDED - we never mutated the global agent config!
       
+      
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, {
         success: true,
         conversation_id: data.conversation_id,
@@ -11093,7 +11405,13 @@ We Are All ABA.`;
       });
     }
     
-    return jsonResponse(res, 200, { received: true });
+    
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
+      return jsonResponse(res, 200, { received: true });
   }
   
   // /api/call/record - Toggle manual recording
@@ -11101,7 +11419,13 @@ We Are All ABA.`;
     const body = await parseBody(req);
     const { callSid, enable } = body;
     console.log('[DIAL] Manual record', enable ? 'STARTED' : 'STOPPED', '| Call:', callSid);
-    return jsonResponse(res, 200, { 
+    
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
+      return jsonResponse(res, 200, { 
       success: true, 
       recording: enable,
       timestamp: new Date().toISOString()
@@ -11128,6 +11452,12 @@ We Are All ABA.`;
         try { return { id: m.id, ...JSON.parse(m.content), storedAt: m.created_at, importance: m.importance, tags: m.tags }; }
         catch(e) { return { id: m.id, raw: m.content, storedAt: m.created_at }; }
       });
+      
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, { jobs, total: jobs.length, source: 'supabase_brain' });
     } catch(e) { return jsonResponse(res, 500, { error: e.message }); }
   }
@@ -11211,7 +11541,13 @@ We Are All ABA.`;
         try {
           const dialResult = await DIAL_callWithElevenLabs(targetPhone, spokenMessage, source || 'escalate');
           
-          return jsonResponse(res, 200, {
+          
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
+      return jsonResponse(res, 200, {
             success: dialResult.success,
             routing: 'FORCE_CALL*ELEVENLABS*TWOWAY',
             analysis: { urgency: 10, category: 'ham_request', intent: 'Call requested by HAM' },
@@ -11239,6 +11575,12 @@ We Are All ABA.`;
         metadata: { urgency, target, originalBody: body }
       });
       
+      
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, {
         success: true,
         routing: result.routing,
@@ -11375,7 +11717,13 @@ We Are All ABA.`;
       const msgData = JSON.parse(msgResult.data.toString());
       const messages = msgData.data || [];
       
-      if (messages.length === 0) return jsonResponse(res, 200, { message: 'No Idealist emails found', jobs: [], total: 0 });
+      if (messages.length === 0) 
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
+      return jsonResponse(res, 200, { message: 'No Idealist emails found', jobs: [], total: 0 });
       
       // Parse each email for Idealist URLs
       let allJobs = [];
@@ -11434,6 +11782,12 @@ We Are All ABA.`;
         }
       }
       
+      
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, {
         success: true,
         emailsProcessed: Math.min(messages.length, 20),
@@ -11504,14 +11858,26 @@ We Are All ABA.`;
     const query = url.searchParams.get('q') || '';
     console.log('[SAGE] API search:', query);
     const results = await SAGE_search(query);
-    return jsonResponse(res, 200, { query, results, count: results.length });
+    
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
+      return jsonResponse(res, 200, { query, results, count: results.length });
   }
   
   // GET /api/sage/index - Get ACL tag index
   if (path === '/api/sage/index' && method === 'GET') {
     console.log('[SAGE] API index request');
     const index = await SAGE_indexACL();
-    return jsonResponse(res, 200, { tags: Object.keys(index).length, index });
+    
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
+      return jsonResponse(res, 200, { tags: Object.keys(index).length, index });
   }
   
   // ⬡B:AIR:REACH.NYLAS.STATUS:CODE:email.nylas.connection_check:REACH→BRAIN→UI:v2.6.8:20260214:n1s2t⬡
@@ -11533,10 +11899,28 @@ We Are All ABA.`;
           const m = grants[0].content.match(/Email: ([^\s|]+)/);
           if (m) email = m[1];
         }
-        return jsonResponse(res, 200, { connected: true, grant_id: grantId, email, provider: 'nylas' });
+        
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
+      return jsonResponse(res, 200, { connected: true, grant_id: grantId, email, provider: 'nylas' });
       }
+      
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, { connected: false });
     } catch (e) {
+      
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, { connected: false, error: e.message });
     }
   }
@@ -11592,6 +11976,12 @@ We Are All ABA.`;
         else if (combined.match(/meeting|calendar|invite|rsvp/)) msg.category = 'meeting';
       }
 
+      
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, { success: true, emails: messages, count: messages.length, provider: 'nylas' });
     } catch (e) {
       console.error('[NYLAS INBOX]', e.message);
@@ -11604,7 +11994,13 @@ We Are All ABA.`;
     const body = await parseBody(req);
     console.log('[IMAN] API draft request:', body.to);
     const draft = await IMAN_draftEmail(body);
-    return jsonResponse(res, 200, { success: !!draft, draft });
+    
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
+      return jsonResponse(res, 200, { success: !!draft, draft });
   }
   
   // POST /api/iman/send - Send email (direct OR from draft)
@@ -11642,6 +12038,12 @@ We Are All ABA.`;
         }
       });
       const drafts = JSON.parse(draftsResult.data.toString()) || [];
+      
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, { count: drafts.length, drafts: drafts.map(d => ({
         id: d.id,
         ...JSON.parse(d.content || '{}'),
@@ -11664,14 +12066,26 @@ We Are All ABA.`;
   if (path === '/api/devices' && method === 'GET') {
     const userId = url.searchParams.get('userId');
     const devices = await getActiveDevices(userId);
-    return jsonResponse(res, 200, { count: devices.length, devices });
+    
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
+      return jsonResponse(res, 200, { count: devices.length, devices });
   }
   
   // GET /api/pulse/status - Get heartbeat status
   if (path === '/api/pulse/status' && method === 'GET') {
     const oneHourAgo = Date.now() - 60 * 60 * 1000;
     const recentCalls = CALL_HISTORY.filter(t => t > oneHourAgo);
-    return jsonResponse(res, 200, {
+    
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
+      return jsonResponse(res, 200, {
       status: 'active',
       uptime: Math.floor(process.uptime()),
       commandCenterClients: COMMAND_CENTER_CLIENTS.size,
@@ -11697,7 +12111,13 @@ We Are All ABA.`;
         cooldowns[phone] = Math.ceil(remaining / 60000) + ' min remaining';
       }
     }
-    return jsonResponse(res, 200, {
+    
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
+      return jsonResponse(res, 200, {
       callsThisHour: recentCalls.length,
       maxCallsPerHour: MAX_CALLS_PER_HOUR,
       cooldownMinutes: CALL_COOLDOWN_MINUTES,
@@ -11711,7 +12131,13 @@ We Are All ABA.`;
     console.log('[THROTTLE] Manual reset triggered');
     CALL_COOLDOWN.clear();
     CALL_HISTORY.length = 0;
-    return jsonResponse(res, 200, { 
+    
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
+      return jsonResponse(res, 200, { 
       reset: true, 
       message: 'All cooldowns cleared. ABA can call again immediately.' 
     });
@@ -11723,7 +12149,13 @@ We Are All ABA.`;
     pulseCheck().then(() => {
       console.log('[PULSE] Manual pulse complete');
     });
-    return jsonResponse(res, 200, { triggered: true, timestamp: new Date().toISOString() });
+    
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
+      return jsonResponse(res, 200, { triggered: true, timestamp: new Date().toISOString() });
   }
 
 
@@ -11754,7 +12186,13 @@ We Are All ABA.`;
         subject: data.draft.subject
       });
     }
-    return jsonResponse(res, 200, { count: pending.length, pending });
+    
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
+      return jsonResponse(res, 200, { count: pending.length, pending });
   }
 
 
@@ -11815,7 +12253,13 @@ We Are All ABA.`;
   
   if (path === '/api/air/erica' && method === 'GET') {
     const cooldownRemaining = Math.max(0, (ERICA_LAST_RUN + ERICA_COOLDOWN) - Date.now());
-    return jsonResponse(res, 200, {
+    
+      // RETURN-TO-ME: Post-process logging
+      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
+      // LOGFUL logs outcome to brain
+      // AGENT_LINK creates session handoff
+      // MEMOS captures if noteworthy
+      return jsonResponse(res, 200, {
       agent: 'ERICA',
       fullName: 'Executive Roadmap Intelligence & Continuous Automation',
       status: cooldownRemaining > 0 ? 'cooldown' : 'ready',
