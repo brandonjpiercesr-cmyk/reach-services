@@ -7125,6 +7125,170 @@ function jsonResponse(res, status, data) {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 // HAM - Identify caller FIRST on every request
+// ╔══════════════════════════════════════════════════════════════════════════════╗
+// ║ GREET - Greeting Intelligence and Contextual Welcome Engine                   ║
+// ║ LAYER 0 CORE AGENT - Runs on incoming calls                                   ║
+// ║ ROUTING: CALL→AIR→HAM,TIME,COLE,TRACE→GREET→VARA                             ║
+// ╚══════════════════════════════════════════════════════════════════════════════╝
+// ⬡B:AIR:REACH.AGENT.GREET:CODE:core.greeting.smart:T10:v1.0.0:20260221:g1r2t⬡
+
+async function GREET_smartGreeting(callerContext) {
+  console.log('[GREET] Smart greeting initiated...');
+  
+  // 1. WHO - HAM identifies caller
+  const identity = await HAM_identify(callerContext);
+  console.log('[GREET] Identity:', identity?.name || 'Unknown', '| Trust:', identity?.trust || 'T1');
+  
+  // 2. WHEN - TIME gets current context (user's timezone from HAM location)
+  const locationToTimezone = {
+    'Greensboro NC': 'America/New_York',
+    'Charlotte NC': 'America/New_York', 
+    'Los Angeles CA': 'America/Los_Angeles',
+    'Pennsylvania': 'America/New_York',
+  };
+  const timezone = locationToTimezone[identity?.location] || 'America/New_York';
+  const now = new Date();
+  const timeOptions = { 
+    hour: 'numeric', 
+    minute: '2-digit',
+    timeZone: timezone 
+  };
+  const dateOptions = {
+    weekday: 'long',
+    month: 'long', 
+    day: 'numeric',
+    timeZone: timezone
+  };
+  const currentTime = now.toLocaleTimeString('en-US', timeOptions);
+  const currentDate = now.toLocaleDateString('en-US', dateOptions);
+  const hour = parseInt(now.toLocaleTimeString('en-US', { hour: 'numeric', hour12: false, timeZone: timezone }));
+  const timePeriod = hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : hour < 21 ? 'evening' : 'late night';
+  
+  console.log('[GREET] TIME:', currentTime, timePeriod, '| TZ:', timezone);
+  
+  // 3. RECENT - COLE gets recent activity across ALL channels (last 30 min)
+  let recentActivity = null;
+  let activeMission = null;
+  try {
+    // Query brain for recent interactions with this user
+    const thirtyMinAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    const recentQuery = await httpsRequest({
+      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+      path: `/rest/v1/aba_memory?created_at=gte.${thirtyMinAgo}&order=created_at.desc&limit=5&or=(content.ilike.*${encodeURIComponent(identity?.name || 'brandon')}*,source.ilike.*omi*,source.ilike.*voice*,source.ilike.*sms*)`,
+      method: 'GET',
+      headers: {
+        'apikey': SUPABASE_ANON,
+        'Authorization': 'Bearer ' + SUPABASE_ANON
+      }
+    });
+    
+    if (recentQuery.status === 200) {
+      const memories = JSON.parse(recentQuery.data.toString());
+      if (memories.length > 0) {
+        console.log('[GREET] Found', memories.length, 'recent activities');
+        
+        // Look for active missions (directions, pending tasks, etc)
+        for (const m of memories) {
+          const content = m.content?.toLowerCase() || '';
+          if (content.includes('direction') || content.includes('navigate') || content.includes('going to')) {
+            activeMission = { type: 'directions', context: m.content.substring(0, 200) };
+            break;
+          }
+          if (content.includes('remind') || content.includes('reminder')) {
+            activeMission = { type: 'reminder', context: m.content.substring(0, 200) };
+            break;
+          }
+          if (content.includes('email') || content.includes('draft')) {
+            activeMission = { type: 'email', context: m.content.substring(0, 200) };
+            break;
+          }
+          if (content.includes('call') || content.includes('meeting')) {
+            activeMission = { type: 'meeting', context: m.content.substring(0, 200) };
+            break;
+          }
+        }
+        
+        recentActivity = {
+          count: memories.length,
+          lastChannel: memories[0].source || 'unknown',
+          lastContent: memories[0].content?.substring(0, 200) || '',
+          minutesAgo: Math.round((Date.now() - new Date(memories[0].created_at).getTime()) / 60000)
+        };
+      }
+    }
+  } catch (e) {
+    console.log('[GREET] COLE recent activity error:', e.message);
+  }
+  
+  console.log('[GREET] Recent:', recentActivity ? `${recentActivity.count} activities, last ${recentActivity.minutesAgo}min ago` : 'none');
+  console.log('[GREET] Active mission:', activeMission?.type || 'none');
+  
+  // 4. BUILD GREETING CONTEXT
+  const greetingContext = {
+    name: identity?.name || 'friend',
+    firstName: (identity?.name || 'friend').split(' ')[0],
+    trust: identity?.trust || 'T1',
+    timePeriod,
+    currentTime,
+    currentDate,
+    timezone,
+    recentActivity,
+    activeMission,
+    isHighTrust: ['T8', 'T9', 'T10'].includes(identity?.trust)
+  };
+  
+  // 5. GENERATE SMART GREETING via model
+  const greetingPrompt = `Generate a 1-sentence warm greeting for ${greetingContext.firstName}.
+
+CONTEXT:
+- Time: ${greetingContext.timePeriod} (${greetingContext.currentTime})
+- Date: ${greetingContext.currentDate}
+- Trust Level: ${greetingContext.trust} (${greetingContext.isHighTrust ? 'close relationship' : 'standard'})
+${greetingContext.activeMission ? `- ACTIVE MISSION: ${greetingContext.activeMission.type} - ${greetingContext.activeMission.context}` : ''}
+${greetingContext.recentActivity ? `- Last contact: ${greetingContext.recentActivity.minutesAgo} minutes ago via ${greetingContext.recentActivity.lastChannel}
+- Recent context: ${greetingContext.recentActivity.lastContent}` : '- No recent contact'}
+
+RULES:
+1. If there's an ACTIVE MISSION, reference it naturally (e.g., "You should be close now" for directions)
+2. If recent contact was < 15 min ago, CONTINUE the conversation ("Back already?" or reference what was discussed)
+3. If high trust (T8+), be warm and personal like a friend
+4. Match the time of day naturally
+5. NEVER say "How can I help you?" - you already know their life
+6. Keep it to ONE sentence, natural and warm
+7. You are VARA, their life partner AI
+
+EXAMPLES:
+- [Active directions, 5min ago]: "You should be close now. Ready for that meeting?"
+- [Recent email draft, 10min ago]: "Did they respond yet?"
+- [Morning, no recent]: "Good morning, sir. What's first today?"
+- [Late night, high trust]: "Burning the midnight oil again?"
+- [Recent call ended badly]: "Everything alright? I'm here."
+
+Generate ONLY the greeting, nothing else:`;
+
+  try {
+    const greetingResponse = await callModelDeep(greetingPrompt, 100);
+    const greeting = greetingResponse.trim().replace(/^["']|["']$/g, '');
+    console.log('[GREET] Generated:', greeting);
+    return {
+      greeting,
+      context: greetingContext,
+      trace: 'AIR*HAM,TIME,COLE,GREET*VARA'
+    };
+  } catch (e) {
+    console.log('[GREET] Model error, using fallback:', e.message);
+    // Fallback greeting
+    const fallback = greetingContext.isHighTrust 
+      ? `Hey ${greetingContext.firstName}! Good to hear from you.`
+      : `Hello! How can I help?`;
+    return {
+      greeting: fallback,
+      context: greetingContext,
+      trace: 'AIR*GREET_FALLBACK*VARA'
+    };
+  }
+}
+
 async function HAM_identify(context) {
   const { caller_number, device_id, ham_id, source } = context;
   
@@ -8212,6 +8376,47 @@ Phone: (336) 389-8116</p>
       const body = await parseBody(req);
       const { message, history, model, systemPrompt, agent_id, agent_name } = body;
       if (!message) return jsonResponse(res, 400, { error: 'message required' });
+
+      // ⬡B:AIR:REACH.GREET.HANDLER:CODE:smart.greeting.incoming:T10:v1.0.0:20260221⬡
+      // SPECIAL: Smart greeting for incoming calls
+      if (message === 'GREET_INCOMING_CALL' || message.toLowerCase() === 'greet_incoming_call') {
+        console.log('[ROUTER] GREET_INCOMING_CALL - Deploying smart greeting agents...');
+        
+        // Extract caller context from body
+        const callerContext = {
+          caller_number: body.caller_number || body.callerNumber || null,
+          device_id: body.device_id || null,
+          source: body.source || 'livekit_voice',
+          channel: body.channel || 'phone'
+        };
+        
+        try {
+          const greetResult = await GREET_smartGreeting(callerContext);
+          console.log('[ROUTER] GREET complete:', greetResult.greeting);
+          
+          return jsonResponse(res, 200, {
+            response: greetResult.greeting,
+            isGoodbye: false,
+            missionNumber: `⬡M:greet:incoming:${Date.now()}⬡`,
+            source: 'REACH-AIR-GREET',
+            trace: greetResult.trace,
+            agents: ['HAM', 'TIME', 'COLE', 'GREET'],
+            greetingContext: greetResult.context
+          });
+        } catch (e) {
+          console.log('[ROUTER] GREET error:', e.message);
+          // Fallback greeting
+          return jsonResponse(res, 200, {
+            response: "Hey! Good to hear from you.",
+            isGoodbye: false,
+            missionNumber: `⬡M:greet:fallback:${Date.now()}⬡`,
+            source: 'REACH-AIR-GREET',
+            trace: 'AIR*GREET_ERROR*VARA',
+            agents: ['GREET']
+          });
+        }
+      }
+
 
       // If agent_id or agent_name provided, load that agent's JD and route specifically
       if (agent_id || agent_name) {
