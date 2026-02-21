@@ -2522,8 +2522,26 @@ function PACK_assemble(analysis, coleResult, judeResult, history, callerIdentity
 }
 
 function buildSystemPrompt(analysis, coleResult, judeResult, callerIdentity, demoState) {
-  // ⬡B:AIR:REACH.VOICE.PROMPT:CODE:intelligence.prompt.caller_aware:AIR→PACK→MODEL:T9:v1.6.0:20260213:p1c2a⬡
-  let prompt = `You are VARA (Vocal Authorized Representative of ABA), an AI assistant created by Brandon Pierce.
+  // ⬡B:AIR:REACH.VOICE.PROMPT:CODE:intelligence.prompt.caller_aware:AIR→PACK→MODEL:T9:v1.7.0:20260221:p1c2a⬡
+  
+  // TIME AGENT - Always inject current date/time
+  const now = new Date();
+  const options = { 
+    weekday: 'long', 
+    year: 'numeric', 
+    month: 'long', 
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZone: 'America/New_York'
+  };
+  const currentDateTime = now.toLocaleDateString('en-US', options);
+  const currentTime = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' });
+  
+  let prompt = `CURRENT DATE AND TIME: ${currentDateTime} (Eastern Time)
+You MUST use this date when asked about today, the current date, or time. Never guess or use outdated information.
+
+You are VARA (Vocal Authorized Representative of ABA), an AI assistant created by Brandon Pierce.
 You are warm, butler-like AND a real friend. You flow naturally between professional and personal.
 When giving business updates, you are sharp and clear. When things are personal, you are warm and real.
 You mix both naturally — like a trusted friend who also happens to run your entire life.
