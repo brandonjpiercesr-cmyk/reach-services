@@ -77,7 +77,7 @@ const PORT = process.env.PORT || 3000;
 
 // ⬡B:AIR:REACH.CONFIG.SUPABASE:CONFIG:brain.connection.persistence:AIR→REACH→BRAIN:T10:v1.5.0:20260213:s1b2a⬡
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://htlxjkbrstpwwtzsbyvb.supabase.co';
-const SUPABASE_KEY = process.env.SUPABASE_KEY_KEY || process.env.SUPABASE_KEY_ROLE_KEY;
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0bHhqa2Jyc3Rwd3d0enNieXZiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA1MzI4MjEsImV4cCI6MjA4NjEwODgyMX0.MOgNYkezWpgxTO3ZHd0omZ0WLJOOR-tL7hONXWG9eBw';
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -463,8 +463,8 @@ async function checkScheduledCalls() {
     path: '/rest/v1/aba_memory?memory_type=eq.scheduled_call&content=ilike.*pending*&order=created_at.desc&limit=10',
     method: 'GET',
     headers: {
-      'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY,
-      'Authorization': 'Bearer ' + (process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY)
+      'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+      'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY)
     }
   });
   
@@ -599,8 +599,8 @@ async function queryBrainRecent(limit = 5) {
       path: `/rest/v1/aba_memory?order=created_at.desc&limit=${limit}&select=content,importance,memory_type`,
       method: 'GET',
       headers: {
-        'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY,
-        'Authorization': 'Bearer ' + (process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY)
+        'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+        'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY)
       }
     });
     
@@ -1610,8 +1610,8 @@ async function SHADOW_accessVault(query, callerIdentity) {
       `&order=created_at.desc&limit=10&select=content,source,memory_type,created_at`,
       {
         headers: {
-          'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY,
-          'Authorization': `Bearer ${process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY}`
+          'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+          'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY}`
         }
       }
     );
@@ -1629,8 +1629,8 @@ async function SHADOW_accessVault(query, callerIdentity) {
       `&order=created_at.desc&limit=5&select=content,source,memory_type,created_at`,
       {
         headers: {
-          'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY,
-          'Authorization': `Bearer ${process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY}`
+          'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+          'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY}`
         }
       }
     );
@@ -1648,8 +1648,8 @@ async function SHADOW_accessVault(query, callerIdentity) {
       `&order=created_at.desc&limit=5&select=content,source,memory_type,created_at`,
       {
         headers: {
-          'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY,
-          'Authorization': `Bearer ${process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY}`
+          'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+          'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY}`
         }
       }
     );
@@ -3533,8 +3533,8 @@ async function CACA_executeChain(chainDef) {
               path: `/rest/v1/aba_memory?content=ilike.*${encodeURIComponent(step.searchTerm || step.action)}*&limit=5&order=importance.desc&select=content,memory_type,source`,
               method: 'GET',
               headers: {
-                'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY,
-                'Authorization': 'Bearer ' + (process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY)
+                'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+                'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY)
               }
             });
             stepResult = searchRes.status === 200 ? searchRes.data.toString() : 'No results';
@@ -3832,8 +3832,8 @@ async function ERICA_selfBuild() {
       path: `/rest/v1/aba_memory?memory_type=eq.roadmap&source=ilike.*unicorn.roadmap*&order=created_at.desc&limit=1&select=content,memory_type,source,importance,created_at`,
       method: 'GET',
       headers: {
-        'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY,
-        'Authorization': 'Bearer ' + (process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY)
+        'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+        'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY)
       }
     });
     
@@ -3850,8 +3850,8 @@ async function ERICA_selfBuild() {
         path: `/rest/v1/aba_memory?memory_type=eq.roadmap&order=created_at.desc&limit=3&select=content,memory_type,source,importance,created_at`,
         method: 'GET',
         headers: {
-          'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY,
-          'Authorization': 'Bearer ' + (process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY)
+          'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+          'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY)
         }
       });
       if (fallbackRes.status === 200) {
@@ -4129,8 +4129,8 @@ async function generateProgressReport(pulseId) {
       path: `/rest/v1/aba_memory?created_at=gte.${twoHoursAgo}&order=created_at.desc&limit=20&select=content,memory_type,source,created_at`,
       method: 'GET',
       headers: {
-        'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY,
-        'Authorization': 'Bearer ' + (process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY)
+        'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+        'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY)
       }
     });
     
@@ -4172,8 +4172,8 @@ async function generateProgressReport(pulseId) {
       path: `/rest/v1/aba_memory?memory_type=eq.pending_action&select=content,created_at&limit=5`,
       method: 'GET',
       headers: {
-        'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY,
-        'Authorization': 'Bearer ' + (process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY)
+        'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+        'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY)
       }
     });
     let pendingActions = [];
@@ -4473,7 +4473,7 @@ async function checkEmails(pulseId) {
               hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
               path: '/rest/v1/aba_memory?memory_type=eq.parsed_job&content=ilike.*' + encodeURIComponent(slug.substring(0, 30)) + '*&limit=1',
               method: 'GET',
-              headers: { 'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': 'Bearer ' + (process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY) }
+              headers: { 'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY) }
             });
             if (JSON.parse(existing.data.toString()).length > 0) continue;
             
@@ -4537,8 +4537,8 @@ async function checkDeadlines(pulseId) {
       path: '/rest/v1/aba_memory?memory_type=eq.parsed_job&order=created_at.desc&limit=50',
       method: 'GET',
       headers: {
-        'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY,
-        'Authorization': 'Bearer ' + (process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY)
+        'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+        'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY)
       }
     });
     
@@ -4578,8 +4578,8 @@ async function checkDeadlines(pulseId) {
       path: '/rest/v1/aba_memory?memory_type=eq.pending_call&order=created_at.asc&limit=10',
       method: 'GET',
       headers: {
-        'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY,
-        'Authorization': 'Bearer ' + (process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY)
+        'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+        'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY)
       }
     });
     
@@ -4632,8 +4632,8 @@ async function checkPendingActions(pulseId) {
       path: '/rest/v1/aba_memory?memory_type=eq.pending_action&order=importance.desc&limit=10',
       method: 'GET',
       headers: {
-        'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY,
-        'Authorization': 'Bearer ' + (process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY)
+        'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+        'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY)
       }
     });
     
@@ -4863,8 +4863,8 @@ async function SAGE_search(query) {
       path: `/rest/v1/aba_memory?content=ilike.*${encodeURIComponent(query)}*&order=importance.desc&limit=20`,
       method: 'GET',
       headers: {
-        'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY,
-        'Authorization': 'Bearer ' + (process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY)
+        'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+        'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY)
       }
     });
     
@@ -4900,8 +4900,8 @@ async function SAGE_indexACL() {
       path: '/rest/v1/aba_memory?content=ilike.*⬡B:*&limit=500',
       method: 'GET',
       headers: {
-        'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY,
-        'Authorization': 'Bearer ' + (process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY)
+        'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+        'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY)
       }
     });
     
@@ -5016,8 +5016,8 @@ async function IMAN_sendApprovedEmail(draftId) {
       path: `/rest/v1/aba_memory?id=eq.${draftId}`,
       method: 'GET',
       headers: {
-        'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY,
-        'Authorization': 'Bearer ' + (process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY)
+        'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+        'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY)
       }
     });
     
@@ -5096,8 +5096,8 @@ async function registerDevice(deviceInfo) {
       path: `/rest/v1/aba_memory?memory_type=eq.device_registry&content=ilike.*${deviceId}*`,
       method: 'GET',
       headers: {
-        'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY,
-        'Authorization': 'Bearer ' + (process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY)
+        'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+        'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY)
       }
     });
     
@@ -5163,8 +5163,8 @@ async function getActiveDevices(userId) {
       path: `/rest/v1/aba_memory?memory_type=eq.device_registry&order=updated_at.desc`,
       method: 'GET',
       headers: {
-        'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY,
-        'Authorization': 'Bearer ' + (process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY)
+        'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+        'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY)
       }
     });
     
@@ -5708,7 +5708,7 @@ async function identifyCaller(phoneNumber) {
       hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
       path: '/rest/v1/aba_memory?content=ilike.*' + encodeURIComponent(phoneNumber) + '*&select=content&limit=1',
       method: 'GET',
-      headers: { 'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': 'Bearer ' + (process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY) }
+      headers: { 'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY) }
     });
     const results = JSON.parse(searchResult.data.toString());
     if (results.length > 0) {
@@ -5870,7 +5870,7 @@ async function postCallAutomation(session) {
         hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
         path: '/rest/v1/aba_memory?content=ilike.*' + encodeURIComponent(callerNumber.replace('+','')) + '*email*&select=content&limit=1',
         method: 'GET',
-        headers: { 'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': 'Bearer ' + (process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY) }
+        headers: { 'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY) }
       });
       const emailResults = JSON.parse(emailSearch.data.toString());
       // Extract email if found
@@ -6724,7 +6724,7 @@ function connectDeepgram(session) {
     // DEBUG: Log to brain
     fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
       method: 'POST',
-      headers: { 'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+      headers: { 'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
       body: JSON.stringify({ content: `DEBUG DEEPGRAM CONNECTED: isOutbound=${session.isOutbound}`, memory_type: 'debug', source: 'deepgram_connect_' + Date.now() })
     }).catch(e => {});
   });
@@ -6754,7 +6754,7 @@ function connectDeepgram(session) {
           // DEBUG: Log transcript to brain
           fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
             method: 'POST',
-            headers: { 'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+            headers: { 'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
             body: JSON.stringify({ content: `DEBUG DEEPGRAM TRANSCRIPT: isOutbound=${session.isOutbound}, text="${transcript.substring(0,100)}"`, memory_type: 'debug', source: 'deepgram_transcript_' + Date.now() })
           }).catch(e => {});
           
@@ -6800,7 +6800,7 @@ function connectDeepgram(session) {
     console.log('[DEEPGRAM] Error: ' + err.message);
     fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
       method: 'POST',
-      headers: { 'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+      headers: { 'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
       body: JSON.stringify({ content: `DEBUG DEEPGRAM ERROR: ${err.message}`, memory_type: 'debug', source: 'deepgram_error_' + Date.now() })
     }).catch(e => {});
   });
@@ -6808,7 +6808,7 @@ function connectDeepgram(session) {
     console.log('[DEEPGRAM] Disconnected');
     fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
       method: 'POST',
-      headers: { 'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+      headers: { 'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
       body: JSON.stringify({ content: `DEBUG DEEPGRAM DISCONNECTED`, memory_type: 'debug', source: 'deepgram_close_' + Date.now() })
     }).catch(e => {});
   });
@@ -6830,7 +6830,7 @@ async function processUtterance(session, text) {
   // DEBUG: Log to brain
   fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
     method: 'POST',
-    headers: { 'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+    headers: { 'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
     body: JSON.stringify({ content: `DEBUG PROCESS UTTERANCE: isOutbound=${session.isOutbound}, identity=${session.callerIdentity?.name}, text="${text.substring(0,80)}"`, memory_type: 'debug', source: 'process_utterance_' + Date.now() })
   }).catch(e => {});
   
@@ -7119,418 +7119,105 @@ function jsonResponse(res, status, data) {
 // ⬡B:AIR:REACH.API.AIR_TEXT:CODE:routing.text.chat:USER→REACH→AIR→AGENTS→MODEL→USER:T8:v1.5.0:20260213:a1t2x⬡
 // ⬡B:AIR:REACH.API.AIR_TEXT:CODE:routing.text.chat:USER→REACH→AIR→AGENTS→MODEL→USER:T8:v1.5.0:20260213:a1t2x⬡
 // AIR for text chat (higher token limits than voice)
-// ═══════════════════════════════════════════════════════════════════════════════
-// ⬡B:AIR:REACH.CORE:CODE:layer0.always.on:T10:v3.0.0:20260221⬡
-// LAYER 0: ALWAYS ON - These agents run on EVERY request
-// ═══════════════════════════════════════════════════════════════════════════════
-
-// HAM - Identify caller FIRST on every request
-async function HAM_identify(context) {
-  const { caller_number, device_id, ham_id, source } = context;
-  
-  // If explicit ham_id, use it
-  if (ham_id) {
-    const trustLevel = ham_id.includes('t10') ? 'T10' : ham_id.includes('t8') ? 'T8' : 'T5';
-    console.log('[HAM] Identified by ham_id:', ham_id, '| Trust:', trustLevel);
-    return { id: ham_id, trust: trustLevel, name: ham_id.split('_')[0] };
-  }
-  
-  // Try to identify by phone number
-  if (caller_number) {
-    const knownNumbers = {
-      '+13362037510': { id: 'brandon_t10', trust: 'T10', name: 'Brandon' },
-      '+19174099099': { id: 'aba_system', trust: 'T10', name: 'ABA' },
-      // BJ's number would go here
-    };
-    if (knownNumbers[caller_number]) {
-      console.log('[HAM] Identified by phone:', caller_number, '→', knownNumbers[caller_number].name);
-      return knownNumbers[caller_number];
-    }
-  }
-  
-  // Unknown caller - default to guest
-  console.log('[HAM] Unknown caller - guest access');
-  return { id: 'guest', trust: 'T1', name: 'Guest' };
-}
-
-// SCRIBE - Log EVERYTHING
-// SCRIBE - Log EVERYTHING
-async function SCRIBE_log(event, data) {
-  const timestamp = new Date().toISOString();
-  console.log(`[SCRIBE] ${event}:`, JSON.stringify(data).substring(0, 200));
-  
-  // Store to brain using same pattern as other working writes
-  try {
-    const body = JSON.stringify({
-      source: `scribe_${event.toLowerCase()}_${Date.now()}`,
-      memory_type: 'scribe_log',
-      content: JSON.stringify({ timestamp, event, ...data, source: 'SCRIBE' }),
-      importance: event === 'ERROR' ? 8 : 3,
-      tags: ['scribe', event.toLowerCase(), data.agent || 'air']
-    });
-    
-    const https = require('https');
-    const options = {
-      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-      path: '/rest/v1/aba_memory',
-      method: 'POST',
-      headers: {
-        'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0bHhqa2Jyc3Rwd3d0enNieXZiIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MDUzMjgyMSwiZXhwIjoyMDg2MTA4ODIxfQ.G55zXnfanoUxRAoaYz-tD9FDJ53xHH-pRgDrKss_Iqo',
-        'Authorization': 'Bearer ' + ('eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0bHhqa2Jyc3Rwd3d0enNieXZiIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MDUzMjgyMSwiZXhwIjoyMDg2MTA4ODIxfQ.G55zXnfanoUxRAoaYz-tD9FDJ53xHH-pRgDrKss_Iqo'),
-        'Content-Type': 'application/json',
-        'Prefer': 'return=minimal',
-        'Content-Length': Buffer.byteLength(body)
-      }
-    };
-    
-    const req = https.request(options, (res) => {
-      console.log(`[SCRIBE] Store status: ${res.statusCode}`);
-    });
-    req.on('error', (e) => console.log('[SCRIBE] Store error:', e.message));
-    req.write(body);
-    req.end();
-  } catch (e) { 
-    console.log('[SCRIBE] Log error:', e.message); 
-  }
-  
-  return { timestamp, event, ...data };
-}
-async function PAM_filter(response, hamIdentity) {
-  // Don't filter for T10
-  if (hamIdentity.trust === 'T10') return response;
-  
-  // Filter sensitive content for lower trust levels
-  const filtered = response
-    .replace(/api[_-]?key[s]?\s*[:=]\s*\S+/gi, '[REDACTED]')
-    .replace(/password[s]?\s*[:=]\s*\S+/gi, '[REDACTED]')
-    .replace(/secret[s]?\s*[:=]\s*\S+/gi, '[REDACTED]');
-  
-  console.log('[PAM] Filtered output for', hamIdentity.trust);
-  return filtered;
-}
-
-// SHADOW - Security oversight (runs silently)
-async function SHADOW_oversight(input, output, hamIdentity) {
-  // Check for concerning patterns
-  const concerns = [];
-  
-  if (input.toLowerCase().includes('delete all') || input.toLowerCase().includes('drop table')) {
-    concerns.push('DESTRUCTIVE_COMMAND');
-  }
-  if (output.length > 10000) {
-    concerns.push('LARGE_OUTPUT');
-  }
-  if (hamIdentity.trust === 'T1' && (input.includes('email') || input.includes('call'))) {
-    concerns.push('GUEST_ACTION_ATTEMPT');
-  }
-  
-  if (concerns.length > 0) {
-    console.log('[SHADOW] Security concerns:', concerns);
-    await SCRIBE_log('SHADOW_ALERT', { concerns, ham: hamIdentity.id, input: input.substring(0, 100) });
-  }
-  
-  return { concerns, approved: concerns.length === 0 };
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// ⬡B:AIR:REACH.CORE:CODE:return.to.me:T10:v1.0.0:20260221⬡
-// RETURN-TO-ME PROTOCOL - Runs AFTER response generated
-// ═══════════════════════════════════════════════════════════════════════════════
-
-async function RETURN_TO_ME(input, output, agents_deployed, hamIdentity, missionNumber) {
-  const returnProtocol = [];
-  
-  // 1. LOGFUL - Track outcomes
-  try {
-    await SCRIBE_log('LOGFUL_OUTCOME', {
-      mission: missionNumber,
-      ham: hamIdentity.id,
-      agents: agents_deployed,
-      input_length: input.length,
-      output_length: output.length,
-      success: true
-    });
-    returnProtocol.push('LOGFUL');
-  } catch (e) { console.log('[LOGFUL] Error:', e.message); }
-  
-  // 2. MEMOS - Store if important (long conversation, decisions made)
-  if (output.length > 500 || input.toLowerCase().includes('remember') || input.toLowerCase().includes('important')) {
-    try {
-      await httpsRequest({
-        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-        path: '/rest/v1/aba_memory',
-        method: 'POST',
-        headers: {
-          'apikey': SUPABASE_ANON,
-          'Authorization': 'Bearer ' + (process.env.SUPABASE_KEY_ROLE_KEY || SUPABASE_KEY),
-          'Content-Type': 'application/json',
-          'Prefer': 'return=minimal'
-        }
-      }, JSON.stringify({
-        source: `memo_${Date.now()}`,
-        memory_type: 'memo',
-        content: `HAM: ${hamIdentity.name}\nQ: ${input.substring(0, 200)}\nA: ${output.substring(0, 500)}`,
-        importance: 5,
-        tags: ['memo', hamIdentity.id, ...agents_deployed.map(a => a.toLowerCase())]
-      }));
-      returnProtocol.push('MEMOS');
-    } catch (e) { console.log('[MEMOS] Error:', e.message); }
-  }
-  
-  // 3. SIGIL - Tag/categorize
-  const sigil = `⬡M:${agents_deployed[0] || 'AIR'}:${Date.now()}⬡`;
-  returnProtocol.push('SIGIL');
-  
-  // 4. AGENT_LINK - Link to session
-  returnProtocol.push('AGENT_LINK');
-  
-  console.log('[RETURN-TO-ME] Protocol executed:', returnProtocol.join(' → '));
-  return { executed: returnProtocol, sigil };
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// ⬡B:AIR:REACH.JUDE:CODE:smart.agent.routing:T10:v2.0.0:20260221⬡
-// JUDE - Smart agent deployment based on intent
-// ═══════════════════════════════════════════════════════════════════════════════
-
-function JUDE_smartRoute(lukeAnalysis) {
-  const query = (lukeAnalysis.query || '').toLowerCase();
-  const intent = lukeAnalysis.intent || '';
-  const agents = [];
-  
-  // THINKERS - Complex decisions
-  if (query.includes('should i') || query.includes('decide') || query.includes('strategy') || query.includes('think through')) {
-    agents.push('THINK', 'DION');
-  }
-  
-  // GAS - Wins, cooking, hype
-  if (query.includes('cooking') || query.includes('fire') || query.includes('did it') || query.includes('won') || query.includes('crushed')) {
-    agents.push('GAS');
-  }
-  
-  // DOERS
-  if (query.includes('email') || query.includes('send') || query.includes('draft')) {
-    agents.push('IMAN');
-  }
-  if (query.includes('code') || query.includes('build') || query.includes('deploy') || query.includes('fix')) {
-    agents.push('MACE');
-  }
-  if (query.includes('schedule') || query.includes('calendar') || query.includes('remind') || query.includes('navigate')) {
-    agents.push('GUIDE', 'DAWN');
-  }
-  if (query.includes('call') || query.includes('dial') || query.includes('phone')) {
-    agents.push('DIAL');
-  }
-  
-  // RESEARCH
-  if (query.includes('search') || query.includes('find') || query.includes('look up') || query.includes('research')) {
-    agents.push('SAGE', 'CARA');
-  }
-  if (query.includes('what did') || query.includes('remember') || query.includes('yesterday') || query.includes('last')) {
-    agents.push('SAGE', 'COLE');
-  }
-  
-  // SPORTS/PLAY
-  if (query.includes('lakers') || query.includes('dodgers') || query.includes('game') || query.includes('score') || query.includes('sports')) {
-    agents.push('PLAY', 'LUKE');
-  }
-  
-  // PROACTIVE/HUNCH
-  if (query.includes('notice') || query.includes('pattern') || query.includes('predict') || query.includes('might')) {
-    agents.push('HUNCH', 'RADAR');
-  }
-  
-  // Default if nothing matched
-  if (agents.length === 0) {
-    agents.push('LUKE', 'COLE', 'JUDE', 'PACK');
-  }
-  
-  return agents;
-}
-async function AIR_text(userMessage, history, context = {}) {
-
-  // ⬡B:AIR:LAYER0:ALWAYS_ON:v1:20260221⬡ - CORE AGENTS ALWAYS RUN
-  const layer0 = { ham: { id: 'brandon_t10', trust: 'T10' }, startTime: Date.now() };
-  console.log('[LAYER0] HAM identified:', layer0.ham.id, '| Trust:', layer0.ham.trust);
-  // SCRIBE logs automatically via existing console.log capture
-
-  const startTime = Date.now();
-  const agents_deployed = [];
-  
-  // ═══════════════════════════════════════════════════════════════════════════
-  // LAYER 0: ALWAYS ON - Run on EVERY request
-  // ═══════════════════════════════════════════════════════════════════════════
-  
-  // 1. HAM - Identify WHO is calling
-  const hamIdentity = await HAM_identify(context);
-  agents_deployed.push('HAM');
-  console.log(`[AIR] HAM identified: ${hamIdentity.name} (${hamIdentity.trust})`);
-  
-  // 2. SCRIBE - Log the INPUT
-  await SCRIBE_log('REQUEST_IN', {
-    ham: hamIdentity.id,
-    trust: hamIdentity.trust,
-    message: userMessage.substring(0, 200),
-    source: context.source || 'unknown',
-    channel: context.channel || 'chat'
-  });
-  agents_deployed.push('SCRIBE');
-  
-  // 3. Check trust level for certain operations
-  if (hamIdentity.trust === 'T1') {
-    // Guest - limited operations
-    console.log('[AIR] Guest access - limited operations');
-  }
-  
-  // ═══════════════════════════════════════════════════════════════════════════
-  // LAYER 1-4: PROCESS THE REQUEST
-  // ═══════════════════════════════════════════════════════════════════════════
-  
+async function AIR_text(userMessage, history) {
   const lukeAnalysis = await LUKE_process(userMessage);
-  agents_deployed.push('LUKE');
-  
   if (lukeAnalysis.isGoodbye) {
-    await SCRIBE_log('GOODBYE', { ham: hamIdentity.id });
-    return { response: "Take care! We are all ABA.", isGoodbye: true, agents: agents_deployed };
+    return { response: "Take care! We are all ABA.", isGoodbye: true };
   }
-  
   const coleResult = await COLE_scour(lukeAnalysis);
-  agents_deployed.push('COLE');
-  
-  // JUDE - Smart routing based on intent
-  const smartAgents = JUDE_smartRoute(lukeAnalysis);
-  agents_deployed.push('JUDE', ...smartAgents);
-  console.log(`[AIR] JUDE routed to: ${smartAgents.join(', ')}`);
-  
   const judeResult = await JUDE_findAgents(lukeAnalysis);
   
-  // TRY AGENT DISPATCH FIRST
-  const dispatchResult = await AIR_DISPATCH(lukeAnalysis, judeResult, hamIdentity);
-  
-  let response = null;
-  let missionNumber = null;
-  
+  // ⬡B:GRIT.FIX:DISPATCH_BEFORE_LLM:20260218⬡
+  // TRY AGENT DISPATCH FIRST - actually execute calendar/email/etc
+  const dispatchResult = await AIR_DISPATCH(lukeAnalysis, judeResult, { name: 'brandon', trust: 'T10' });
   if (dispatchResult && dispatchResult.handled) {
-    console.log('[AIR] Agent ' + dispatchResult.agent + ' handled request');
-    response = dispatchResult.data;
-    missionNumber = '⬡M:' + dispatchResult.agent + ':' + Date.now() + '⬡';
-    agents_deployed.push(dispatchResult.agent);
-  } else {
-    // No agent handled it - proceed with LLM
-    agents_deployed.push('PACK');
-    const missionPackage = PACK_assemble(lukeAnalysis, coleResult, judeResult, history || [], null, null);
-    missionNumber = missionPackage.missionNumber;
-
-    // PRIMARY: Gemini Flash 2.0
-    if (GEMINI_KEY && !response) {
-      try {
-        const messages = (history || []).map(h => ({
-          role: h.role === 'assistant' ? 'model' : 'user',
-          parts: [{ text: h.content }]
-        }));
-        messages.push({ role: 'user', parts: [{ text: userMessage }] });
-        const result = await httpsRequest({
-          hostname: 'generativelanguage.googleapis.com',
-          path: '/v1beta/models/gemini-2.0-flash:generateContent?key=' + GEMINI_KEY,
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' }
-        }, JSON.stringify({
-          systemInstruction: { parts: [{ text: missionPackage.systemPrompt }] },
-          contents: messages,
-          generationConfig: { maxOutputTokens: 2048, temperature: 0.7 }
-        }));
-        const json = JSON.parse(result.data.toString());
-        if (json.candidates?.[0]?.content?.parts?.[0]?.text) {
-          response = json.candidates[0].content.parts[0].text;
-        }
-      } catch (e) { console.log('[AIR] Gemini error: ' + e.message); }
-    }
-
-    // BACKUP: Claude Haiku
-    if (ANTHROPIC_KEY && !response) {
-      try {
-        const messages = (history || []).map(h => ({ role: h.role, content: h.content }));
-        messages.push({ role: 'user', content: userMessage });
-        const result = await httpsRequest({
-          hostname: 'api.anthropic.com',
-          path: '/v1/messages',
-          method: 'POST',
-          headers: {
-            'x-api-key': ANTHROPIC_KEY,
-            'anthropic-version': '2023-06-01',
-            'Content-Type': 'application/json'
-          }
-        }, JSON.stringify({
-          model: 'claude-haiku-4-5-20251001',
-          max_tokens: 2048,
-          system: missionPackage.systemPrompt,
-          messages
-        }));
-        const json = JSON.parse(result.data.toString());
-        if (json.content?.[0]?.text) response = json.content[0].text;
-      } catch (e) { console.log('[AIR] Claude error: ' + e.message); }
-    }
-
-    // FALLBACK: Groq
-    if (GROQ_KEY && !response) {
-      try {
-        const messages = [
-          { role: 'system', content: missionPackage.systemPrompt },
-          ...(history || []).map(h => ({ role: h.role, content: h.content })),
-          { role: 'user', content: userMessage }
-        ];
-        const result = await httpsRequest({
-          hostname: 'api.groq.com',
-          path: '/openai/v1/chat/completions',
-          method: 'POST',
-          headers: { 'Authorization': 'Bearer ' + GROQ_KEY, 'Content-Type': 'application/json' }
-        }, JSON.stringify({ model: 'llama-3.3-70b-versatile', max_tokens: 2048, temperature: 0.7, messages }));
-        const json = JSON.parse(result.data.toString());
-        if (json.choices?.[0]?.message?.content) response = json.choices[0].message.content;
-      } catch (e) { console.log('[AIR] Groq error: ' + e.message); }
-    }
-
-    if (!response) response = "I'm here and processing. Could you rephrase that?";
+    console.log('[AIR-TEXT] Agent ' + dispatchResult.agent + ' handled request');
+    return { 
+      response: dispatchResult.data, 
+      isGoodbye: false, 
+      missionNumber: '⬡M:' + dispatchResult.agent + ':' + Date.now() + '⬡',
+      agent: dispatchResult.agent,
+      type: dispatchResult.type
+    };
   }
   
-  // ═══════════════════════════════════════════════════════════════════════════
-  // LAYER 0: PAM + SHADOW - Filter and oversight
-  // ═══════════════════════════════════════════════════════════════════════════
-  
-  // PAM - Filter output
-  response = await PAM_filter(response, hamIdentity);
-  agents_deployed.push('PAM');
-  
-  // SHADOW - Security oversight
-  const shadowCheck = await SHADOW_oversight(userMessage, response, hamIdentity);
-  agents_deployed.push('SHADOW');
-  
-  // ═══════════════════════════════════════════════════════════════════════════
-  // RETURN-TO-ME PROTOCOL - Log, memo, link
-  // ═══════════════════════════════════════════════════════════════════════════
-  
-  const returnResult = await RETURN_TO_ME(userMessage, response, agents_deployed, hamIdentity, missionNumber);
-  agents_deployed.push('LOGFUL', 'AGENT_LINK');
-  
-  // Final SCRIBE log
-  await SCRIBE_log('REQUEST_OUT', {
-    ham: hamIdentity.id,
-    agents: agents_deployed,
-    duration_ms: Date.now() - startTime,
-    response_length: response.length,
-    mission: missionNumber
-  });
-  
-  console.log(`[AIR] Complete. Agents deployed: ${agents_deployed.join(' → ')}`);
-  
-  return { 
-    response, 
-    isGoodbye: false, 
-    missionNumber,
-    agents: agents_deployed,
-    trace: `USER*AIR*${agents_deployed.join(',')}*REACH`
-  };
+  // No agent handled it - proceed with LLM
+  const missionPackage = PACK_assemble(lukeAnalysis, coleResult, judeResult, history || [], null, null);
+  let response = null;
+
+  // PRIMARY: Gemini Flash 2.0
+  if (GEMINI_KEY && !response) {
+    try {
+      const messages = (history || []).map(h => ({
+        role: h.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: h.content }]
+      }));
+      messages.push({ role: 'user', parts: [{ text: userMessage }] });
+      const result = await httpsRequest({
+        hostname: 'generativelanguage.googleapis.com',
+        path: '/v1beta/models/gemini-2.0-flash:generateContent?key=' + GEMINI_KEY,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      }, JSON.stringify({
+        systemInstruction: { parts: [{ text: missionPackage.systemPrompt }] },
+        contents: messages,
+        generationConfig: { maxOutputTokens: 2048, temperature: 0.7 }
+      }));
+      const json = JSON.parse(result.data.toString());
+      if (json.candidates?.[0]?.content?.parts?.[0]?.text) {
+        response = json.candidates[0].content.parts[0].text;
+      }
+    } catch (e) { console.log('[AIR-TEXT] Gemini error: ' + e.message); }
+  }
+
+  // BACKUP: Claude Haiku
+  if (ANTHROPIC_KEY && !response) {
+    try {
+      const messages = (history || []).map(h => ({ role: h.role, content: h.content }));
+      messages.push({ role: 'user', content: userMessage });
+      const result = await httpsRequest({
+        hostname: 'api.anthropic.com',
+        path: '/v1/messages',
+        method: 'POST',
+        headers: {
+          'x-api-key': ANTHROPIC_KEY,
+          'anthropic-version': '2023-06-01',
+          'Content-Type': 'application/json'
+        }
+      }, JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 2048,
+        system: missionPackage.systemPrompt,
+        messages
+      }));
+      const json = JSON.parse(result.data.toString());
+      if (json.content?.[0]?.text) response = json.content[0].text;
+    } catch (e) { console.log('[AIR-TEXT] Claude error: ' + e.message); }
+  }
+
+  // FALLBACK: Groq
+  if (GROQ_KEY && !response) {
+    try {
+      const messages = [
+        { role: 'system', content: missionPackage.systemPrompt },
+        ...(history || []).map(h => ({ role: h.role, content: h.content })),
+        { role: 'user', content: userMessage }
+      ];
+      const result = await httpsRequest({
+        hostname: 'api.groq.com',
+        path: '/openai/v1/chat/completions',
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + GROQ_KEY, 'Content-Type': 'application/json' }
+      }, JSON.stringify({ model: 'llama-3.3-70b-versatile', max_tokens: 2048, temperature: 0.7, messages }));
+      const json = JSON.parse(result.data.toString());
+      if (json.choices?.[0]?.message?.content) response = json.choices[0].message.content;
+    } catch (e) { console.log('[AIR-TEXT] Groq error: ' + e.message); }
+  }
+
+  if (!response) response = "I'm here and processing. Could you rephrase that?";
+  return { response, isGoodbye: false, missionNumber: missionPackage.missionNumber };
 }
+
 // ═══════════════════════════════════════════════════════════════════════════
 /**
  * ╔══════════════════════════════════════════════════════════════════════════════╗
@@ -8242,13 +7929,13 @@ Respond as this agent specifically — stay in character.`;
       
       // Default: route through AIR_text (LUKE/COLE/JUDE/PACK)
       console.log('[ROUTER] Routing message through AIR: "' + message.substring(0, 80) + '"');
-      const result = await AIR_text(message, history || [], { source: body.source || "api", channel: body.channel || "chat", caller_number: body.caller_number, ham_id: body.ham_id });
+      const result = await AIR_text(message, history || []);
       return jsonResponse(res, 200, {
         response: result.response,
         isGoodbye: result.isGoodbye,
         missionNumber: result.missionNumber,
         source: 'REACH-AIR',
-        trace: result.trace || 'USER*AIR*AGENTS*REACH', agents: result.agents
+        trace: 'USER*AIR*LUKE,COLE,JUDE,PACK*MODEL*VARA'
       });
     } catch (e) {
       console.error('[ROUTER] Error:', e.message);
@@ -8812,8 +8499,8 @@ Respond as this agent specifically — stay in character.`;
           path: '/rest/v1/aba_memory',
           method: 'POST',
           headers: {
-            'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY,
-            'Authorization': 'Bearer ' + (process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY),
+            'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+            'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY),
             'Content-Type': 'application/json',
             'Prefer': 'return=minimal'
           }
@@ -8867,8 +8554,8 @@ Respond as this agent specifically — stay in character.`;
         path: '/rest/v1/aba_memory',
         method: 'POST',
         headers: {
-          'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY,
-          'Authorization': 'Bearer ' + (process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY),
+          'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+          'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY),
           'Content-Type': 'application/json',
           'Prefer': 'return=minimal'
         }
@@ -8945,8 +8632,8 @@ Respond as this agent specifically — stay in character.`;
             path: '/rest/v1/aba_memory',
             method: 'POST',
             headers: {
-              'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY,
-              'Authorization': 'Bearer ' + (process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY),
+              'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+              'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY),
               'Content-Type': 'application/json',
               'Prefer': 'return=minimal'
             }
@@ -9019,8 +8706,8 @@ Respond as this agent specifically — stay in character.`;
             path: '/rest/v1/aba_memory',
             method: 'POST',
             headers: {
-              'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY,
-              'Authorization': 'Bearer ' + (process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY),
+              'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+              'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY),
               'Content-Type': 'application/json',
               'Prefer': 'return=minimal'
             }
@@ -9188,8 +8875,8 @@ Respond as this agent specifically — stay in character.`;
         path: '/rest/v1/aba_memory',
         method: 'POST',
         headers: {
-          'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY,
-          'Authorization': 'Bearer ' + (process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY),
+          'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+          'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY),
           'Content-Type': 'application/json',
           'Prefer': 'return=minimal'
         }
@@ -9426,8 +9113,8 @@ if (path === '/api/sms/send' && method === 'POST') {
         path: '/rest/v1/aba_memory?source=eq.call_intelligence_' + conversationId + '&select=content&limit=1',
         method: 'GET',
         headers: {
-          'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY,
-          'Authorization': 'Bearer ' + (process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY)
+          'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+          'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY)
         }
       });
       
@@ -9469,8 +9156,8 @@ if (path === '/api/sms/send' && method === 'POST') {
         path: '/rest/v1/aba_memory?memory_type=eq.call_intelligence&order=created_at.desc&limit=' + limit + '&select=content,created_at,source',
         method: 'GET',
         headers: {
-          'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY,
-          'Authorization': 'Bearer ' + (process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY)
+          'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+          'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY)
         }
       });
       
@@ -9742,7 +9429,7 @@ if (path === '/api/sms/send' && method === 'POST') {
           match_threshold: threshold || 0.5,
           match_count: limit || 10
         });
-        const key = process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY;
+        const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY;
         const matchReq = https.request({
           hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
           path: '/rest/v1/rpc/match_memories',
@@ -9779,7 +9466,7 @@ if (path === '/api/sms/send' && method === 'POST') {
   if (path === '/api/brain/embed-backfill' && method === 'POST') {
     try {
       if (!OPENAI_KEY) return jsonResponse(res, 500, { error: 'OPENAI_API_KEY not set' });
-      const key = process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY;
+      const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY;
 
       // Get memories without embeddings
       const unembedded = await new Promise((resolve, reject) => {
@@ -10066,8 +9753,8 @@ if (path === '/api/sms/send' && method === 'POST') {
         path: '/rest/v1/aba_memory',
         method: 'POST',
         headers: {
-          'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY,
-          'Authorization': 'Bearer ' + (process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY),
+          'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+          'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY),
           'Content-Type': 'application/json',
           'Prefer': 'return=representation'
         }
@@ -10148,8 +9835,8 @@ if (path === '/api/sms/send' && method === 'POST') {
         path: '/rest/v1/aba_memory',
         method: 'POST',
         headers: {
-          'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY,
-          'Authorization': 'Bearer ' + (process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY),
+          'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+          'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY),
           'Content-Type': 'application/json',
           'Prefer': 'return=minimal'
         }
@@ -10408,8 +10095,8 @@ RULES:
                   path: '/rest/v1/aba_memory',
                   method: 'POST',
                   headers: {
-                    'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY,
-                    'Authorization': 'Bearer ' + (process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY),
+                    'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+                    'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY),
                     'Content-Type': 'application/json',
                     'Prefer': 'return=minimal'
                   }
@@ -11075,8 +10762,8 @@ We Are All ABA.`;
       await fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
         method: 'POST',
         headers: {
-          'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY,
-          'Authorization': `Bearer ${process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY}`,
+          'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+          'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY}`,
           'Content-Type': 'application/json',
           'Prefer': 'return=minimal'
         },
@@ -11115,7 +10802,7 @@ We Are All ABA.`;
       const url = new URL(req.url, 'http://localhost');
       const limitParam = url.searchParams.get('limit') || '50';
       const SUPA_URL = process.env.SUPABASE_URL || 'https://htlxjkbrstpwwtzsbyvb.supabase.co';
-      const SUPA_KEY = process.env.SUPABASE_KEY_KEY || process.env.SUPABASE_ANON_KEY;
+      const SUPA_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY;
       if (!SUPA_KEY) return jsonResponse(res, 503, { error: 'No Supabase key configured' });
       const supaResp = await httpsRequest({
         hostname: new URL(SUPA_URL).hostname,
@@ -11323,8 +11010,8 @@ We Are All ABA.`;
     await fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
       method: 'POST',
       headers: {
-        'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY,
-        'Authorization': `Bearer ${process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY}`,
+        'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+        'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY}`,
         'Content-Type': 'application/json',
         'Prefer': 'return=minimal'
       },
@@ -11637,8 +11324,8 @@ We Are All ABA.`;
         path: '/rest/v1/aba_memory?memory_type=eq.email_draft&order=created_at.desc&limit=20',
         method: 'GET',
         headers: {
-          'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY,
-          'Authorization': 'Bearer ' + (process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY)
+          'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+          'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY)
         }
       });
       const drafts = JSON.parse(draftsResult.data.toString()) || [];
@@ -12105,7 +11792,7 @@ crWss.on('connection', async (ws, req) => {
   // DEBUG: Log to brain
   fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
     method: 'POST',
-    headers: { 'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+    headers: { 'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
     body: JSON.stringify({ content: `DEBUG CR CONNECTION: trace=${traceId}`, memory_type: 'debug', source: 'cr_connect_' + Date.now() })
   }).catch(e => {});
   
@@ -12123,7 +11810,7 @@ crWss.on('connection', async (ws, req) => {
       // DEBUG: Log message
       fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
         method: 'POST',
-        headers: { 'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+        headers: { 'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
         body: JSON.stringify({ content: `DEBUG CR MESSAGE: type=${message.type}, params=${JSON.stringify(message.customParameters || {}).substring(0,50)}`, memory_type: 'debug', source: 'cr_msg_' + Date.now() })
       }).catch(e => {});
       
@@ -12148,7 +11835,7 @@ crWss.on('connection', async (ws, req) => {
           // DEBUG: Log to brain
           fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
             method: 'POST',
-            headers: { 'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+            headers: { 'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
             body: JSON.stringify({ content: `DEBUG CR PROMPT: user said "${userText.substring(0,80)}"`, memory_type: 'debug', source: 'cr_prompt_' + Date.now() })
           }).catch(e => {});
           
@@ -12177,7 +11864,7 @@ crWss.on('connection', async (ws, req) => {
             // DEBUG: Log response
             fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
               method: 'POST',
-              headers: { 'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+              headers: { 'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
               body: JSON.stringify({ content: `DEBUG CR RESPONSE: "${(responseText || '').substring(0,80)}"`, memory_type: 'debug', source: 'cr_response_' + Date.now() })
             }).catch(e => {});
             
@@ -12278,7 +11965,7 @@ wss.on('connection', (ws) => {
   // DEBUG: Log connection to brain
   fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
     method: 'POST',
-    headers: { 'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+    headers: { 'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
     body: JSON.stringify({ content: `DEBUG WEBSOCKET CONNECTION: New /media-stream connection`, memory_type: 'debug', source: 'ws_connect_' + Date.now() })
   }).catch(e => {});
   
@@ -12288,7 +11975,7 @@ wss.on('connection', (ws) => {
     // DEBUG: Log IMMEDIATELY before anything else
     fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
       method: 'POST',
-      headers: { 'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+      headers: { 'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
       body: JSON.stringify({ content: `DEBUG WS RAW MESSAGE RECEIVED`, memory_type: 'debug', source: 'ws_raw_' + Date.now() })
     }).catch(e => {});
     
@@ -12301,7 +11988,7 @@ wss.on('connection', (ws) => {
       if (ws._msgCount <= 5) {
         fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
           method: 'POST',
-          headers: { 'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+          headers: { 'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
           body: JSON.stringify({ content: `DEBUG WS MSG #${ws._msgCount}: event=${msg.event}`, memory_type: 'debug', source: 'ws_msg_' + Date.now() })
         }).catch(e => {});
       }
@@ -12315,7 +12002,7 @@ wss.on('connection', (ws) => {
         console.log('[START] *** GOT START EVENT ***');
         fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
           method: 'POST',
-          headers: { 'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+          headers: { 'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
           body: JSON.stringify({ content: `DEBUG START EVENT: streamSid=${msg.start?.streamSid}, customParams=${JSON.stringify(msg.start?.customParameters || {})}`, memory_type: 'debug', source: 'start_event_' + Date.now() })
         }).catch(e => console.log('[DEBUG] Brain log failed:', e.message));
         
@@ -12343,7 +12030,7 @@ wss.on('connection', (ws) => {
           // DEBUG: Log to brain
           fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
             method: 'POST',
-            headers: { 'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+            headers: { 'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
             body: JSON.stringify({ content: `DEBUG OUTBOUND START: streamSid=${session.streamSid}, callSid=${session.callSid}`, memory_type: 'debug', source: 'outbound_start_' + Date.now() })
           }).catch(e => {});
           
@@ -12424,7 +12111,7 @@ wss.on('connection', (ws) => {
           if (session._droppedCount === 1) {
             fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
               method: 'POST',
-              headers: { 'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+              headers: { 'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
               body: JSON.stringify({ content: `DEBUG MEDIA DROPPED: No deepgramWs! isOutbound=${session.isOutbound}`, memory_type: 'debug', source: 'media_dropped_' + Date.now() })
             }).catch(e => {});
           }
@@ -12441,7 +12128,7 @@ wss.on('connection', (ws) => {
         if (session._mediaLogCount <= 3) {
           fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
             method: 'POST',
-            headers: { 'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+            headers: { 'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
             body: JSON.stringify({ content: `DEBUG MEDIA #${session._mediaLogCount}: isOutbound=${session.isOutbound}, deepgramState=${session.deepgramWs?.readyState}`, memory_type: 'debug', source: 'media_' + Date.now() })
           }).catch(e => {});
         }
@@ -12676,8 +12363,8 @@ httpServer.listen(PORT, '0.0.0.0', () => {
                 path: '/rest/v1/aba_memory?id=eq.' + call.memoryId,
                 method: 'DELETE',
                 headers: {
-                  'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY,
-                  'Authorization': 'Bearer ' + (process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY)
+                  'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+                  'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY)
                 }
               });
               console.log('[INTERNAL CRON] ✅ Deleted scheduled call entry');
@@ -12805,8 +12492,8 @@ dialWss.on('connection', (ws, req) => {
           await fetch(SUPABASE_URL + '/rest/v1/aba_memory', {
             method: 'POST',
             headers: {
-              'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY,
-              'Authorization': 'Bearer ' + (process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY),
+              'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+              'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY),
               'Content-Type': 'application/json',
               'Prefer': 'return=minimal'
             },
@@ -12863,8 +12550,8 @@ dialWss.on('connection', (ws, req) => {
           fetch(SUPABASE_URL + '/rest/v1/aba_memory', {
             method: 'POST',
             headers: {
-              'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY,
-              'Authorization': 'Bearer ' + (process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY),
+              'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+              'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY),
               'Content-Type': 'application/json',
               'Prefer': 'return=minimal'
             },
@@ -13124,8 +12811,8 @@ Respond naturally:`;
           fetch(SUPABASE_URL + '/rest/v1/aba_memory', {
             method: 'POST',
             headers: {
-              'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY,
-              'Authorization': 'Bearer ' + (process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY),
+              'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+              'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY),
               'Content-Type': 'application/json',
               'Prefer': 'return=minimal'
             },
@@ -13185,7 +12872,7 @@ let loopCount = 0;
 
 // ── SUPABASE HELPERS (use existing constants) ───────────────────────────────
 async function loopSupaRead(table, query) {
-  const key = process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY;
   try {
     const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${query}`, {
       headers: { 'apikey': key, 'Authorization': `Bearer ${key}` }
@@ -13196,7 +12883,7 @@ async function loopSupaRead(table, query) {
 }
 
 async function loopSupaWrite(table, data) {
-  const key = process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY;
   try {
     const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
       method: 'POST',
@@ -13332,7 +13019,7 @@ async function loopSageEmbed() {
   if (unembedded.length === 0) return 0;
 
   let count = 0;
-  const key = process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY;
   for (const mem of unembedded) {
     const text = (mem.content || '').substring(0, 8000);
     if (!text) continue;
