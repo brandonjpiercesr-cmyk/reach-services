@@ -7512,7 +7512,9 @@ const httpServer = http.createServer(async (req, res) => {
           // ⬡B:TOUCH:AGENT.DAWN:cron.integration:20260216⬡
           // Check if this is a DAWN briefing call
           if (call.call_type === 'dawn_briefing') {
-            console.log('[CRON] DAWN BRIEFING CALL - Using DAWN_makeCall');
+            console.log("[CRON] DAWN BRIEFING SKIPPED - Now handled by ABACIA ThinkLoop");
+            results.push({ target: call.target_name, status: "skipped_abacia_handles" });
+            continue; // Skip DAWN - ABACIA handles it
             callResult = await DAWN_makeCall(call.target_phone, call.target_name);
             
             if (callResult.success) {
