@@ -7154,42 +7154,47 @@ async function HAM_identify(context) {
 }
 
 // SCRIBE - Log EVERYTHING
+// SCRIBE - Log EVERYTHING
 async function SCRIBE_log(event, data) {
   const timestamp = new Date().toISOString();
-  const logEntry = {
-    timestamp,
-    event,
-    ...data,
-    source: 'SCRIBE'
-  };
-  
   console.log(`[SCRIBE] ${event}:`, JSON.stringify(data).substring(0, 200));
   
-  // Store to brain
+  // Store to brain using same pattern as other working writes
   try {
-    await httpsRequest({
+    const body = JSON.stringify({
+      source: `scribe_${event.toLowerCase()}_${Date.now()}`,
+      memory_type: 'scribe_log',
+      content: JSON.stringify({ timestamp, event, ...data, source: 'SCRIBE' }),
+      importance: event === 'ERROR' ? 8 : 3,
+      tags: ['scribe', event.toLowerCase(), data.agent || 'air']
+    });
+    
+    const https = require('https');
+    const options = {
       hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
       path: '/rest/v1/aba_memory',
       method: 'POST',
       headers: {
-        'apikey': SUPABASE_ANON,
-        'Authorization': 'Bearer ' + (process.env.SUPABASE_KEY_ROLE_KEY || SUPABASE_KEY),
+        'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+        'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY),
         'Content-Type': 'application/json',
-        'Prefer': 'return=minimal'
+        'Prefer': 'return=minimal',
+        'Content-Length': Buffer.byteLength(body)
       }
-    }, JSON.stringify({
-      source: `scribe_${event.toLowerCase()}_${Date.now()}`,
-      memory_type: 'scribe_log',
-      content: JSON.stringify(logEntry),
-      importance: event === 'ERROR' ? 8 : 3,
-      tags: ['scribe', event.toLowerCase(), data.agent || 'air']
-    }));
-  } catch (e) { console.log('[SCRIBE] Log error:', e.message); }
+    };
+    
+    const req = https.request(options, (res) => {
+      console.log(`[SCRIBE] Store status: ${res.statusCode}`);
+    });
+    req.on('error', (e) => console.log('[SCRIBE] Store error:', e.message));
+    req.write(body);
+    req.end();
+  } catch (e) { 
+    console.log('[SCRIBE] Log error:', e.message); 
+  }
   
-  return logEntry;
+  return { timestamp, event, ...data };
 }
-
-// PAM - Filter output before sending
 async function PAM_filter(response, hamIdentity) {
   // Don't filter for T10
   if (hamIdentity.trust === 'T10') return response;
