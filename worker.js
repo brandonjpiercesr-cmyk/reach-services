@@ -9667,47 +9667,26 @@ Respond as this agent specifically — stay in character.`;
       
       let responseText = "I understand. Let me help you with that.";
       
+      // ⬡B:AIR:VOICE_TOOL_DIRECT:v3.1.0:20260222⬡
+      // Use AIR_text DIRECTLY instead of calling external ABACIA service
+      // This gives voice the SAME brain access as text chat
       try {
-        const abaciaResult = await fetch('https://abacia-services.onrender.com/api/air/process', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            query: userMessage,
-            caller: callerIdentity,
-            source: 'elevenlabs_voice',
-            conversation_id: conversationId,
-            conversation_history: conversationHistory  // NEW: Send history for context
-          })
+        console.log('[AIR VOICE TOOL] Using AIR_text directly for:', userMessage);
+        const airResult = await AIR_text(userMessage, conversationHistory || [], {
+          source: 'elevenlabs_voice',
+          channel: 'phone',
+          caller_number: callerNumber,
+          ham_id: callerIdentity?.id
         });
         
-        if (abaciaResult.ok) {
-          const abaciaData = await abaciaResult.json();
-          console.log('[AIR VOICE TOOL] ABACIA success:', abaciaData.success);
-          console.log('[AIR VOICE TOOL] Agents ran:', (abaciaData.agents || []).length);
-          
-          // Check if ABACIA returned a direct response
-          if (abaciaData.response) {
-            responseText = abaciaData.response;
-          }
-          // Check if any agent returned a conversational response
-          else if (abaciaData.agents) {
-            for (const agent of abaciaData.agents) {
-              const result = agent.data?.result;
-              if (result?.response) {
-                responseText = result.response;
-                break;
-              }
-              if (result?.message && !result.message.includes('parsed query')) {
-                responseText = result.message;
-                break;
-              }
-            }
-          }
+        if (airResult && airResult.response) {
+          responseText = airResult.response;
+          console.log('[AIR VOICE TOOL] AIR_text success, response:', responseText.substring(0, 100));
         } else {
-          console.log('[AIR VOICE TOOL] ABACIA error status:', abaciaResult.status);
+          console.log('[AIR VOICE TOOL] AIR_text returned empty');
         }
       } catch (e) {
-        console.log('[AIR VOICE TOOL] ABACIA error:', e.message);
+        console.log('[AIR VOICE TOOL] AIR_text error:', e.message);
       }
       
       console.log('[AIR VOICE TOOL] Response:', responseText.substring(0, 100) + '...');
