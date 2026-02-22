@@ -4491,6 +4491,30 @@ async function pulseCheck() {
       console.log('[PULSE→ERICA] Skipped:', ericaErr.message);
     }
     
+    // ⬡B:AIR:REACH.HEART:ROUTE:proactive_call:v1.0.0:20260222⬡
+    // Check 7: HEART - Proactive outbound call to Brandon when important events
+    try {
+      const heartResult = await HEART_checkProactive(pulseId);
+      if (heartResult.shouldCall) {
+        console.log('[PULSE→HEART] Triggering proactive call:', heartResult.reason);
+        // Use /api/call/dial endpoint to make the call
+        const callResult = await DIAL_callWithElevenLabs('+13363898116', heartResult.message, {});
+        if (callResult.success) {
+          console.log('[PULSE→HEART] Proactive call initiated:', callResult.conversation_id);
+          // Store that we called so we don't spam
+          await storeToBrain({
+            content: 'HEART PROACTIVE CALL: ' + heartResult.reason + ' | ConvID: ' + (callResult.conversation_id || 'unknown'),
+            memory_type: 'heart_call_log',
+            importance: 7,
+            source: 'heart_proactive_' + Date.now(),
+            tags: ['heart', 'proactive', 'call']
+          });
+        }
+      }
+    } catch (heartErr) {
+      console.log('[PULSE→HEART] Skipped:', heartErr.message);
+    }
+    
     // Broadcast pulse to Command Center
     broadcastToCommandCenter({
       type: 'pulse',
@@ -5442,6 +5466,23 @@ async function AIR_DISPATCH(lukeAnalysis, judeResult, callerIdentity) {
     }
   }
   
+  // ⬡B:AIR:REACH.DISPATCH.MY_INFO:ROUTE:personal:v1.0.0:20260222⬡
+  // Return personal info when asked "my email", "my phone", "my address"
+  if ((query.includes('my email') || query.includes('my phone') || query.includes('my number')) && 
+      (query.includes('what') || query.includes('address') || query.includes('is'))) {
+    console.log('[AIR DISPATCH] → Personal info query');
+    const info = [];
+    if (callerIdentity?.email) info.push('Your email is ' + callerIdentity.email);
+    if (callerIdentity?.phone) info.push('Your phone is ' + callerIdentity.phone);
+    if (info.length > 0) {
+      return { handled: true, agent: 'HAM', data: info.join('. ') + '.', type: 'personal' };
+    }
+    // If not in callerIdentity, check brain
+    if (query.includes('email') && callerIdentity?.name === 'Brandon') {
+      return { handled: true, agent: 'HAM', data: 'Your email is brandon@globalmajoritygroup.com.', type: 'personal' };
+    }
+  }
+
   // ⬡B:AIR:REACH.DISPATCH.IMAN:ROUTE:email:v2.4.0:20260214⬡
   // IMAN Agent - Email queries (L3: Manager, EMAIL department)
   if (query.includes('email') || query.includes('inbox') || query.includes('mail') ||
@@ -5487,6 +5528,126 @@ async function AIR_DISPATCH(lukeAnalysis, judeResult, callerIdentity) {
     }
   }
   
+  // ⬡B:AIR:REACH.DISPATCH.DIAL:ROUTE:outbound_call:v1.0.0:20260222⬡
+  // DIAL Agent - Outbound calls (L3: Manager, VOICE department)
+  // Triggers on: "call eric", "dial BJ", "phone mom"
+  if ((query.includes('call ') || query.includes('dial ') || query.includes('phone ')) && !query.includes('phone number')) {
+    console.log('[AIR DISPATCH] → L3: DIAL (Outbound Call Agent)');
+    try {
+      // Extract who to call from query
+      const callMatch = query.match(/(?:call|dial|phone)\s+([\w\s]+)/i);
+      const targetName = callMatch ? callMatch[1].trim() : null;
+      
+      if (targetName) {
+        // Look up contact in HAM identities
+        const hamResult = await httpsRequest({
+          hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+          path: '/rest/v1/aba_memory?memory_type=eq.ham_identity&content=ilike.*' + encodeURIComponent(targetName) + '*&limit=1',
+          method: 'GET',
+          headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON }
+        });
+        
+        if (hamResult.status === 200) {
+          const contacts = JSON.parse(hamResult.data.toString());
+          if (contacts.length > 0) {
+            const phoneMatch = contacts[0].content.match(/Phone:\s*([+\d]+)/);
+            if (phoneMatch) {
+              const targetPhone = phoneMatch[1];
+              console.log('[AIR DISPATCH] DIAL: Found phone for', targetName, ':', targetPhone);
+              const dialResult = await DIAL_callWithElevenLabs(targetPhone, 'Hey, ABA is connecting you with ' + (callerIdentity?.name || 'your contact') + '.', {});
+              if (dialResult.success) {
+                return { handled: true, agent: 'DIAL', data: 'Calling ' + targetName + ' now at ' + targetPhone + '.', type: 'call' };
+              }
+            }
+          }
+        }
+        return { handled: true, agent: 'DIAL', data: 'I could not find a phone number for ' + targetName + '. Can you give me their number?', type: 'call' };
+      }
+    } catch (e) {
+      console.log('[AIR DISPATCH] DIAL error:', e.message);
+    }
+  }
+  
+  // ⬡B:AIR:REACH.DISPATCH.CARA:ROUTE:sms:v1.0.0:20260222⬡
+  // CARA Agent - Send SMS (L3: Manager, SMS department)
+  // Triggers on: "text BJ say whats up", "send sms to mom"
+  if ((query.includes('text ') || query.includes('sms ') || query.includes('message ')) && (query.includes('say') || query.includes('tell') || query.includes('send'))) {
+    console.log('[AIR DISPATCH] → L3: CARA (SMS Agent)');
+    try {
+      // Parse: "text BJ say whats up" or "send sms to mom saying hello"
+      const smsMatch = query.match(/(?:text|sms|message)\s+([\w\s]+?)\s+(?:say|saying|tell|send)\s+(.+)/i);
+      if (smsMatch) {
+        const targetName = smsMatch[1].trim();
+        const messageText = smsMatch[2].trim();
+        
+        // Look up contact
+        const hamResult = await httpsRequest({
+          hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+          path: '/rest/v1/aba_memory?memory_type=eq.ham_identity&content=ilike.*' + encodeURIComponent(targetName) + '*&limit=1',
+          method: 'GET',
+          headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON }
+        });
+        
+        if (hamResult.status === 200) {
+          const contacts = JSON.parse(hamResult.data.toString());
+          if (contacts.length > 0) {
+            const phoneMatch = contacts[0].content.match(/Phone:\s*([+\d]+)/);
+            if (phoneMatch) {
+              const targetPhone = phoneMatch[1];
+              // Send SMS via CARA
+              const smsResult = await sendSMSFromCall(targetPhone, messageText);
+              console.log('[AIR DISPATCH] CARA: Sent SMS to', targetName, ':', targetPhone);
+              return { handled: true, agent: 'CARA', data: 'Sent text to ' + targetName + ': "' + messageText + '"', type: 'sms' };
+            }
+          }
+        }
+        return { handled: true, agent: 'CARA', data: 'I could not find a phone number for ' + targetName + '.', type: 'sms' };
+      }
+    } catch (e) {
+      console.log('[AIR DISPATCH] CARA error:', e.message);
+    }
+  }
+  
+  // ⬡B:AIR:REACH.DISPATCH.IMAN_SEND:ROUTE:send_email:v1.0.0:20260222⬡
+  // IMAN Send - Actually send emails (not just read)
+  // Triggers on: "email eric say...", "send email to..."
+  if ((query.includes('send email') || query.includes('email ')) && (query.includes('say') || query.includes('tell') || query.includes('about'))) {
+    console.log('[AIR DISPATCH] → L3: IMAN SEND (Email Send Agent)');
+    try {
+      const emailMatch = query.match(/(?:send email to|email)\s+([\w\s]+?)\s+(?:say|saying|tell|about)\s+(.+)/i);
+      if (emailMatch) {
+        const targetName = emailMatch[1].trim();
+        const messageText = emailMatch[2].trim();
+        
+        // Look up contact email
+        const hamResult = await httpsRequest({
+          hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+          path: '/rest/v1/aba_memory?memory_type=eq.ham_identity&content=ilike.*' + encodeURIComponent(targetName) + '*&limit=1',
+          method: 'GET',
+          headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON }
+        });
+        
+        if (hamResult.status === 200) {
+          const contacts = JSON.parse(hamResult.data.toString());
+          if (contacts.length > 0) {
+            const emailAddrMatch = contacts[0].content.match(/Email:\s*([\w.@]+)/);
+            if (emailAddrMatch) {
+              const targetEmail = emailAddrMatch[1];
+              const subject = 'Message from ' + (callerIdentity?.name || 'ABA');
+              const body = messageText;
+              const sendResult = await IMAN_sendEmailGmail(targetEmail, subject, body);
+              console.log('[AIR DISPATCH] IMAN: Sent email to', targetName, ':', targetEmail);
+              return { handled: true, agent: 'IMAN_SEND', data: 'Sent email to ' + targetName + ' (' + targetEmail + ') about: ' + messageText, type: 'email' };
+            }
+          }
+        }
+        return { handled: true, agent: 'IMAN_SEND', data: 'I could not find an email for ' + targetName + '.', type: 'email' };
+      }
+    } catch (e) {
+      console.log('[AIR DISPATCH] IMAN_SEND error:', e.message);
+    }
+  }
+
   // ⬡B:AIR:REACH.DISPATCH.ABACIA:ROUTE:general:v2.4.0:20260214⬡
   // For complex queries, try ABACIA-SERVICES full AIR (22 agents)
   if (intent === 'command' || intent === 'complex') {
@@ -14699,4 +14860,204 @@ console.log('[AIR-LOOP] ━━━━━━━━━━━━━━━━━━�
 setTimeout(runAutonomousLoop, 30000);
 // Then every 5 minutes
 setInterval(runAutonomousLoop, LOOP_INTERVAL);
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:AIR:REACH.AGENTS.DIAL_LIVEKIT:FUNC:outbound.livekit:v1.0.0:20260222⬡
+// DIAL_LiveKit - Outbound calls via LiveKit SIP
+// Uses the same voice agent that handles inbound
+// ═══════════════════════════════════════════════════════════════════════════════
+
+async function DIAL_callWithLiveKit(phoneNumber, firstMessage) {
+  console.log('[DIAL:LIVEKIT] Initiating outbound call to:', phoneNumber);
+  
+  const LIVEKIT_API_KEY = process.env.LIVEKIT_API_KEY;
+  const LIVEKIT_API_SECRET = process.env.LIVEKIT_API_SECRET;
+  const LIVEKIT_URL = 'aba-aeuea88u.livekit.cloud';
+  
+  if (!LIVEKIT_API_KEY || !LIVEKIT_API_SECRET) {
+    console.log('[DIAL:LIVEKIT] Missing credentials, falling back to ElevenLabs');
+    return await DIAL_callWithElevenLabs(phoneNumber, firstMessage, {});
+  }
+  
+  try {
+    // LiveKit SIP outbound requires creating a SIP participant
+    // The agent will automatically join and handle the call
+    const roomName = 'outbound-' + Date.now();
+    
+    const requestBody = {
+      sip_trunk_id: 'aba-sip-trunk', // Need to configure in LiveKit
+      sip_call_to: phoneNumber,
+      room_name: roomName,
+      participant_identity: 'aba-outbound',
+      participant_metadata: JSON.stringify({
+        firstMessage: firstMessage,
+        type: 'outbound',
+        initiatedAt: new Date().toISOString()
+      })
+    };
+    
+    // Create JWT for LiveKit API
+    const jwt = createLiveKitJWT(LIVEKIT_API_KEY, LIVEKIT_API_SECRET, roomName);
+    
+    const result = await httpsRequest({
+      hostname: LIVEKIT_URL,
+      path: '/twirp/livekit.SIP/CreateSIPOutboundCall',
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + jwt,
+        'Content-Type': 'application/json'
+      }
+    }, JSON.stringify(requestBody));
+    
+    if (result.status === 200) {
+      const data = JSON.parse(result.data.toString());
+      console.log('[DIAL:LIVEKIT] Call initiated:', data);
+      return { success: true, callId: data.call_id, message: 'Calling via LiveKit' };
+    } else {
+      console.log('[DIAL:LIVEKIT] API error:', result.status, 'falling back to ElevenLabs');
+      return await DIAL_callWithElevenLabs(phoneNumber, firstMessage, {});
+    }
+  } catch (e) {
+    console.log('[DIAL:LIVEKIT] Error:', e.message, 'falling back to ElevenLabs');
+    return await DIAL_callWithElevenLabs(phoneNumber, firstMessage, {});
+  }
+}
+
+// Simple JWT creator for LiveKit (HS256)
+function createLiveKitJWT(apiKey, apiSecret, roomName) {
+  const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
+  const now = Math.floor(Date.now() / 1000);
+  const payload = Buffer.from(JSON.stringify({
+    iss: apiKey,
+    sub: 'aba-outbound',
+    iat: now,
+    exp: now + 3600,
+    video: { room: roomName, roomCreate: true, canPublish: true }
+  })).toString('base64url');
+  
+  const crypto = require('crypto');
+  const signature = crypto.createHmac('sha256', apiSecret)
+    .update(header + '.' + payload)
+    .digest('base64url');
+  
+  return header + '.' + payload + '.' + signature;
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:AIR:REACH.AGENTS.HEART:FUNC:proactive.call.decision:v1.0.0:20260222⬡
+// HEART Agent - Determines when to proactively call Brandon
+// Triggers: urgent emails, calendar reminders, important OMI detections
+// ═══════════════════════════════════════════════════════════════════════════════
+
+async function HEART_checkProactive(pulseId) {
+  console.log('[HEART] Checking if proactive call needed...');
+  
+  const now = new Date();
+  const hour = now.getHours();
+  
+  // Don't call between 11pm and 7am
+  if (hour >= 23 || hour < 7) {
+    console.log('[HEART] Night hours - no proactive calls');
+    return { shouldCall: false, reason: 'night_hours' };
+  }
+  
+  // Check if we called recently (within 30 min)
+  try {
+    const recentCallRes = await httpsRequest({
+      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+      path: '/rest/v1/aba_memory?memory_type=eq.heart_call_log&order=created_at.desc&limit=1',
+      method: 'GET',
+      headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON }
+    });
+    
+    if (recentCallRes.status === 200) {
+      const calls = JSON.parse(recentCallRes.data.toString());
+      if (calls.length > 0) {
+        const lastCall = new Date(calls[0].created_at);
+        const minSinceLast = (now - lastCall) / 60000;
+        if (minSinceLast < 30) {
+          console.log('[HEART] Called', Math.round(minSinceLast), 'min ago - skipping');
+          return { shouldCall: false, reason: 'recent_call' };
+        }
+      }
+    }
+  } catch (e) {
+    console.log('[HEART] Recent call check error:', e.message);
+  }
+  
+  // Check for urgent items that require proactive call
+  let urgentItems = [];
+  
+  // 1. Check for urgent emails (keyword: urgent, asap, emergency, deadline today)
+  try {
+    const urgentEmailRes = await httpsRequest({
+      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+      path: '/rest/v1/aba_memory?memory_type=eq.email_urgent&created_at=gte.' + new Date(now - 3600000).toISOString() + '&limit=3',
+      method: 'GET',
+      headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON }
+    });
+    if (urgentEmailRes.status === 200) {
+      const urgent = JSON.parse(urgentEmailRes.data.toString());
+      if (urgent.length > 0) {
+        urgentItems.push({ type: 'email', count: urgent.length, sample: urgent[0].content?.substring(0, 100) });
+      }
+    }
+  } catch (e) {}
+  
+  // 2. Check for calendar events starting in next 15 min
+  try {
+    const calRes = await httpsRequest({
+      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+      path: '/rest/v1/aba_memory?memory_type=eq.calendar_reminder&importance=gte.8&created_at=gte.' + new Date(now - 900000).toISOString() + '&limit=1',
+      method: 'GET',
+      headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON }
+    });
+    if (calRes.status === 200) {
+      const cal = JSON.parse(calRes.data.toString());
+      if (cal.length > 0) {
+        urgentItems.push({ type: 'calendar', content: cal[0].content?.substring(0, 100) });
+      }
+    }
+  } catch (e) {}
+  
+  // 3. Check for OMI proactive items that need action
+  try {
+    const omiRes = await httpsRequest({
+      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+      path: '/rest/v1/aba_memory?memory_type=eq.omi_proactive_execution&importance=gte.8&created_at=gte.' + new Date(now - 3600000).toISOString() + '&limit=1',
+      method: 'GET',
+      headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON }
+    });
+    if (omiRes.status === 200) {
+      const omi = JSON.parse(omiRes.data.toString());
+      if (omi.length > 0) {
+        urgentItems.push({ type: 'omi', content: omi[0].content?.substring(0, 100) });
+      }
+    }
+  } catch (e) {}
+  
+  // If we have urgent items, call Brandon
+  if (urgentItems.length > 0) {
+    const reasons = urgentItems.map(i => i.type).join(', ');
+    let message = 'Hey Brandon, this is ABA with an urgent update. ';
+    
+    if (urgentItems.find(i => i.type === 'email')) {
+      message += 'You have ' + urgentItems.find(i => i.type === 'email').count + ' urgent emails. ';
+    }
+    if (urgentItems.find(i => i.type === 'calendar')) {
+      message += 'You have an upcoming meeting. ';
+    }
+    if (urgentItems.find(i => i.type === 'omi')) {
+      message += 'I detected something from your pendant that needs attention. ';
+    }
+    message += 'Want me to go over these with you?';
+    
+    return { shouldCall: true, reason: reasons, message: message };
+  }
+  
+  console.log('[HEART] No urgent items - no call needed');
+  return { shouldCall: false, reason: 'no_urgent_items' };
+}
 
