@@ -2376,7 +2376,7 @@ async function PRESS_getNews(query) {
         'Content-Type': 'application/json'
       }
     }, JSON.stringify({
-      model: 'llama-3.1-sonar-small-128k-online',
+      model: 'sonar',  // FIXED: was llama-3.1-sonar-small-128k-online (deprecated)
       messages: [
         { role: 'system', content: 'You are a news assistant. Give brief, factual news summaries in 2-3 sentences. Be warm and conversational, not robotic. Current date: ' + new Date().toLocaleDateString() },
         { role: 'user', content: query }
@@ -5302,7 +5302,7 @@ async function SAGE_search(query, options = {}) {
             'Content-Type': 'application/json'
           }
         }, JSON.stringify({
-          model: 'llama-3.1-sonar-small-128k-online',
+          model: 'sonar',  // FIXED: was llama-3.1-sonar-small-128k-online (deprecated)
           messages: [
             { role: 'system', content: 'You are a research assistant. Provide factual, concise answers with sources.' },
             { role: 'user', content: query }
