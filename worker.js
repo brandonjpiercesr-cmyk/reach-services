@@ -89,6 +89,34 @@ const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFz
 let AIR_TRAINING_CACHE = null;
 let AIR_TRAINING_LOADED_AT = null;
 
+// ⬡B:REACH.OMI.DEDUP.GLOBAL:FIX:duplicate_prevention:20260222⬡
+// GLOBAL DEDUPLICATION MAP - persists across requests
+const omiProcessedSegments = new Map();
+const OMI_DEDUP_WINDOW = 60000; // 1 minute window
+
+function isOmiDuplicate(segmentId, segmentText) {
+  const now = Date.now();
+  // Clean old entries
+  for (const [id, data] of omiProcessedSegments) {
+    if (now - data.ts > OMI_DEDUP_WINDOW) omiProcessedSegments.delete(id);
+  }
+  // Check for exact ID match
+  if (omiProcessedSegments.has(segmentId)) {
+    console.log('[OMI DEDUP] Skipping duplicate segment:', segmentId);
+    return true;
+  }
+  // Check for similar text within window (catch reordered JSON)
+  const textHash = segmentText.substring(0, 100);
+  for (const [id, data] of omiProcessedSegments) {
+    if (data.textHash === textHash && now - data.ts < 5000) {
+      console.log('[OMI DEDUP] Skipping similar text within 5s');
+      return true;
+    }
+  }
+  omiProcessedSegments.set(segmentId, { ts: now, textHash });
+  return false;
+}
+
 async function loadAIRTraining() {
   // Cache for 5 minutes
   if (AIR_TRAINING_CACHE && AIR_TRAINING_LOADED_AT && (Date.now() - AIR_TRAINING_LOADED_AT) < 300000) {
@@ -10258,34 +10286,8 @@ Respond as this agent specifically — stay in character.`;
   // ═══════════════════════════════════════════════════════════════════════
   // ⬡B:AIR:REACH.API.OMI_WEBHOOK:CODE:senses.omi.transcript:OMI→REACH→TASTE→BRAIN:T7:v1.5.0:20260213:o1w2h⬡ /api/omi/webhook
   // Receives transcripts from OMI and stores in ABA Brain via TASTE
+  // NOTE: Deduplication moved to module scope (line ~94) for persistence
   // ═══════════════════════════════════════════════════════════════════════
-  // ⬡B:REACH.OMI.DEDUP:FIX:duplicate_prevention:20260222⬡
-  // DEDUPLICATION: Prevent duplicate OMI transcripts from being stored
-  const omiProcessedSegments = new Map();
-  const OMI_DEDUP_WINDOW = 60000; // 1 minute window
-  
-  function isOmiDuplicate(segmentId, segmentText) {
-    const now = Date.now();
-    // Clean old entries
-    for (const [id, data] of omiProcessedSegments) {
-      if (now - data.ts > OMI_DEDUP_WINDOW) omiProcessedSegments.delete(id);
-    }
-    // Check for exact ID match
-    if (omiProcessedSegments.has(segmentId)) {
-      console.log('[OMI DEDUP] Skipping duplicate segment:', segmentId);
-      return true;
-    }
-    // Check for similar text within window (catch reordered JSON)
-    const textHash = segmentText.substring(0, 100);
-    for (const [id, data] of omiProcessedSegments) {
-      if (data.textHash === textHash && now - data.ts < 5000) {
-        console.log('[OMI DEDUP] Skipping similar text within 5s');
-        return true;
-      }
-    }
-    omiProcessedSegments.set(segmentId, { ts: now, textHash });
-    return false;
-  }
 
   if (path === '/api/omi/webhook' && method === 'POST') {
     try {
