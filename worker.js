@@ -2475,11 +2475,49 @@ async function COLE_scour(analysis) {
   }
   
   const searchTerms = [analysis.raw, ...analysis.entities].join(' ');
-  const keywords = searchTerms.split(/\s+/).filter(w => w.length > 3).slice(0, 5);
+  const keywords = searchTerms.split(/\s+/).filter(w => w.length > 1).slice(0, 8);
   
   let memories = [];
   
   try {
+
+    // ALWAYS search HAM identities for people questions
+    const peopleWords = ['who', 'is', 'contact', 'call', 'text', 'email'];
+    if (peopleWords.some(w => analysis.raw.toLowerCase().includes(w))) {
+      console.log('[COLE] People question detected - searching HAM identities');
+      try {
+        const hamResult = await httpsRequest({
+          hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+          path: '/rest/v1/aba_memory?memory_type=eq.ham_identity&limit=10',
+          method: 'GET',
+          headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON }
+        });
+        if (hamResult.status === 200) {
+          const hamData = JSON.parse(hamResult.data.toString());
+          for (const h of hamData) {
+            memories.push({ id: h.id, content: h.content, type: 'ham_identity', importance: 10 });
+          }
+          console.log('[COLE] Added', hamData.length, 'HAM identities to context');
+        }
+      } catch (e) { console.log('[COLE] HAM search error:', e.message); }
+    }
+
+    // Also search for brandon_context (family, kids, etc)
+    try {
+      const contextResult = await httpsRequest({
+        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+        path: '/rest/v1/aba_memory?memory_type=eq.brandon_context&limit=5',
+        method: 'GET',
+        headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON }
+      });
+      if (contextResult.status === 200) {
+        const ctxData = JSON.parse(contextResult.data.toString());
+        for (const c of ctxData) {
+          memories.push({ id: c.id, content: c.content, type: 'brandon_context', importance: 9 });
+        }
+      }
+    } catch (e) {}
+
     for (const keyword of keywords) {
       const url = `/rest/v1/aba_memory?content=ilike.*${encodeURIComponent(keyword)}*&order=importance.desc&limit=3`;
       
