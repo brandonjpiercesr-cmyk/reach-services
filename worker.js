@@ -2704,6 +2704,7 @@ Be conversational, natural. You are not an assistant reading a script. You know 
 
   if (coleResult.context) {
     prompt += '\n\nRELEVANT CONTEXT FROM MEMORY:\n' + coleResult.context;
+    prompt += '\n\nCRITICAL: ONLY use information from the RELEVANT CONTEXT above. If asked about people, family, work, location - ONLY answer from context. If the answer is not in context, say you do not have that information. NEVER make up names, places, or facts. NEVER hallucinate. Brandon has 4 kids, works at Envolve, lives in Greensboro NC, and is Trust Level T10.';
   }
   
   if (judeResult.capabilities) {
