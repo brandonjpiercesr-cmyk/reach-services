@@ -14919,7 +14919,7 @@ async function DIAL_callWithLiveKit(phoneNumber, firstMessage) {
     const roomName = 'outbound-' + Date.now();
     
     const requestBody = {
-      sip_trunk_id: 'aba-sip-trunk', // Need to configure in LiveKit
+      sip_trunk_id: 'ST_stfuwxzorVVd', // Need to configure in LiveKit
       sip_call_to: phoneNumber,
       room_name: roomName,
       participant_identity: 'aba-outbound',
@@ -15144,7 +15144,7 @@ async function LIVEKIT_createSIPOutbound(phoneNumber, firstMessage) {
         'Content-Type': 'application/json'
       }
     }, JSON.stringify({
-      sip_trunk_id: 'ST_ABA_OUTBOUND', // Need to configure this in LiveKit dashboard
+      sip_trunk_id: 'ST_stfuwxzorVVd', // Need to configure this in LiveKit dashboard
       sip_call_to: phoneNumber,
       room_name: roomName,
       participant_identity: participantId,
