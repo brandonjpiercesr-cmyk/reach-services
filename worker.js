@@ -5726,11 +5726,73 @@ async function AIR_DISPATCH(lukeAnalysis, judeResult, callerIdentity) {
     }
   }
   
+  // ⬡B:AIR:REACH.DISPATCH.FAMILY:ROUTE:personal.family:v1.0.0:20260222⬡
+  // FAMILY/PERSONAL Agent - Family queries MUST be checked BEFORE sports
+  // Handles: kids, children, wife, family, brother, parents, etc.
+  const familyKeywords = ['kids', 'children', 'wife', 'family', 'brother', 'sister', 'parent', 
+    'mom', 'dad', 'husband', 'bethany', 'bailey', 'joshua', 'jeremiah', 'bella', 'bj',
+    'raquel', 'eric', 'spouse', 'child', 'son', 'daughter', 'sibling'];
+  
+  const needsFamily = familyKeywords.some(kw => query.includes(kw));
+  
+  if (needsFamily) {
+    console.log('[AIR DISPATCH] → L3: FAMILY/BRAIN (Personal family query detected)');
+    try {
+      // Force brain search for family data
+      const familyResult = await httpsRequest({
+        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+        path: '/rest/v1/aba_memory?or=(memory_type.eq.brandon_family,memory_type.eq.brandon_context,memory_type.eq.ham_identity)&limit=10',
+        method: 'GET',
+        headers: {
+          'apikey': SUPABASE_ANON,
+          'Authorization': 'Bearer ' + SUPABASE_ANON
+        }
+      });
+      
+      if (familyResult.status === 200) {
+        const familyData = JSON.parse(familyResult.data.toString());
+        if (familyData && familyData.length > 0) {
+          // Build response from family data
+          let familyContext = '';
+          for (const f of familyData) {
+            if (f.content && (
+              f.content.toLowerCase().includes('family') ||
+              f.content.toLowerCase().includes('children') ||
+              f.content.toLowerCase().includes('wife') ||
+              f.content.toLowerCase().includes('bailey') ||
+              familyKeywords.some(kw => f.content.toLowerCase().includes(kw))
+            )) {
+              familyContext += f.content.substring(0, 300) + '\n';
+            }
+          }
+          
+          if (familyContext.length > 0) {
+            console.log('[AIR DISPATCH] Found family data in brain');
+            return { 
+              handled: false, // Let LLM synthesize from context
+              agent: 'COLE', 
+              familyData: familyContext,
+              type: 'family',
+              injectContext: familyContext
+            };
+          }
+        }
+      }
+    } catch (e) {
+      console.log('[AIR DISPATCH] Family brain search error:', e.message);
+    }
+  }
+  
   // ⬡B:AIR:REACH.DISPATCH.PLAY:ROUTE:sports:v2.4.0:20260214⬡
   // PLAY Agent - Sports queries (L3: Manager, LIFESTYLE department)
-  if (query.includes('score') || query.includes('laker') || query.includes('game') ||
-      query.includes('win') || query.includes('nba') || query.includes('sports') ||
-      agentNames.includes('play')) {
+  // NOTE: Only trigger for EXPLICIT sports terms, not generic words
+  const sportsKeywords = ['score', 'laker', 'lakers', 'dodger', 'dodgers', 'nba', 'nfl', 'mlb', 
+    'sports', 'basketball', 'football', 'baseball', 'soccer', 'hockey', 'standings', 'playoffs'];
+  
+  const needsSports = sportsKeywords.some(kw => query.includes(kw)) || agentNames.includes('play');
+  
+  // Exclude if family keywords present (family takes priority)
+  if (needsSports && !needsFamily) {
     console.log('[AIR DISPATCH] → L3: PLAY (Performance and Live Activity Yielder)');
     try {
       const result = await PLAY_getScores(lukeAnalysis.raw);
@@ -6025,6 +6087,20 @@ async function AIR_process(userSaid, history, callerIdentity, demoState) {
     coleResult.agentData = dispatchResult.data;
     coleResult.agentName = dispatchResult.agent;
     coleResult.agentType = dispatchResult.type;
+  }
+  
+  // ⬡B:AIR:REACH.DISPATCH.INJECT_CONTEXT:FIX:family_routing:20260222⬡
+  // If family data was found, inject it into COLE context
+  if (dispatchResult.injectContext) {
+    console.log('[AIR] Injecting family context into COLE');
+    coleResult.context = (coleResult.context || '') + '\n\nFAMILY DATA:\n' + dispatchResult.injectContext;
+    coleResult.memories = coleResult.memories || [];
+    coleResult.memories.push({
+      id: 'family_inject',
+      content: dispatchResult.injectContext,
+      type: 'family',
+      importance: 10
+    });
   }
   
   const missionPackage = PACK_assemble(lukeAnalysis, coleResult, judeResult, history, callerIdentity, demoState);
