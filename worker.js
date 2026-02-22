@@ -5485,8 +5485,10 @@ async function AIR_DISPATCH(lukeAnalysis, judeResult, callerIdentity) {
 
   // ⬡B:AIR:REACH.DISPATCH.IMAN:ROUTE:email:v2.4.0:20260214⬡
   // IMAN Agent - Email queries (L3: Manager, EMAIL department)
-  if (query.includes('email') || query.includes('inbox') || query.includes('mail') ||
-      agentNames.includes('iman')) {
+  // SKIP if this is a SEND command (handled by IMAN_SEND above)
+  const isEmailSend = (query.includes('say') || query.includes('tell')) && query.includes('email');
+  if (!isEmailSend && (query.includes('email') || query.includes('inbox') || query.includes('mail') ||
+      agentNames.includes('iman'))) {
     console.log('[AIR DISPATCH] → L3: IMAN (Intelligent Mail Agent Nexus)');
     try {
       const result = await IMAN_readEmails(callerIdentity);
