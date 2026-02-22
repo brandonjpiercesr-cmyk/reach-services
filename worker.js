@@ -5767,12 +5767,14 @@ async function AIR_DISPATCH(lukeAnalysis, judeResult, callerIdentity) {
           }
           
           if (familyContext.length > 0) {
-            console.log('[AIR DISPATCH] Found family data in brain');
+            console.log('[AIR DISPATCH] Found family data in brain - returning directly');
+            // ⬡B:AIR:REACH.DISPATCH.FAMILY_DIRECT:FIX:return_data:20260222⬡
+            // Return family data DIRECTLY to avoid LLM hallucination
             return { 
-              handled: false, // Let LLM synthesize from context
+              handled: true, // CHANGED: Don't let this fall through
               agent: 'COLE', 
-              familyData: familyContext,
-              type: 'family',
+              data: familyContext.trim(),  // CHANGED: Return as data
+              type: 'family',  // CHANGED: Use family type for direct return
               injectContext: familyContext
             };
           }
@@ -6073,7 +6075,7 @@ async function AIR_process(userSaid, history, callerIdentity, demoState) {
     
     // Return factual data directly - no LLM hallucination risk
     // ⬡B:TOUCH:FIX:direct.response.all.factual:20260216⬡
-    const directTypes = ['sports', 'weather', 'email', 'calendar', 'tasks', 'contacts', 'brain_search', 'vault'];
+    const directTypes = ['sports', 'weather', 'email', 'calendar', 'tasks', 'contacts', 'brain_search', 'vault', 'family'];
     if (directTypes.includes(dispatchResult.type)) {
       console.log('[AIR] Returning agent data DIRECTLY (no LLM) - Type:', dispatchResult.type);
       return { 
@@ -13743,8 +13745,10 @@ We Are All ABA.`;
   // GET /api/sage/search - Search brain via SAGE
   if (path === '/api/sage/search' && method === 'GET') {
     const query = url.searchParams.get('q') || '';
-    console.log('[SAGE] API search:', query);
-    const results = await SAGE_search(query);
+    const forceWeb = url.searchParams.get('forceWeb') === 'true';
+    const includeWeb = url.searchParams.get('includeWeb') === 'true';
+    console.log('[SAGE] API search:', query, '| forceWeb:', forceWeb, '| includeWeb:', includeWeb);
+    const results = await SAGE_search(query, { forceWeb, includeWeb });
     
       // RETURN-TO-ME: Post-process logging
       console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
