@@ -9650,25 +9650,41 @@ Respond as this agent specifically — stay in character.`;
       
       if (isSelfEmailRequest) {
         console.log('[AIR VOICE TOOL] SELF EMAIL REQUEST DETECTED!');
+        console.log('[AIR VOICE TOOL] Sending self-email...');
         
         try {
           // Parse message content
           const emailMatch = userMessage.match(/email.*(?:saying|about|with)\s+(.+)/i);
           const messageContent = emailMatch ? emailMatch[1] : 'Test email from ABA';
+          console.log('[AIR VOICE TOOL] Email content:', messageContent);
           
           // Send to Brandon's email
-          const emailResult = await IMAN_sendEmailGmail('brandon@globalmajoritygroup.com', 'ABA Message', messageContent);
+          const emailResult = await IMAN_sendEmailGmail('brandon@globalmajoritygroup.com', 'ABA Message: ' + messageContent.substring(0, 30), messageContent);
+          console.log('[AIR VOICE TOOL] Email result:', JSON.stringify(emailResult));
           
-          if (emailResult.success) {
+          if (emailResult && emailResult.success) {
             return jsonResponse(res, 200, {
               response: 'Done! I sent you an email with that message.',
               email_sent: true,
               target: 'brandon@globalmajoritygroup.com',
               agents: ['IMAN']
             });
+          } else {
+            // Email failed but we caught it
+            return jsonResponse(res, 200, {
+              response: 'I tried to send that email but hit a snag. Want me to try again?',
+              email_error: emailResult?.error || 'unknown',
+              agents: ['IMAN']
+            });
           }
         } catch (e) {
           console.log('[AIR VOICE TOOL] Self email error:', e.message);
+          // Return error response instead of falling through
+          return jsonResponse(res, 200, {
+            response: 'I ran into an issue sending that email: ' + e.message.substring(0, 50) + '. Let me try a different approach.',
+            error: e.message,
+            agents: ['IMAN']
+          });
         }
       }
       
