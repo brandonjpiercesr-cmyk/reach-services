@@ -8571,7 +8571,7 @@ const httpServer = http.createServer(async (req, res) => {
       service: 'ABA TOUCH v2.12.16-OMI-FIX-FEB20',
       mode: 'FULL API + VOICE + OMI + SMS + SPEECH INTELLIGENCE',
       air: 'ABA Intellectual Role - CENTRAL ORCHESTRATOR',
-      models: { primary: 'Gemini Flash 2.0', backup: 'Claude Haiku', speed_fallback: 'Groq' },
+      models: { primary: 'Claude Sonnet 4.5', backup: 'Gemini Flash 2.0', speed_fallback: 'Groq' },
       agents: { hardcoded: ['LUKE', 'COLE', 'JUDE', 'PACK'], voice: 'VARA', intelligence: 'DEEPGRAM' },
       voice: 'ElevenLabs ' + ELEVENLABS_VOICE,
       phone: TWILIO_PHONE,
