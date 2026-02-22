@@ -2579,108 +2579,149 @@ async function LUKE_process(userSaid) {
  */
 // ⬡B:AIR:REACH.AGENT.COLE:CODE:intelligence.brain.search:AIR→COLE→BRAIN→COLE→AIR:T8:v1.5.0:20260213:c1o2l⬡
 // ⬡B:ABCD:ABAOS:AGENT.COLE⬡
-async function COLE_scour(analysis) {
+// ⬡B:REACH.COLE.DEEP_SEARCH:FIX:enhanced_memory:20260222⬡
+// COLE with deep memory search - multi-strategy, relevance scoring
+async function COLE_scour(analysis, options = {}) {
   console.log('[COLE] Scouring brain for context...');
+  const { deepSearch = false, maxResults = 10 } = options;
   
-  if (!analysis.needsBrain) {
+  if (!analysis.needsBrain && !deepSearch) {
     console.log('[COLE] Brain search not needed for this query');
     return { memories: [], context: '' };
   }
   
   const searchTerms = [analysis.raw, ...analysis.entities].join(' ');
-  const keywords = searchTerms.split(/\s+/).filter(w => w.length > 1).slice(0, 8);
+  const keywords = searchTerms.split(/\s+/).filter(w => w.length > 2).slice(0, 10);
+  const queryLower = analysis.raw.toLowerCase();
   
   let memories = [];
+  const seenIds = new Set();
+  
+  // Helper to add memory without duplicates
+  const addMemory = (mem, relevanceBoost = 0) => {
+    if (seenIds.has(mem.id)) return;
+    seenIds.add(mem.id);
+    
+    // Calculate relevance score
+    let score = (mem.importance || 5) + relevanceBoost;
+    const contentLower = (mem.content || '').toLowerCase();
+    
+    // Boost if content contains exact query terms
+    keywords.forEach(kw => {
+      if (contentLower.includes(kw.toLowerCase())) score += 2;
+    });
+    
+    memories.push({
+      id: mem.id,
+      content: mem.content?.substring(0, 300),
+      type: mem.memory_type,
+      importance: mem.importance,
+      relevance: score
+    });
+  };
   
   try {
-
-    // ALWAYS search HAM identities for people questions
-    const peopleWords = ['who', 'is', 'contact', 'call', 'text', 'email', 'kids', 'children', 'wife', 'family', 'brother', 'sister', 'parent', 'mom', 'dad', 'husband', 'name'];
-    if (peopleWords.some(w => analysis.raw.toLowerCase().includes(w))) {
-      console.log('[COLE] People question detected - searching HAM identities');
+    // STRATEGY 1: HAM identities for people questions
+    const peopleWords = ['who', 'is', 'contact', 'call', 'text', 'email', 'kids', 'children', 'wife', 'family', 'brother', 'sister', 'parent', 'mom', 'dad', 'husband', 'name', 'brandon', 'bj', 'raquel', 'eric'];
+    if (peopleWords.some(w => queryLower.includes(w))) {
+      console.log('[COLE DEEP] Strategy 1: HAM identities');
       try {
         const hamResult = await httpsRequest({
           hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-          path: '/rest/v1/aba_memory?memory_type=eq.ham_identity&limit=10',
+          path: '/rest/v1/aba_memory?memory_type=eq.ham_identity&limit=15',
           method: 'GET',
           headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON }
         });
         if (hamResult.status === 200) {
           const hamData = JSON.parse(hamResult.data.toString());
-          for (const h of hamData) {
-            memories.push({ id: h.id, content: h.content, type: 'ham_identity', importance: 10 });
-          }
-          console.log('[COLE] Added', hamData.length, 'HAM identities to context');
+          hamData.forEach(h => addMemory(h, 5)); // High boost for HAM
+          console.log('[COLE DEEP] Found', hamData.length, 'HAM identities');
         }
-      } catch (e) { console.log('[COLE] HAM search error:', e.message); }
+      } catch (e) { console.log('[COLE DEEP] HAM error:', e.message); }
     }
 
-    // Also search for brandon_context (family, kids, etc) with keyword matching
-    try {
-      // Build keyword filter for more relevant context
-      const queryKeywords = analysis.raw.toLowerCase().split(/\s+/).filter(w => w.length > 2);
-      let contextPath = '/rest/v1/aba_memory?or=(memory_type.eq.brandon_context,memory_type.eq.brandon_family)&limit=15';
-      
-      // If query mentions specific topics, filter for them
-      const hasFamily = queryKeywords.some(w => ['kids', 'children', 'family', 'wife', 'brother', 'names', 'bethany'].includes(w));
-      const hasFood = queryKeywords.some(w => ['eat', 'ate', 'food', 'restaurant', 'bbq', 'dallas', 'wings'].includes(w));
-      
-      if (hasFamily) {
-        contextPath = '/rest/v1/aba_memory?or=(memory_type.eq.brandon_context,memory_type.eq.brandon_family)&or=(content.ilike.*family*,content.ilike.*children*,content.ilike.*wife*,content.ilike.*Bailey*)&limit=10';
-      } else if (hasFood) {
-        contextPath = '/rest/v1/aba_memory?memory_type=eq.brandon_context&content=ilike.*' + queryKeywords.find(w => ['bbq', 'dallas', 'restaurant', 'food'].includes(w)) + '*&limit=5';
-      }
-      
-      const contextResult = await httpsRequest({
-        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-        path: contextPath,
-        method: 'GET',
-        headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON }
-      });
-      if (contextResult.status === 200) {
-        const ctxData = JSON.parse(contextResult.data.toString());
-        console.log('[COLE] Found', ctxData.length, 'brandon_context entries');
-        for (const c of ctxData) {
-          memories.push({ id: c.id, content: c.content, type: 'brandon_context', importance: 9 });
+    // STRATEGY 2: Brandon context (family, personal)
+    const personalWords = ['family', 'wife', 'children', 'kids', 'bethany', 'bailey', 'joshua', 'jeremiah', 'bella', 'birthday', 'anniversary'];
+    if (personalWords.some(w => queryLower.includes(w)) || deepSearch) {
+      console.log('[COLE DEEP] Strategy 2: Brandon context');
+      try {
+        const contextResult = await httpsRequest({
+          hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+          path: '/rest/v1/aba_memory?or=(memory_type.eq.brandon_context,memory_type.eq.brandon_family)&limit=15',
+          method: 'GET',
+          headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON }
+        });
+        if (contextResult.status === 200) {
+          const ctxData = JSON.parse(contextResult.data.toString());
+          ctxData.forEach(c => addMemory(c, 4));
+          console.log('[COLE DEEP] Found', ctxData.length, 'brandon_context entries');
         }
-      }
-    } catch (e) { console.log('[COLE] brandon_context error:', e.message); }
+      } catch (e) { console.log('[COLE DEEP] Context error:', e.message); }
+    }
 
-    for (const keyword of keywords) {
-      const url = `/rest/v1/aba_memory?content=ilike.*${encodeURIComponent(keyword)}*&order=importance.desc&limit=3`;
-      
-      const result = await httpsRequest({
-        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-        path: url,
-        method: 'GET',
-        headers: {
-          'apikey': SUPABASE_ANON,
-          'Authorization': 'Bearer ' + SUPABASE_ANON
+    // STRATEGY 3: Agent/architecture queries
+    const techWords = ['agent', 'air', 'vara', 'mace', 'cole', 'luke', 'reach', 'abacia', 'omi', 'architecture', 'routing', 'brain'];
+    if (techWords.some(w => queryLower.includes(w)) || deepSearch) {
+      console.log('[COLE DEEP] Strategy 3: Agent/architecture');
+      try {
+        const agentResult = await httpsRequest({
+          hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+          path: '/rest/v1/aba_memory?or=(memory_type.eq.aba_agents,memory_type.eq.aba_architecture,memory_type.eq.protocol)&limit=10',
+          method: 'GET',
+          headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON }
+        });
+        if (agentResult.status === 200) {
+          const agentData = JSON.parse(agentResult.data.toString());
+          agentData.forEach(a => addMemory(a, 3));
+          console.log('[COLE DEEP] Found', agentData.length, 'agent/architecture entries');
         }
-      });
-      
-      if (result.status === 200) {
-        const data = JSON.parse(result.data.toString());
-        for (const mem of data) {
-          if (!memories.find(m => m.id === mem.id)) {
-            memories.push({
-              id: mem.id,
-              content: mem.content?.substring(0, 200),
-              type: mem.memory_type,
-              importance: mem.importance
-            });
-          }
+      } catch (e) { console.log('[COLE DEEP] Agent error:', e.message); }
+    }
+
+    // STRATEGY 4: Keyword search across all memory types
+    console.log('[COLE DEEP] Strategy 4: Keyword search for', keywords.slice(0, 5).join(', '));
+    for (const keyword of keywords.slice(0, 5)) {
+      if (keyword.length < 3) continue;
+      try {
+        const result = await httpsRequest({
+          hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+          path: `/rest/v1/aba_memory?content=ilike.*${encodeURIComponent(keyword)}*&order=importance.desc&limit=5`,
+          method: 'GET',
+          headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON }
+        });
+        if (result.status === 200) {
+          const data = JSON.parse(result.data.toString());
+          data.forEach(mem => addMemory(mem, 1));
         }
-      }
+      } catch (e) { /* skip */ }
+    }
+
+    // STRATEGY 5: Deep search - recent memories, OMI transcripts (if deepSearch enabled)
+    if (deepSearch) {
+      console.log('[COLE DEEP] Strategy 5: Recent memories + OMI');
+      try {
+        const recentResult = await httpsRequest({
+          hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+          path: '/rest/v1/aba_memory?order=created_at.desc&limit=10',
+          method: 'GET',
+          headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON }
+        });
+        if (recentResult.status === 200) {
+          const recentData = JSON.parse(recentResult.data.toString());
+          recentData.forEach(r => addMemory(r, 0));
+          console.log('[COLE DEEP] Added', recentData.length, 'recent memories');
+        }
+      } catch (e) { console.log('[COLE DEEP] Recent error:', e.message); }
     }
     
-    memories = memories.sort((a, b) => (b.importance || 0) - (a.importance || 0)).slice(0, 5);
+    // Sort by relevance score and limit
+    memories = memories.sort((a, b) => (b.relevance || 0) - (a.relevance || 0)).slice(0, maxResults);
     
   } catch (e) {
-    console.log('[COLE] Brain search error: ' + e.message);
+    console.log('[COLE DEEP] Brain search error: ' + e.message);
   }
   
-  console.log('[COLE] Found ' + memories.length + ' relevant memories');
+  console.log('[COLE DEEP] Final: ' + memories.length + ' relevant memories');
   
   const context = memories.map(m => m.content).join('\n');
   
@@ -5202,41 +5243,98 @@ async function logActivityToBrain(activity) {
 // SPURT 7: SAGE INDEXER - ACL tag search and navigation
 // ═══════════════════════════════════════════════════════════════════════════════
 
-async function SAGE_search(query) {
+// ⬡B:REACH.SAGE.WEB_FALLBACK:FIX:perplexity_fallback:20260222⬡
+// SAGE with web search fallback when brain returns empty
+async function SAGE_search(query, options = {}) {
   console.log(`[SAGE] Searching: "${query}"`);
+  const { forceWeb = false, includeWeb = false } = options;
   
-  try {
-    // Search by content
-    const contentSearch = await httpsRequest({
-      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-      path: `/rest/v1/aba_memory?content=ilike.*${encodeURIComponent(query)}*&order=importance.desc&limit=20`,
-      method: 'GET',
-      headers: {
-        'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY,
-        'Authorization': 'Bearer ' + (process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY)
-      }
-    });
-    
-    const results = JSON.parse(contentSearch.data.toString()) || [];
-    
-    // Parse ACL tags from results
-    const aclTagged = results.map(r => {
-      const aclMatch = (r.content || '').match(/⬡B:[^⬡]+⬡/g) || [];
-      return {
-        id: r.id,
-        content: r.content?.substring(0, 200),
-        acl_tags: aclMatch,
-        memory_type: r.memory_type,
-        importance: r.importance
-      };
-    });
-    
-    console.log(`[SAGE] Found ${aclTagged.length} results`);
-    return aclTagged;
-  } catch (e) {
-    console.error('[SAGE] Search error:', e.message);
-    return [];
+  let brainResults = [];
+  
+  // STEP 1: Search brain first (unless forceWeb)
+  if (!forceWeb) {
+    try {
+      const contentSearch = await httpsRequest({
+        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+        path: `/rest/v1/aba_memory?content=ilike.*${encodeURIComponent(query)}*&order=importance.desc&limit=20`,
+        method: 'GET',
+        headers: {
+          'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY,
+          'Authorization': 'Bearer ' + (process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY)
+        }
+      });
+      
+      const results = JSON.parse(contentSearch.data.toString()) || [];
+      brainResults = results.map(r => {
+        const aclMatch = (r.content || '').match(/⬡B:[^⬡]+⬡/g) || [];
+        return {
+          id: r.id,
+          content: r.content?.substring(0, 200),
+          acl_tags: aclMatch,
+          memory_type: r.memory_type,
+          importance: r.importance,
+          source: 'brain'
+        };
+      });
+      console.log(`[SAGE] Brain found ${brainResults.length} results`);
+    } catch (e) {
+      console.error('[SAGE] Brain search error:', e.message);
+    }
   }
+  
+  // STEP 2: Web search fallback if brain empty OR includeWeb requested
+  const needsWeb = forceWeb || includeWeb || brainResults.length === 0;
+  const webKeywords = ['current', 'latest', 'today', 'news', 'price', 'weather', 'score', 'who is', 'what happened'];
+  const queryNeedsWeb = webKeywords.some(k => query.toLowerCase().includes(k));
+  
+  let webResults = [];
+  if (needsWeb || queryNeedsWeb) {
+    console.log('[SAGE] Triggering web search fallback via Perplexity...');
+    try {
+      const PERPLEXITY_KEY = process.env.PERPLEXITY_API_KEY;
+      if (PERPLEXITY_KEY) {
+        const webSearch = await httpsRequest({
+          hostname: 'api.perplexity.ai',
+          path: '/chat/completions',
+          method: 'POST',
+          headers: {
+            'Authorization': 'Bearer ' + PERPLEXITY_KEY,
+            'Content-Type': 'application/json'
+          }
+        }, JSON.stringify({
+          model: 'llama-3.1-sonar-small-128k-online',
+          messages: [
+            { role: 'system', content: 'You are a research assistant. Provide factual, concise answers with sources.' },
+            { role: 'user', content: query }
+          ],
+          max_tokens: 500
+        }));
+        
+        const webData = JSON.parse(webSearch.data.toString());
+        const webAnswer = webData.choices?.[0]?.message?.content || '';
+        if (webAnswer) {
+          webResults.push({
+            id: 'web_' + Date.now(),
+            content: webAnswer.substring(0, 500),
+            acl_tags: [],
+            memory_type: 'web_search',
+            importance: 8,
+            source: 'perplexity'
+          });
+          console.log('[SAGE] Web search returned result');
+        }
+      } else {
+        console.log('[SAGE] No Perplexity API key, skipping web fallback');
+      }
+    } catch (e) {
+      console.error('[SAGE] Web search error:', e.message);
+    }
+  }
+  
+  // Combine results: brain first, web second
+  const combined = [...brainResults, ...webResults];
+  console.log(`[SAGE] Total results: ${combined.length} (brain: ${brainResults.length}, web: ${webResults.length})`);
+  return combined;
 }
 
 async function SAGE_indexACL() {
@@ -11693,6 +11791,352 @@ if (path === '/api/sms/send' && method === 'POST') {
   }
 
   // ═══════════════════════════════════════════════════════════════════════
+  // ⬡B:REACH.BRAIN.CODE_PATCH:API:code.update.from_brain:20260222⬡
+  // BRAIN-TO-CODE UPDATE SYSTEM
+  // Store code patches in brain, apply them to REACH, push to GitHub
+  // T10 ONLY - Brandon's "purple unicorn" self-updating system
+  // ═══════════════════════════════════════════════════════════════════════
+  
+  // POST /api/brain/code-patch - Apply a code patch from brain
+  if (path === '/api/brain/code-patch' && method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      const { patch_id, trust_level } = body;
+      
+      // T10 ONLY - Security check
+      if (trust_level !== 'T10' && trust_level !== 10) {
+        return jsonResponse(res, 403, { 
+          error: 'Code patches require T10 trust level',
+          hint: 'Only Brandon can update code through brain'
+        });
+      }
+      
+      if (!patch_id) {
+        return jsonResponse(res, 400, { error: 'patch_id required' });
+      }
+      
+      // Fetch the patch from brain
+      const patchResult = await httpsRequest({
+        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+        path: `/rest/v1/aba_memory?id=eq.${patch_id}&select=content,source,tags`,
+        method: 'GET',
+        headers: {
+          'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY,
+          'Authorization': 'Bearer ' + (process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY)
+        }
+      });
+      
+      const patches = JSON.parse(patchResult.data.toString());
+      if (!patches || patches.length === 0) {
+        return jsonResponse(res, 404, { error: 'Patch not found in brain' });
+      }
+      
+      const patch = patches[0];
+      const patchContent = patch.content;
+      
+      // Verify it's a code patch (must have code_patch tag)
+      if (!patch.tags?.includes('code_patch')) {
+        return jsonResponse(res, 400, { 
+          error: 'Not a code patch',
+          hint: 'Memory must have tag "code_patch"'
+        });
+      }
+      
+      // Parse patch instructions from content
+      // Format: JSON with { file, action, old_code, new_code, commit_message }
+      let patchData;
+      try {
+        // Try to extract JSON from content
+        const jsonMatch = patchContent.match(/```json\n?([\s\S]*?)\n?```/) || 
+                          patchContent.match(/\{[\s\S]*"file"[\s\S]*\}/);
+        if (jsonMatch) {
+          patchData = JSON.parse(jsonMatch[1] || jsonMatch[0]);
+        } else {
+          patchData = JSON.parse(patchContent);
+        }
+      } catch (e) {
+        return jsonResponse(res, 400, { 
+          error: 'Invalid patch format',
+          hint: 'Patch content must be JSON with file, action, old_code, new_code, commit_message'
+        });
+      }
+      
+      console.log('[BRAIN-CODE] Applying patch:', patchData.commit_message || patch_id);
+      
+      // Return the patch data for now (actual file modification would need fs access)
+      // In production, this would trigger a GitHub workflow or direct file edit
+      return jsonResponse(res, 200, {
+        status: 'patch_ready',
+        patch_id,
+        patch_data: patchData,
+        next_step: 'POST to /api/github/push with this patch to deploy',
+        instructions: [
+          '1. Patch fetched from brain successfully',
+          '2. Use /api/github/push to apply and deploy',
+          '3. Or use Claude.ai MACE to apply manually'
+        ]
+      });
+      
+    } catch (e) {
+      return jsonResponse(res, 500, { error: e.message });
+    }
+  }
+  
+  // GET /api/brain/code-patches - List all pending code patches
+  if (path === '/api/brain/code-patches' && method === 'GET') {
+    try {
+      const result = await httpsRequest({
+        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+        path: '/rest/v1/aba_memory?tags=cs.{code_patch}&order=created_at.desc&limit=20',
+        method: 'GET',
+        headers: {
+          'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY,
+          'Authorization': 'Bearer ' + (process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY)
+        }
+      });
+      
+      const patches = JSON.parse(result.data.toString());
+      const summary = patches.map(p => ({
+        id: p.id,
+        source: p.source,
+        created: p.created_at,
+        preview: p.content?.substring(0, 100),
+        applied: p.tags?.includes('applied') || false
+      }));
+      
+      return jsonResponse(res, 200, { 
+        count: summary.length,
+        patches: summary,
+        how_to_apply: 'POST /api/brain/code-patch with { patch_id, trust_level: "T10" }'
+      });
+      
+    } catch (e) {
+      return jsonResponse(res, 500, { error: e.message });
+    }
+  }
+  
+  // POST /api/brain/store-patch - Store a new code patch in brain
+  if (path === '/api/brain/store-patch' && method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      const { file, action, old_code, new_code, commit_message, trust_level } = body;
+      
+      // T10 ONLY
+      if (trust_level !== 'T10' && trust_level !== 10) {
+        return jsonResponse(res, 403, { error: 'Code patches require T10 trust level' });
+      }
+      
+      if (!file || !commit_message) {
+        return jsonResponse(res, 400, { error: 'file and commit_message required' });
+      }
+      
+      const patchContent = JSON.stringify({
+        file,
+        action: action || 'replace',
+        old_code: old_code || '',
+        new_code: new_code || '',
+        commit_message,
+        created_by: 'brain_api',
+        created_at: new Date().toISOString()
+      }, null, 2);
+      
+      const acl = `⬡B:code_patch.${file.replace(/[^a-zA-Z0-9]/g, '_')}:PATCH:${action || 'replace'}:${new Date().toISOString().split('T')[0].replace(/-/g, '')}⬡`;
+      
+      const result = await httpsRequest({
+        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+        path: '/rest/v1/aba_memory',
+        method: 'POST',
+        headers: {
+          'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY,
+          'Authorization': 'Bearer ' + (process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY),
+          'Content-Type': 'application/json',
+          'Prefer': 'return=representation'
+        }
+      }, JSON.stringify({
+        content: acl + '\n\n' + patchContent,
+        memory_type: 'code_patch',
+        source: acl,
+        importance: 10,
+        is_system: true,
+        tags: ['code_patch', 'pending', file.split('/').pop()]
+      }));
+      
+      const json = JSON.parse(result.data.toString());
+      return jsonResponse(res, 201, { 
+        stored: true, 
+        patch_id: json[0]?.id || json.id,
+        acl,
+        next_step: 'POST /api/brain/code-patch with { patch_id, trust_level: "T10" } to apply'
+      });
+      
+    } catch (e) {
+      return jsonResponse(res, 500, { error: e.message });
+    }
+  }
+  
+  // ═══════════════════════════════════════════════════════════════════════
+  // ⬡B:REACH.BRAIN.APPLY_PATCH:API:code.deploy.from_brain:20260222⬡
+  // FULL BRAIN-TO-GITHUB DEPLOYMENT
+  // Fetches patch from brain, applies to GitHub, triggers Render deploy
+  // ═══════════════════════════════════════════════════════════════════════
+  
+  // POST /api/brain/apply-patch - Full deployment: brain → GitHub → Render
+  if (path === '/api/brain/apply-patch' && method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      const { patch_id, trust_level, repo, branch } = body;
+      
+      // T10 ONLY
+      if (trust_level !== 'T10' && trust_level !== 10) {
+        return jsonResponse(res, 403, { 
+          error: 'Code deployment requires T10 trust level',
+          hint: 'Only Brandon can deploy code through brain'
+        });
+      }
+      
+      if (!patch_id) {
+        return jsonResponse(res, 400, { error: 'patch_id required' });
+      }
+      
+      console.log('[BRAIN-DEPLOY] Starting deployment for patch:', patch_id);
+      
+      // Step 1: Fetch patch from brain
+      const patchResult = await httpsRequest({
+        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+        path: `/rest/v1/aba_memory?id=eq.${patch_id}&select=content,source,tags`,
+        method: 'GET',
+        headers: {
+          'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY,
+          'Authorization': 'Bearer ' + (process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY)
+        }
+      });
+      
+      const patches = JSON.parse(patchResult.data.toString());
+      if (!patches || patches.length === 0) {
+        return jsonResponse(res, 404, { error: 'Patch not found in brain' });
+      }
+      
+      const patch = patches[0];
+      
+      // Verify it's a code patch
+      if (!patch.tags?.includes('code_patch')) {
+        return jsonResponse(res, 400, { error: 'Not a code patch' });
+      }
+      
+      // Parse patch data
+      let patchData;
+      try {
+        const jsonMatch = patch.content.match(/```json\n?([\s\S]*?)\n?```/) || 
+                          patch.content.match(/\{[\s\S]*"file"[\s\S]*\}/);
+        patchData = JSON.parse(jsonMatch ? (jsonMatch[1] || jsonMatch[0]) : patch.content);
+      } catch (e) {
+        return jsonResponse(res, 400, { error: 'Invalid patch format: ' + e.message });
+      }
+      
+      const targetRepo = repo || 'reach-services';
+      const targetBranch = branch || 'main';
+      const targetFile = patchData.file || 'worker.js';
+      
+      console.log('[BRAIN-DEPLOY] Patch data:', patchData.commit_message);
+      
+      // Step 2: Fetch current file from GitHub
+      let currentContent = '';
+      let currentSHA = null;
+      
+      try {
+        const getFile = await httpsRequest({
+          hostname: 'api.github.com',
+          path: `/repos/${GITHUB_OWNER}/${targetRepo}/contents/${targetFile}?ref=${targetBranch}`,
+          method: 'GET',
+          headers: {
+            'Authorization': `token ${GITHUB_TOKEN}`,
+            'User-Agent': 'ABA-BRAIN-DEPLOY',
+            'Accept': 'application/vnd.github.v3+json'
+          }
+        });
+        
+        if (getFile.status === 200) {
+          const fileData = JSON.parse(getFile.data.toString());
+          currentSHA = fileData.sha;
+          currentContent = Buffer.from(fileData.content, 'base64').toString('utf-8');
+          console.log('[BRAIN-DEPLOY] Current file SHA:', currentSHA.substring(0, 8));
+        }
+      } catch (e) {
+        console.log('[BRAIN-DEPLOY] File is new or fetch failed:', e.message);
+      }
+      
+      // Step 3: Apply patch (str_replace style)
+      let newContent = currentContent;
+      
+      if (patchData.action === 'replace' && patchData.old_code && patchData.new_code) {
+        if (!currentContent.includes(patchData.old_code)) {
+          return jsonResponse(res, 400, { 
+            error: 'old_code not found in file',
+            hint: 'The string to replace was not found in ' + targetFile
+          });
+        }
+        newContent = currentContent.replace(patchData.old_code, patchData.new_code);
+        console.log('[BRAIN-DEPLOY] Applied str_replace patch');
+      } else if (patchData.action === 'append') {
+        newContent = currentContent + '\n' + patchData.new_code;
+        console.log('[BRAIN-DEPLOY] Appended new code');
+      } else if (patchData.action === 'prepend') {
+        newContent = patchData.new_code + '\n' + currentContent;
+        console.log('[BRAIN-DEPLOY] Prepended new code');
+      } else if (patchData.action === 'full_replace') {
+        newContent = patchData.new_code;
+        console.log('[BRAIN-DEPLOY] Full file replace');
+      } else {
+        return jsonResponse(res, 400, { error: 'Unknown action: ' + patchData.action });
+      }
+      
+      // Step 4: Push to GitHub
+      const pushResult = await pushToGitHub(
+        targetRepo, 
+        targetFile, 
+        newContent, 
+        patchData.commit_message || `Brain patch ${patch_id}`,
+        targetBranch
+      );
+      
+      if (!pushResult.success) {
+        return jsonResponse(res, 500, { error: 'GitHub push failed', details: pushResult });
+      }
+      
+      console.log('[BRAIN-DEPLOY] Pushed to GitHub successfully');
+      
+      // Step 5: Mark patch as applied in brain
+      await httpsRequest({
+        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+        path: `/rest/v1/aba_memory?id=eq.${patch_id}`,
+        method: 'PATCH',
+        headers: {
+          'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY,
+          'Authorization': 'Bearer ' + (process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY),
+          'Content-Type': 'application/json'
+        }
+      }, JSON.stringify({
+        tags: [...(patch.tags || []).filter(t => t !== 'pending'), 'applied', 'deployed']
+      }));
+      
+      return jsonResponse(res, 200, {
+        status: 'deployed',
+        patch_id,
+        repo: targetRepo,
+        file: targetFile,
+        branch: targetBranch,
+        commit_message: patchData.commit_message,
+        github_result: pushResult,
+        render_note: 'Render will auto-deploy from GitHub in 1-3 minutes'
+      });
+      
+    } catch (e) {
+      console.log('[BRAIN-DEPLOY] Error:', e.message);
+      return jsonResponse(res, 500, { error: e.message });
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
 
   // ═══════════════════════════════════════════════════════════════════════
   // ⬡B:AIR:REACH.WEBHOOK.RECORDING:CODE:voice.recording.callback:TWILIO→REACH→SCRIBE→BRAIN:T8:v1.9.0:20260214:r1w2h⬡
@@ -13652,7 +14096,7 @@ We Are All ABA.`;
   // ═══════════════════════════════════════════════════════════════════════
   jsonResponse(res, 404, { 
     error: 'Route not found: ' + method + ' ' + path,
-    available: ['/api/escalate', '/api/escalate/twiml', '/api/escalate/confirm', '/api/call/dial', '/api/call/twiml', '/api/call/status', '/api/call/record', '/api/air/trigger/email', '/api/air/trigger/omi', '/api/air/trigger/calendar', '/api/air/trigger/job', '/api/air/trigger/system', '/api/air/think-tank', '/api/air/caca', '/api/air/erica', '/api/air/grit', '/api/github/push', '/api/sage/search', '/api/sage/index', '/api/iman/draft', '/api/iman/send', '/api/iman/drafts', '/api/devices/register', '/api/devices', '/api/pulse/status', '/api/pulse/trigger', '/api/router', '/api/models/claude', '/api/voice/deepgram-token', '/api/voice/tts', '/api/voice/tts-stream', '/api/omi/manifest', '/api/omi/webhook', '/api/sms/send', '/api/brain/search', '/api/brain/store', '/ws:command-center'],
+    available: ['/api/escalate', '/api/escalate/twiml', '/api/escalate/confirm', '/api/call/dial', '/api/call/twiml', '/api/call/status', '/api/call/record', '/api/air/trigger/email', '/api/air/trigger/omi', '/api/air/trigger/calendar', '/api/air/trigger/job', '/api/air/trigger/system', '/api/air/think-tank', '/api/air/caca', '/api/air/erica', '/api/air/grit', '/api/github/push', '/api/sage/search', '/api/sage/index', '/api/iman/draft', '/api/iman/send', '/api/iman/drafts', '/api/devices/register', '/api/devices', '/api/pulse/status', '/api/pulse/trigger', '/api/router', '/api/models/claude', '/api/voice/deepgram-token', '/api/voice/tts', '/api/voice/tts-stream', '/api/omi/manifest', '/api/omi/webhook', '/api/sms/send', '/api/brain/search', '/api/brain/store', '/api/brain/code-patch', '/api/brain/code-patches', '/api/brain/store-patch', '/api/brain/apply-patch', '/ws:command-center'],
     hint: 'We are all ABA'
   });
 });
