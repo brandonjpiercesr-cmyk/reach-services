@@ -4517,7 +4517,12 @@ async function pulseCheck() {
       if (heartResult.shouldCall) {
         console.log('[PULSE→HEART] Triggering proactive call:', heartResult.reason);
         // Use /api/call/dial endpoint to make the call
-        const callResult = await DIAL_callWithElevenLabs('+13363898116', heartResult.message, {});
+        const callResult = await DIAL_callWithLiveKit('+13363898116', heartResult.message);
+        if (!callResult.success) {
+          // Fallback to ElevenLabs if LiveKit fails
+          const fallback = await DIAL_callWithElevenLabs('+13363898116', heartResult.message, {});
+          if (fallback.success) console.log('[PULSE→HEART] ElevenLabs fallback succeeded');
+        }
         if (callResult.success) {
           console.log('[PULSE→HEART] Proactive call initiated:', callResult.conversation_id);
           // Store that we called so we don't spam
@@ -15087,5 +15092,75 @@ async function HEART_checkProactive(pulseId) {
   
   console.log('[HEART] No urgent items - no call needed');
   return { shouldCall: false, reason: 'no_urgent_items' };
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:AIR:REACH.LIVEKIT_SIP:FUNC:outbound.sip:v1.1.0:20260222⬡
+// LiveKit SIP Outbound - Uses LiveKit's SIP trunk for outbound calls
+// This connects to the same voice agent that handles inbound
+// ═══════════════════════════════════════════════════════════════════════════════
+
+async function LIVEKIT_createSIPOutbound(phoneNumber, firstMessage) {
+  console.log('[LIVEKIT:SIP] Creating outbound call to:', phoneNumber);
+  
+  const LIVEKIT_API_KEY = process.env.LIVEKIT_API_KEY || 'API2S7dhL2a84Mp';
+  const LIVEKIT_API_SECRET = process.env.LIVEKIT_API_SECRET || 'wT95NmmZWztgc32MCz9j4Llq6Trc09KgadlHVISYnxE';
+  const LIVEKIT_URL = (process.env.LIVEKIT_URL || 'wss://aba-aeuea88u.livekit.cloud').replace('wss://', '');
+  
+  // LiveKit SIP requires creating a dispatch rule first, then initiating
+  // For now, use their HTTP API to create an outbound SIP call
+  
+  const roomName = 'outbound-' + Date.now();
+  const participantId = 'aba-caller-' + Date.now();
+  
+  // Create JWT token for LiveKit API
+  const jwt = require('jsonwebtoken');
+  const token = jwt.sign({
+    iss: LIVEKIT_API_KEY,
+    sub: participantId,
+    iat: Math.floor(Date.now() / 1000),
+    exp: Math.floor(Date.now() / 1000) + 3600,
+    video: {
+      room: roomName,
+      roomCreate: true,
+      canPublish: true,
+      canSubscribe: true
+    },
+    sip: {
+      call: true
+    },
+    metadata: JSON.stringify({ firstMessage, type: 'outbound_proactive' })
+  }, LIVEKIT_API_SECRET, { algorithm: 'HS256' });
+  
+  try {
+    // LiveKit SIP API endpoint
+    const result = await httpsRequest({
+      hostname: LIVEKIT_URL,
+      path: '/twirp/livekit.SIP/CreateSIPParticipant',
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Content-Type': 'application/json'
+      }
+    }, JSON.stringify({
+      sip_trunk_id: 'ST_ABA_OUTBOUND', // Need to configure this in LiveKit dashboard
+      sip_call_to: phoneNumber,
+      room_name: roomName,
+      participant_identity: participantId,
+      participant_metadata: JSON.stringify({ firstMessage, proactive: true })
+    }));
+    
+    if (result.status >= 200 && result.status < 300) {
+      console.log('[LIVEKIT:SIP] Outbound call created');
+      return { success: true, roomName, message: 'LiveKit SIP call initiated' };
+    } else {
+      console.log('[LIVEKIT:SIP] API error:', result.status, result.data?.toString());
+      return { success: false, error: 'API error ' + result.status };
+    }
+  } catch (e) {
+    console.log('[LIVEKIT:SIP] Error:', e.message);
+    return { success: false, error: e.message };
+  }
 }
 
