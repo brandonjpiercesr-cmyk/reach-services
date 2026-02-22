@@ -9513,8 +9513,11 @@ Respond as this agent specifically — stay in character.`;
       // HANDLER 3.5: EMAIL SENDING - "Send an email to Eric about..."
       // ⬡B:TOUCH:IMAN.VOICE.EMAIL:handler:20260216⬡
       // ═══════════════════════════════════════════════════════════════════
-      const isEmailRequest = msgLower.includes('send') && msgLower.includes('email') ||
-                            msgLower.includes('email') && msgLower.includes('to');
+      // Exclude "send me an email" - handled by self-email handler below
+      const isSelfEmail = msgLower.match(/send\s+me\s+/i) || msgLower.match(/email\s+me\b/i) || msgLower.match(/me\s+an?\s+email/i);
+      const isEmailRequest = !isSelfEmail && (
+                            (msgLower.includes('send') && msgLower.includes('email')) ||
+                            (msgLower.includes('email') && msgLower.includes('to')));
       
       if (isEmailRequest) {
         console.log('[AIR VOICE TOOL] EMAIL REQUEST DETECTED!');
@@ -9625,8 +9628,9 @@ Respond as this agent specifically — stay in character.`;
       // HANDLER 3.7: SEND EMAIL TO SELF - "Send me an email"
       // ⬡B:TOUCH:IMAN.VOICE.SELF_EMAIL:handler:20260222⬡
       // ═══════════════════════════════════════════════════════════════════
-      const isSelfEmailRequest = msgLower.includes('send') && msgLower.includes('email') && 
-                                  (msgLower.includes(' me ') || msgLower.includes(' myself '));
+      const isSelfEmailRequest = msgLower.includes('email') && 
+                                  (msgLower.match(/send\s+me\s+/i) || msgLower.match(/email\s+me\b/i) || 
+                                   msgLower.includes('myself') || msgLower.match(/me\s+an?\s+email/i));
       
       if (isSelfEmailRequest) {
         console.log('[AIR VOICE TOOL] SELF EMAIL REQUEST DETECTED!');
@@ -9656,9 +9660,13 @@ Respond as this agent specifically — stay in character.`;
       // HANDLER 3.8: TROUBLESHOOTING - Tech questions need web search
       // ⬡B:TOUCH:SAGE.VOICE.TROUBLESHOOT:handler:20260222⬡
       // ═══════════════════════════════════════════════════════════════════
-      const isTroubleshootRequest = msgLower.includes('fix') || msgLower.includes('stuck') || 
-                                     msgLower.includes('not working') || msgLower.includes('how do i') ||
-                                     msgLower.includes('troubleshoot') || msgLower.includes('problem');
+      const isTroubleshootRequest = (msgLower.includes('fix') || msgLower.includes('stuck') || 
+                                     msgLower.includes('not working') || msgLower.includes('not connecting') ||
+                                     msgLower.includes('troubleshoot') || msgLower.includes('problem') ||
+                                     msgLower.includes('broken') || msgLower.includes('help with')) &&
+                                     (msgLower.includes('omi') || msgLower.includes('device') || 
+                                      msgLower.includes('phone') || msgLower.includes('app') ||
+                                      msgLower.includes('computer') || msgLower.includes('light'));
       
       if (isTroubleshootRequest) {
         console.log('[AIR VOICE TOOL] TROUBLESHOOTING REQUEST DETECTED!');
