@@ -2482,7 +2482,7 @@ async function COLE_scour(analysis) {
   try {
 
     // ALWAYS search HAM identities for people questions
-    const peopleWords = ['who', 'is', 'contact', 'call', 'text', 'email'];
+    const peopleWords = ['who', 'is', 'contact', 'call', 'text', 'email', 'kids', 'children', 'wife', 'family', 'brother', 'sister', 'parent', 'mom', 'dad', 'husband', 'name'];
     if (peopleWords.some(w => analysis.raw.toLowerCase().includes(w))) {
       console.log('[COLE] People question detected - searching HAM identities');
       try {
