@@ -5752,17 +5752,35 @@ async function AIR_DISPATCH(lukeAnalysis, judeResult, callerIdentity) {
       if (familyResult.status === 200) {
         const familyData = JSON.parse(familyResult.data.toString());
         if (familyData && familyData.length > 0) {
-          // Build response from family data
+          // Build response from family data - prioritize brandon_family type
           let familyContext = '';
-          for (const f of familyData) {
+          
+          // FIRST: Get entries from brandon_family memory type (most specific)
+          const familyTypeEntries = familyData.filter(f => f.memory_type === 'brandon_family');
+          for (const f of familyTypeEntries) {
             if (f.content && (
-              f.content.toLowerCase().includes('family') ||
               f.content.toLowerCase().includes('children') ||
-              f.content.toLowerCase().includes('wife') ||
               f.content.toLowerCase().includes('bailey') ||
-              familyKeywords.some(kw => f.content.toLowerCase().includes(kw))
+              f.content.toLowerCase().includes('joshua') ||
+              f.content.toLowerCase().includes('jeremiah') ||
+              f.content.toLowerCase().includes('bella')
             )) {
               familyContext += f.content.substring(0, 300) + '\n';
+            }
+          }
+          
+          // SECOND: If no brandon_family entries, fall back to brandon_context
+          if (familyContext.length === 0) {
+            for (const f of familyData) {
+              if (f.content && (
+                f.content.toLowerCase().includes('children') ||
+                f.content.toLowerCase().includes('kids') ||
+                f.content.toLowerCase().includes('wife bethany') ||
+                f.content.toLowerCase().includes('bailey') ||
+                f.content.toLowerCase().includes('four children')
+              )) {
+                familyContext += f.content.substring(0, 300) + '\n';
+              }
             }
           }
           
