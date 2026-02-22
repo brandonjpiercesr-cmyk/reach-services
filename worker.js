@@ -9562,6 +9562,212 @@ Respond as this agent specifically — stay in character.`;
       }
       
       // ═══════════════════════════════════════════════════════════════════
+      // HANDLER 3.6: SMS SENDING - "Text BJ and say whats up"
+      // ⬡B:TOUCH:CARA.VOICE.SMS:handler:20260222⬡
+      // ═══════════════════════════════════════════════════════════════════
+      const isSmsRequest = msgLower.includes('text') && (msgLower.includes('say') || msgLower.includes('tell') || msgLower.includes('message'));
+      
+      if (isSmsRequest) {
+        console.log('[AIR VOICE TOOL] SMS REQUEST DETECTED!');
+        
+        try {
+          // Parse: "text BJ and say whats up bro" → name: "bj", message: "whats up bro"
+          const smsMatch = userMessage.match(/text\s+([a-zA-Z]+(?:\s+[a-zA-Z]+)?)(?:\s+(?:and\s+)?(?:say|tell|message)\s+(.+))?/i);
+          let targetName = smsMatch ? smsMatch[1].trim().toLowerCase() : null;
+          let messageText = smsMatch && smsMatch[2] ? smsMatch[2].trim() : 'Hey, ABA asked me to reach out.';
+          
+          // Remove filler words from name
+          if (targetName) {
+            targetName = targetName.replace(/\b(and|to|for)\b/gi, '').trim();
+          }
+          
+          if (targetName) {
+            // Look up contact in HAM identities
+            const hamResult = await httpsRequest({
+              hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+              path: '/rest/v1/aba_memory?memory_type=eq.ham_identity&content=ilike.*' + encodeURIComponent(targetName) + '*&limit=1',
+              method: 'GET',
+              headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON }
+            });
+            
+            if (hamResult.status === 200) {
+              const contacts = JSON.parse(hamResult.data.toString());
+              if (contacts.length > 0) {
+                const phoneMatch = contacts[0].content.match(/Phone:\s*([+\d]+)/);
+                if (phoneMatch) {
+                  const targetPhone = phoneMatch[1];
+                  console.log('[AIR VOICE TOOL] Sending SMS to', targetName, 'at', targetPhone);
+                  
+                  const smsResult = await sendSMSFromCall(targetPhone, messageText);
+                  
+                  if (smsResult.success) {
+                    return jsonResponse(res, 200, {
+                      response: 'Done! I sent ' + targetName + ' your message: "' + messageText.substring(0, 50) + '"',
+                      sms_sent: true,
+                      target: targetName,
+                      agents: ['CARA', 'HAM']
+                    });
+                  }
+                }
+              }
+            }
+            return jsonResponse(res, 200, {
+              response: 'I could not find a phone number for ' + targetName + '. Can you give me their number?',
+              agents: ['CARA', 'HAM']
+            });
+          }
+        } catch (e) {
+          console.log('[AIR VOICE TOOL] SMS error:', e.message);
+        }
+      }
+      
+      // ═══════════════════════════════════════════════════════════════════
+      // HANDLER 3.7: SEND EMAIL TO SELF - "Send me an email"
+      // ⬡B:TOUCH:IMAN.VOICE.SELF_EMAIL:handler:20260222⬡
+      // ═══════════════════════════════════════════════════════════════════
+      const isSelfEmailRequest = msgLower.includes('send') && msgLower.includes('email') && 
+                                  (msgLower.includes(' me ') || msgLower.includes(' myself '));
+      
+      if (isSelfEmailRequest) {
+        console.log('[AIR VOICE TOOL] SELF EMAIL REQUEST DETECTED!');
+        
+        try {
+          // Parse message content
+          const emailMatch = userMessage.match(/email.*(?:saying|about|with)\s+(.+)/i);
+          const messageContent = emailMatch ? emailMatch[1] : 'Test email from ABA';
+          
+          // Send to Brandon's email
+          const emailResult = await IMAN_sendEmailGmail('brandon@globalmajoritygroup.com', 'ABA Message', messageContent);
+          
+          if (emailResult.success) {
+            return jsonResponse(res, 200, {
+              response: 'Done! I sent you an email with that message.',
+              email_sent: true,
+              target: 'brandon@globalmajoritygroup.com',
+              agents: ['IMAN']
+            });
+          }
+        } catch (e) {
+          console.log('[AIR VOICE TOOL] Self email error:', e.message);
+        }
+      }
+      
+      // ═══════════════════════════════════════════════════════════════════
+      // HANDLER 3.8: TROUBLESHOOTING - Tech questions need web search
+      // ⬡B:TOUCH:SAGE.VOICE.TROUBLESHOOT:handler:20260222⬡
+      // ═══════════════════════════════════════════════════════════════════
+      const isTroubleshootRequest = msgLower.includes('fix') || msgLower.includes('stuck') || 
+                                     msgLower.includes('not working') || msgLower.includes('how do i') ||
+                                     msgLower.includes('troubleshoot') || msgLower.includes('problem');
+      
+      if (isTroubleshootRequest) {
+        console.log('[AIR VOICE TOOL] TROUBLESHOOTING REQUEST DETECTED!');
+        
+        try {
+          // Use web search for troubleshooting
+          const searchResult = await httpsRequest({
+            hostname: 'api.perplexity.ai',
+            path: '/chat/completions',
+            method: 'POST',
+            headers: {
+              'Authorization': 'Bearer ' + (process.env.PERPLEXITY_API_KEY || ''),
+              'Content-Type': 'application/json'
+            }
+          }, JSON.stringify({
+            model: 'llama-3.1-sonar-small-128k-online',
+            messages: [{ role: 'user', content: userMessage + ' Give a brief, helpful answer.' }],
+            max_tokens: 300
+          }));
+          
+          if (searchResult.status === 200) {
+            const searchData = JSON.parse(searchResult.data.toString());
+            const webAnswer = searchData.choices?.[0]?.message?.content;
+            
+            if (webAnswer) {
+              return jsonResponse(res, 200, {
+                response: webAnswer,
+                source: 'web_search',
+                agents: ['SAGE']
+              });
+            }
+          }
+        } catch (e) {
+          console.log('[AIR VOICE TOOL] Troubleshoot search error:', e.message);
+        }
+      }
+
+      // ═══════════════════════════════════════════════════════════════════
+      // HANDLER 3.9: MEMORY SEARCH - "What did we discuss" / "What did X help us do"
+      // ⬡B:TOUCH:COLE.VOICE.MEMORY:handler:20260222⬡
+      // ═══════════════════════════════════════════════════════════════════
+      const isMemoryRequest = msgLower.includes('what did') || msgLower.includes('remember when') ||
+                               msgLower.includes('we talked about') || msgLower.includes('help us do') ||
+                               msgLower.includes('help us with');
+      
+      if (isMemoryRequest) {
+        console.log('[AIR VOICE TOOL] MEMORY SEARCH REQUEST DETECTED!');
+        
+        try {
+          // Extract keywords for search
+          const keywords = userMessage.split(/\s+/)
+            .filter(w => w.length > 3)
+            .filter(w => !['what', 'when', 'where', 'help', 'with', 'about', 'that', 'this', 'they', 'were'].includes(w.toLowerCase()))
+            .slice(0, 5)
+            .join(' ');
+          
+          console.log('[AIR VOICE TOOL] Memory search keywords:', keywords);
+          
+          // Search transcripts and memories
+          const memoryResult = await httpsRequest({
+            hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+            path: '/rest/v1/aba_memory?or=(memory_type.eq.omi_transcript,memory_type.eq.brandon_context)&content=ilike.*' + encodeURIComponent(keywords) + '*&limit=3&order=created_at.desc',
+            method: 'GET',
+            headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON }
+          });
+          
+          if (memoryResult.status === 200) {
+            const memories = JSON.parse(memoryResult.data.toString());
+            if (memories.length > 0) {
+              const memoryContent = memories.map(m => m.content.substring(0, 300)).join(' | ');
+              
+              // Use model to summarize relevant info
+              const summaryResult = await httpsRequest({
+                hostname: 'api.anthropic.com',
+                path: '/v1/messages',
+                method: 'POST',
+                headers: {
+                  'x-api-key': ANTHROPIC_KEY,
+                  'anthropic-version': '2023-06-01',
+                  'Content-Type': 'application/json'
+                }
+              }, JSON.stringify({
+                model: 'claude-sonnet-4-5-20250929',
+                max_tokens: 200,
+                messages: [{
+                  role: 'user',
+                  content: 'Based on this context from my memories: "' + memoryContent + '". Answer this question briefly (2-3 sentences): "' + userMessage + '"'
+                }]
+              }));
+              
+              if (summaryResult.status === 200) {
+                const summaryData = JSON.parse(summaryResult.data.toString());
+                const answer = summaryData.content?.[0]?.text;
+                if (answer) {
+                  return jsonResponse(res, 200, {
+                    response: answer,
+                    source: 'memory_search',
+                    agents: ['COLE', 'PACK']
+                  });
+                }
+              }
+            }
+          }
+        } catch (e) {
+          console.log('[AIR VOICE TOOL] Memory search error:', e.message);
+        }
+      }
+
+      // ═══════════════════════════════════════════════════════════════════
       // HANDLER 4: SINGLE OUTBOUND CALLS - "Call me back" or "Call Eric"
       // ═══════════════════════════════════════════════════════════════════
       const isCallbackRequest = msgLower.includes('call me back') || msgLower.includes('hang up and call') || msgLower.includes('callback');
