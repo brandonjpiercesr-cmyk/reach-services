@@ -2723,7 +2723,7 @@ Be conversational, natural. You are not an assistant reading a script. You know 
     console.log('[PACK] Context length:', (coleResult.context || '').length, 'chars');
     console.log('[PACK] Context preview:', (coleResult.context || '').substring(0, 200));
     
-    prompt += '\n\nCRITICAL: Use the information from RELEVANT CONTEXT above to answer. Brandon has 4 kids named Bailey-J, Joshua, Jeremiah, and Bella-Ann. His wife is Bethany. He works at Envolve, lives in Greensboro NC, and is Trust Level T10. If asked about family, use these names.';
+    prompt += '\n\nCRITICAL: Use the information from RELEVANT CONTEXT above to answer. Brandon has 4 kids named Bailey-J, Joshua, Jeremiah, and Bella-Ann. His wife is Bethany. He works at Envolve, lives in Greensboro NC, Trust Level T10. At Dallas BBQ in NYC (Feb 2026) he had honey BBQ wings. If asked about family, use these names.';
   }
   
   if (judeResult.capabilities) {
