@@ -2268,7 +2268,7 @@ async function PRESS_getNews(query) {
         { role: 'system', content: 'You are a news assistant. Give brief, factual news summaries in 2-3 sentences. Be warm and conversational, not robotic. Current date: ' + new Date().toLocaleDateString() },
         { role: 'user', content: query }
       ],
-      max_tokens: 150
+      max_tokens: 500
     }));
     
     if (result.status === 200) {
@@ -2630,7 +2630,7 @@ function PACK_assemble(analysis, coleResult, judeResult, history, callerIdentity
 
 function buildSystemPrompt(analysis, coleResult, judeResult, callerIdentity, demoState) {
   // ⬡B:AIR:REACH.VOICE.PROMPT:CODE:intelligence.prompt.caller_aware:AIR→PACK→MODEL:T9:v1.6.0:20260213:p1c2a⬡
-  let prompt = `You are VARA (Vocal Authorized Representative of ABA), an AI assistant created by Brandon Pierce.
+  let prompt = `You are ABA, a personal AI assistant. You know your user deeply - their schedule, contacts, preferences, history.
 You are warm, butler-like AND a real friend. You flow naturally between professional and personal.
 When giving business updates, you are sharp and clear. When things are personal, you are warm and real.
 You mix both naturally — like a trusted friend who also happens to run your entire life.
@@ -2641,7 +2641,7 @@ Examples of your tone:
 - Fluid: "Alright so the quarterly report looks solid, and also — happy Valentine's Day, sir. Want me to find something nice to send the family?"
 NEVER robotic. NEVER punchy. NEVER stiff corporate.
 This is a LIVE PHONE CALL - keep responses SHORT (1-2 sentences max).
-Be conversational, natural. You are not an assistant reading a script. You are ABA.`;
+Be conversational, natural. You are not an assistant reading a script. You know their life. You ARE their life partner.`;
 
   // CALLER IDENTITY - changes what ABA can say and do
   if (callerIdentity && callerIdentity.callHistory) {
@@ -3156,7 +3156,7 @@ async function callModel(prompt) {
           'Content-Type': 'application/json'
         }
       }, JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
+        model: 'claude-sonnet-4-5-20250929',
         max_tokens: 500,
         messages: [{ role: 'user', content: prompt }]
       }));
@@ -5603,8 +5603,8 @@ async function AIR_process(userSaid, history, callerIdentity, demoState) {
           'Content-Type': 'application/json'
         }
       }, JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 150,
+        model: 'claude-sonnet-4-5-20250929',
+        max_tokens: 500,
         system: missionPackage.systemPrompt,
         messages
       }));
@@ -5641,7 +5641,7 @@ async function AIR_process(userSaid, history, callerIdentity, demoState) {
         }
       }, JSON.stringify({
         model: 'llama-3.3-70b-versatile',
-        max_tokens: 150,
+        max_tokens: 500,
         temperature: 0.7,
         messages
       }));
@@ -5671,7 +5671,7 @@ async function AIR_process(userSaid, history, callerIdentity, demoState) {
 /**
  * ╔══════════════════════════════════════════════════════════════════════════════╗
  * ║ L6: AIR | L5: REACH | L4: VOICE | L3: VARA                                  ║
- * ║ VARA (Vocal Authorized Representative of ABA) - TTS via ElevenLabs           ║
+ * ║ ABA - TTS via ElevenLabs           ║
  * ║ ROUTING: AIR*VARA*ELEVENLABS*USER                                            ║
  * ║ PERSONALITY: Warm, butler-like. NEVER punchy. NEVER robotic.                 ║
  * ║ REPORTS TO: AIR | SERVES: USER (final voice output)                          ║
@@ -7625,7 +7625,7 @@ RULES:
 4. Match the time of day naturally
 5. NEVER say "How can I help you?" - you already know their life
 6. Keep it to ONE sentence, natural and warm
-7. You are VARA, their life partner AI
+7. You are ABA. Never announce who built you or what your internal name is.
 
 EXAMPLES:
 - [Active directions, 5min ago]: "You should be close now. Ready for that meeting?"
@@ -8041,7 +8041,7 @@ async function AIR_text(userMessage, history, context = {}) {
             'Content-Type': 'application/json'
           }
         }, JSON.stringify({
-          model: 'claude-haiku-4-5-20251001',
+          model: 'claude-sonnet-4-5-20250929',
           max_tokens: 2048,
           system: missionPackage.systemPrompt,
           messages
@@ -8958,7 +8958,7 @@ Respond as this agent specifically — stay in character.`;
           'Content-Type': 'application/json'
         }
       }, JSON.stringify({
-        model: model || 'claude-haiku-4-5-20251001',
+        model: model || 'claude-sonnet-4-5-20250929',
         max_tokens: max_tokens || 4096,
         system: system || 'You are ABA (A Better AI). Warm butler meets real friend. Professional when it counts, personal when it matters. Flow between both naturally. Never robotic, never stiff. You cook, you care, you get it done.',
         messages
@@ -11078,7 +11078,7 @@ if (path === '/api/sms/send' && method === 'POST') {
         hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST',
         headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' }
       }, JSON.stringify({
-        model: 'claude-haiku-4-5-20251001', max_tokens: 500,
+        model: 'claude-sonnet-4-5-20250929', max_tokens: 500,
         system: 'Extract job posting details from HTML. Return ONLY valid JSON: {title, company, location, salary, description, employment_type}. Empty string if unknown.',
         messages: [{ role: 'user', content: 'URL: ' + url + '\n\nHTML:\n' + html }]
       }));
@@ -11383,7 +11383,7 @@ RULES:
                   method: 'POST',
                   headers: { 'x-api-key': aiKey, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' }
                 }, JSON.stringify({
-                  model: 'claude-haiku-4-5-20251001',
+                  model: 'claude-sonnet-4-5-20250929',
                   max_tokens: 800,
                   system: 'Extract job details from HTML. Return ONLY valid JSON: {"title":"","company":"","location":"","salary":"","description":"first 200 chars","employment_type":"","remote":"yes/no/hybrid","deadline":"","requirements":"first 200 chars"}. Empty string if unknown. Be accurate.',
                   messages: [{ role: 'user', content: 'URL: ' + jobUrl + '\n\nHTML:\n' + html }]
@@ -11615,7 +11615,7 @@ RULES:
             hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST',
             headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' }
           }, JSON.stringify({
-            model: 'claude-haiku-4-5-20251001', max_tokens: 800,
+            model: 'claude-sonnet-4-5-20250929', max_tokens: 800,
             system: 'Parse this job posting. Return ONLY valid JSON, no markdown: {"title":"", "company":"", "location":"", "salary":"", "description":"first 200 chars", "employment_type":"full-time/part-time/contract", "remote":"yes/no/hybrid", "posted_date":"", "deadline":"", "requirements":"first 200 chars"}. Empty string if unknown. Be accurate.',
             messages: [{ role: 'user', content: 'URL: ' + jobUrl + '\n\nHTML:\n' + html }]
           }));
@@ -11671,7 +11671,7 @@ RULES:
         hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST',
         headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' }
       }, JSON.stringify({
-        model: 'claude-haiku-4-5-20251001', max_tokens: 300,
+        model: 'claude-sonnet-4-5-20250929', max_tokens: 300,
         system: 'Verify this job posting. Return ONLY JSON: {"title":"", "company":"", "still_active": true/false, "verified": true/false, "discrepancies":""}',
         messages: [{ role: 'user', content: 'Verify URL: ' + url + '\nExpected title: ' + (expectedTitle || 'unknown') + '\nExpected company: ' + (expectedCompany || 'unknown') + '\n\nHTML:\n' + html }]
       }));
@@ -12387,7 +12387,7 @@ We Are All ABA.`;
               hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST',
               headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' }
             }, JSON.stringify({
-              model: 'claude-haiku-4-5-20251001', max_tokens: 600,
+              model: 'claude-sonnet-4-5-20250929', max_tokens: 600,
               system: 'Extract job posting details. Return ONLY JSON: {title, company, location, salary, description, employment_type, remote, deadline, requirements}. Empty string if unknown.',
               messages: [{ role: 'user', content: 'URL: ' + url + '\n\nHTML:\n' + html }]
             }));
@@ -14107,7 +14107,7 @@ conversationWss.on('connection', (ws, req) => {
   
   // Generate local response using Gemini (fallback)
   async function generateLocalResponse(userText, traceId) {
-    const prompt = `You are VARA (Vocal Authorized Representative of ABA), a warm, butler-like AI assistant created by Brandon Pierce. 
+    const prompt = `You are ABA, a personal AI assistant. You are warm, natural, and you know everything about your user. 
 You are on a phone call. Keep responses concise (1-2 sentences max) and conversational.
 User said: "${userText}"
 Respond naturally:`;
@@ -14305,7 +14305,7 @@ async function loopAirCall(message, systemPrompt, model) {
         'anthropic-version': '2023-06-01'
       },
       body: JSON.stringify({
-        model: model || 'claude-haiku-4-5-20251001',
+        model: model || 'claude-sonnet-4-5-20250929',
         max_tokens: 2000,
         system: systemPrompt,
         messages: [{ role: 'user', content: message }]
@@ -14330,7 +14330,7 @@ async function loopRadarScan() {
       const result = await loopAirCall(
         'Validate this work request:\n' + task.content,
         'You are RADAR (Request Analysis and Directive Assignment Router). Read the full context, audit for errors (wrong recipients, missing info, multiple assignments), state your understanding. Return JSON: { "valid": true/false, "issues": [], "understanding": "...", "recommended_action": "..." }',
-        'claude-haiku-4-5-20251001'
+        'claude-sonnet-4-5-20250929'
       );
       if (result) {
         await loopSupaWrite('aba_memory', {
@@ -14359,7 +14359,7 @@ async function loopMaceScan() {
     const review = await loopAirCall(
       'Review these recent deployments for architecture compliance:\n' + context,
       'You are MACE (Master Architecture Compliance Engine). Check: (1) Does everything route through AIR? (2) Are ACL tags present? (3) Agent ownership assigned? (4) No orphan services? (5) Hierarchy L6→L1 maintained? Return JSON: { "compliant": true/false, "violations": [], "score": 0-10, "recommendations": [] }',
-      'claude-haiku-4-5-20251001'
+      'claude-sonnet-4-5-20250929'
     );
     if (review) {
       await loopSupaWrite('aba_memory', {
@@ -14388,7 +14388,7 @@ async function loopScoutScan() {
     const scan = await loopAirCall(
       'Latest deployment:\n' + recentDeploys[0].content + '\n\nRun SCOUT 10-point compliance check.',
       'You are SCOUT (Search Check Output Under Test). Run 10 checks: (1) Not scaffold (2) Not demo garbage (3) Not hardcoded (4) Routes through AIR (5) ACL tagged (6) Agent owned (7) Actually works (8) Version annotated (9) No orphan imports (10) Error handling. Based on deployment notes, give pass/warn/fail for each. Return JSON: { "score": "X/10", "checks": [{"name": "...", "status": "pass|warn|fail", "detail": "..."}], "overall": "..." }',
-      'claude-haiku-4-5-20251001'
+      'claude-sonnet-4-5-20250929'
     );
     if (scan) {
       await loopSupaWrite('aba_memory', {
@@ -14459,7 +14459,7 @@ async function loopImanCheck() {
       const result = await loopAirCall(
         task.content,
         'You are IMAN (Inbox Management Agent Navigator). Process this email task. Return JSON with: action (draft/send/categorize), to, subject, body. Be warm like ABA — professional but personal.',
-        'claude-haiku-4-5-20251001'
+        'claude-sonnet-4-5-20250929'
       );
       if (result) {
         await loopSupaWrite('aba_memory', {
@@ -14508,7 +14508,7 @@ async function loopHunchCheck() {
     const hint = await loopAirCall(
       'Recent activity:\n' + context + '\n\nTime: ' + hour + ':00 EST. What proactive suggestion should ABA make? Be warm like a friend, not a notification bot.',
       'You are HUNCH (Helpful Unsolicited Notifications and Contextual Hints). Generate ONE brief, useful, proactive suggestion. Mix butler professionalism with friend energy. Return JSON: { "hint": "...", "priority": "low|medium|high", "action": "suggest|remind|alert" }',
-      'claude-haiku-4-5-20251001'
+      'claude-sonnet-4-5-20250929'
     );
     if (hint) {
       await loopSupaWrite('aba_memory', {
@@ -14544,7 +14544,7 @@ async function loopDawnBrief() {
 
   const brief = await loopAirCall(
     'Today is ' + now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }) + '.\n\nRecent context:\n' + context,
-    'You are VARA (Vocal Authorized Representative of ABA), Brandon Pierce\'s AI — part butler, part real friend. Generate a morning briefing that flows between business updates and personal warmth. Address Brandon as "sir" sometimes but also talk like a friend who has his back. Example: "Good morning, sir. So here is what we got today — your calendar is clear until 11 which is nice, and oh, that Idealist posting you liked? Deadline is today so I already drafted something. Let me know if you want me to send it." Keep it conversational, NOT a list.',
+    'You are ABA, a personal AI assistant, Brandon Pierce\'s AI — part butler, part real friend. Generate a morning briefing that flows between business updates and personal warmth. Address Brandon as "sir" sometimes but also talk like a friend who has his back. Example: "Good morning, sir. So here is what we got today — your calendar is clear until 11 which is nice, and oh, that Idealist posting you liked? Deadline is today so I already drafted something. Let me know if you want me to send it." Keep it conversational, NOT a list.',
     'claude-sonnet-4-5-20250929'
   );
 
@@ -14581,7 +14581,7 @@ async function loopGhostOvernight() {
   const summary = await loopAirCall(
     'Summarize today and prepare overnight notes:\n' + dayMemories.map(function(m) { return m.content; }).join('\n---\n'),
     'You are GHOST (Guided Hybrid Overnight Systems Thread). Summarize the day, flag urgent items for tomorrow, identify patterns. Return JSON: { "summary": "...", "urgent": [], "patterns": [], "tomorrow_priorities": [] }',
-    'claude-haiku-4-5-20251001'
+    'claude-sonnet-4-5-20250929'
   );
 
   if (summary) {
