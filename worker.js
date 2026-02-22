@@ -9575,13 +9575,30 @@ Respond as this agent specifically — stay in character.`;
         
         try {
           // Parse: "text BJ and say whats up bro" → name: "bj", message: "whats up bro"
-          const smsMatch = userMessage.match(/text\s+([a-zA-Z]+(?:\s+[a-zA-Z]+)?)(?:\s+(?:and\s+)?(?:say|tell|message)\s+(.+))?/i);
-          let targetName = smsMatch ? smsMatch[1].trim().toLowerCase() : null;
-          let messageText = smsMatch && smsMatch[2] ? smsMatch[2].trim() : 'Hey, ABA asked me to reach out.';
+          // Also: "text BJ say whats good" → name: "bj", message: "whats good"
+          let targetName = null;
+          let messageText = 'Hey, ABA asked me to reach out.';
           
-          // Remove filler words from name
-          if (targetName) {
-            targetName = targetName.replace(/\b(and|to|for)\b/gi, '').trim();
+          // Pattern 1: "text NAME and say MESSAGE" or "text NAME say MESSAGE"
+          const match1 = userMessage.match(/text\s+([a-zA-Z]+)(?:\s+and)?\s+(?:say|tell|message)\s+(.+)/i);
+          // Pattern 2: "text NAME MESSAGE" (no say/tell)
+          const match2 = userMessage.match(/text\s+([a-zA-Z]+)\s+(.+)/i);
+          
+          if (match1) {
+            targetName = match1[1].toLowerCase();
+            messageText = match1[2].trim();
+          } else if (match2) {
+            targetName = match2[1].toLowerCase();
+            // Check if second part starts with keywords we should skip
+            if (!['and', 'say', 'tell', 'message'].includes(match2[2].split(' ')[0].toLowerCase())) {
+              messageText = match2[2].trim();
+            }
+          }
+          
+          // Single word extraction fallback
+          if (!targetName) {
+            const nameMatch = userMessage.match(/text\s+([a-zA-Z]+)/i);
+            targetName = nameMatch ? nameMatch[1].toLowerCase() : null;
           }
           
           if (targetName) {
@@ -9628,9 +9645,8 @@ Respond as this agent specifically — stay in character.`;
       // HANDLER 3.7: SEND EMAIL TO SELF - "Send me an email"
       // ⬡B:TOUCH:IMAN.VOICE.SELF_EMAIL:handler:20260222⬡
       // ═══════════════════════════════════════════════════════════════════
-      const isSelfEmailRequest = msgLower.includes('email') && 
-                                  (msgLower.match(/send\s+me\s+/i) || msgLower.match(/email\s+me\b/i) || 
-                                   msgLower.includes('myself') || msgLower.match(/me\s+an?\s+email/i));
+      const isSelfEmailRequest = (msgLower.includes('send') && msgLower.includes('me') && msgLower.includes('email')) ||
+                                  (msgLower.includes('email') && msgLower.includes('me') && !msgLower.includes('to '));
       
       if (isSelfEmailRequest) {
         console.log('[AIR VOICE TOOL] SELF EMAIL REQUEST DETECTED!');
@@ -9672,35 +9688,44 @@ Respond as this agent specifically — stay in character.`;
         console.log('[AIR VOICE TOOL] TROUBLESHOOTING REQUEST DETECTED!');
         
         try {
-          // Use web search for troubleshooting
-          const searchResult = await httpsRequest({
-            hostname: 'api.perplexity.ai',
-            path: '/chat/completions',
+          console.log('[AIR VOICE TOOL] Using Groq for troubleshooting...');
+          // Use Groq for FAST troubleshooting (no web search, just knowledge)
+          const troubleResult = await httpsRequest({
+            hostname: 'api.groq.com',
+            path: '/openai/v1/chat/completions',
             method: 'POST',
             headers: {
-              'Authorization': 'Bearer ' + (process.env.PERPLEXITY_API_KEY || ''),
+              'Authorization': 'Bearer ' + (process.env.GROQ_API_KEY || ''),
               'Content-Type': 'application/json'
             }
           }, JSON.stringify({
-            model: 'llama-3.1-sonar-small-128k-online',
-            messages: [{ role: 'user', content: userMessage + ' Give a brief, helpful answer.' }],
-            max_tokens: 300
+            model: 'llama-3.3-70b-versatile',
+            messages: [{ 
+              role: 'system', 
+              content: 'You are a tech support expert. Give brief, helpful troubleshooting steps. Be concise - max 3 steps.'
+            }, { 
+              role: 'user', 
+              content: userMessage 
+            }],
+            max_tokens: 200,
+            temperature: 0.3
           }));
           
-          if (searchResult.status === 200) {
-            const searchData = JSON.parse(searchResult.data.toString());
-            const webAnswer = searchData.choices?.[0]?.message?.content;
+          if (troubleResult.status === 200) {
+            const troubleData = JSON.parse(troubleResult.data.toString());
+            const answer = troubleData.choices?.[0]?.message?.content;
             
-            if (webAnswer) {
+            if (answer) {
+              console.log('[AIR VOICE TOOL] Troubleshoot answer:', answer.substring(0, 100));
               return jsonResponse(res, 200, {
-                response: webAnswer,
-                source: 'web_search',
+                response: answer,
+                source: 'troubleshoot',
                 agents: ['SAGE']
               });
             }
           }
         } catch (e) {
-          console.log('[AIR VOICE TOOL] Troubleshoot search error:', e.message);
+          console.log('[AIR VOICE TOOL] Troubleshoot error:', e.message);
         }
       }
 
