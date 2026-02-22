@@ -5313,6 +5313,9 @@ async function AIR_DISPATCH(lukeAnalysis, judeResult, callerIdentity) {
   
   // ⬡B:AIR:REACH.DISPATCH.SHADOW:ROUTE:notes.transcripts.vault:v1.0.0:20260216⬡
   // SHADOW Agent - Meeting notes, transcripts, recordings (L3: Manager, VAULT department)
+  // Check for consent words
+  const consentOnlyMessage = ['yes', 'yeah', 'go ahead', 'sure', 'okay', 'ok', 'consent', 'authorize', 'unlock'].some(w => query === w || query.startsWith(w + ' '));
+
   // This is the consent-based data protection agent
   const needsShadow = query.includes('notes') || 
                       query.includes('transcript') || 
@@ -5321,7 +5324,7 @@ async function AIR_DISPATCH(lukeAnalysis, judeResult, callerIdentity) {
                       query.includes('omi') || 
                       query.includes('otter') || 
                       (query.includes('last') && query.includes('night')) ||
-                      agentNames.includes('shadow');
+                      agentNames.includes('shadow') || consentOnlyMessage;
   
   console.log('[AIR DISPATCH] SHADOW check - needsShadow:', needsShadow, '| query:', query.substring(0, 50));
   
