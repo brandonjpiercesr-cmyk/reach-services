@@ -4517,12 +4517,8 @@ async function pulseCheck() {
       if (heartResult.shouldCall) {
         console.log('[PULSE→HEART] Triggering proactive call:', heartResult.reason);
         // Use /api/call/dial endpoint to make the call
-        const callResult = await DIAL_callWithLiveKit('+13363898116', heartResult.message);
-        if (!callResult.success) {
-          // Fallback to ElevenLabs if LiveKit fails
-          const fallback = await DIAL_callWithElevenLabs('+13363898116', heartResult.message, {});
-          if (fallback.success) console.log('[PULSE→HEART] ElevenLabs fallback succeeded');
-        }
+        // LiveKit outbound not configured (no outbound trunk) - use ElevenLabs
+        const callResult = await DIAL_callWithElevenLabs('+13363898116', heartResult.message, {});
         if (callResult.success) {
           console.log('[PULSE→HEART] Proactive call initiated:', callResult.conversation_id);
           // Store that we called so we don't spam
