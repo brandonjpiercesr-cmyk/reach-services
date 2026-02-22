@@ -3157,7 +3157,7 @@ async function callModel(prompt) {
           'Content-Type': 'application/json'
         }
       }, JSON.stringify({
-        model: 'claude-sonnet-4-5-20250929',
+        model: 'claude-haiku-4-5-20251001',
         max_tokens: 500,
         messages: [{ role: 'user', content: prompt }]
       }));
@@ -3287,7 +3287,7 @@ async function callModelDeep(prompt, maxTokens = 2000) {
           'Content-Type': 'application/json'
         }
       }, JSON.stringify({
-        model: 'claude-sonnet-4-5-20250929',
+        model: 'claude-haiku-4-5-20251001',
         max_tokens: maxTokens,
         messages: [{ role: 'user', content: prompt }]
       }));
@@ -5607,7 +5607,7 @@ async function AIR_process(userSaid, history, callerIdentity, demoState) {
           'Content-Type': 'application/json'
         }
       }, JSON.stringify({
-        model: 'claude-sonnet-4-5-20250929',
+        model: 'claude-haiku-4-5-20251001',
         max_tokens: 500,
         system: missionPackage.systemPrompt,
         messages
@@ -8045,7 +8045,7 @@ async function AIR_text(userMessage, history, context = {}) {
             'Content-Type': 'application/json'
           }
         }, JSON.stringify({
-          model: 'claude-sonnet-4-5-20250929',
+          model: 'claude-haiku-4-5-20251001',
           max_tokens: 2048,
           system: missionPackage.systemPrompt,
           messages
@@ -8962,7 +8962,7 @@ Respond as this agent specifically — stay in character.`;
           'Content-Type': 'application/json'
         }
       }, JSON.stringify({
-        model: model || 'claude-sonnet-4-5-20250929',
+        model: model || 'claude-haiku-4-5-20251001',
         max_tokens: max_tokens || 4096,
         system: system || 'You are ABA (A Better AI). Warm butler meets real friend. Professional when it counts, personal when it matters. Flow between both naturally. Never robotic, never stiff. You cook, you care, you get it done.',
         messages
@@ -11082,7 +11082,7 @@ if (path === '/api/sms/send' && method === 'POST') {
         hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST',
         headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' }
       }, JSON.stringify({
-        model: 'claude-sonnet-4-5-20250929', max_tokens: 500,
+        model: 'claude-haiku-4-5-20251001', max_tokens: 500,
         system: 'Extract job posting details from HTML. Return ONLY valid JSON: {title, company, location, salary, description, employment_type}. Empty string if unknown.',
         messages: [{ role: 'user', content: 'URL: ' + url + '\n\nHTML:\n' + html }]
       }));
@@ -11387,7 +11387,7 @@ RULES:
                   method: 'POST',
                   headers: { 'x-api-key': aiKey, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' }
                 }, JSON.stringify({
-                  model: 'claude-sonnet-4-5-20250929',
+                  model: 'claude-haiku-4-5-20251001',
                   max_tokens: 800,
                   system: 'Extract job details from HTML. Return ONLY valid JSON: {"title":"","company":"","location":"","salary":"","description":"first 200 chars","employment_type":"","remote":"yes/no/hybrid","deadline":"","requirements":"first 200 chars"}. Empty string if unknown. Be accurate.',
                   messages: [{ role: 'user', content: 'URL: ' + jobUrl + '\n\nHTML:\n' + html }]
@@ -11619,7 +11619,7 @@ RULES:
             hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST',
             headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' }
           }, JSON.stringify({
-            model: 'claude-sonnet-4-5-20250929', max_tokens: 800,
+            model: 'claude-haiku-4-5-20251001', max_tokens: 800,
             system: 'Parse this job posting. Return ONLY valid JSON, no markdown: {"title":"", "company":"", "location":"", "salary":"", "description":"first 200 chars", "employment_type":"full-time/part-time/contract", "remote":"yes/no/hybrid", "posted_date":"", "deadline":"", "requirements":"first 200 chars"}. Empty string if unknown. Be accurate.',
             messages: [{ role: 'user', content: 'URL: ' + jobUrl + '\n\nHTML:\n' + html }]
           }));
@@ -11675,7 +11675,7 @@ RULES:
         hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST',
         headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' }
       }, JSON.stringify({
-        model: 'claude-sonnet-4-5-20250929', max_tokens: 300,
+        model: 'claude-haiku-4-5-20251001', max_tokens: 300,
         system: 'Verify this job posting. Return ONLY JSON: {"title":"", "company":"", "still_active": true/false, "verified": true/false, "discrepancies":""}',
         messages: [{ role: 'user', content: 'Verify URL: ' + url + '\nExpected title: ' + (expectedTitle || 'unknown') + '\nExpected company: ' + (expectedCompany || 'unknown') + '\n\nHTML:\n' + html }]
       }));
@@ -12391,7 +12391,7 @@ We Are All ABA.`;
               hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST',
               headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' }
             }, JSON.stringify({
-              model: 'claude-sonnet-4-5-20250929', max_tokens: 600,
+              model: 'claude-haiku-4-5-20251001', max_tokens: 600,
               system: 'Extract job posting details. Return ONLY JSON: {title, company, location, salary, description, employment_type, remote, deadline, requirements}. Empty string if unknown.',
               messages: [{ role: 'user', content: 'URL: ' + url + '\n\nHTML:\n' + html }]
             }));
@@ -14309,7 +14309,7 @@ async function loopAirCall(message, systemPrompt, model) {
         'anthropic-version': '2023-06-01'
       },
       body: JSON.stringify({
-        model: model || 'claude-sonnet-4-5-20250929',
+        model: model || 'claude-haiku-4-5-20251001',
         max_tokens: 2000,
         system: systemPrompt,
         messages: [{ role: 'user', content: message }]
@@ -14334,7 +14334,7 @@ async function loopRadarScan() {
       const result = await loopAirCall(
         'Validate this work request:\n' + task.content,
         'You are RADAR (Request Analysis and Directive Assignment Router). Read the full context, audit for errors (wrong recipients, missing info, multiple assignments), state your understanding. Return JSON: { "valid": true/false, "issues": [], "understanding": "...", "recommended_action": "..." }',
-        'claude-sonnet-4-5-20250929'
+        'claude-haiku-4-5-20251001'
       );
       if (result) {
         await loopSupaWrite('aba_memory', {
@@ -14363,7 +14363,7 @@ async function loopMaceScan() {
     const review = await loopAirCall(
       'Review these recent deployments for architecture compliance:\n' + context,
       'You are MACE (Master Architecture Compliance Engine). Check: (1) Does everything route through AIR? (2) Are ACL tags present? (3) Agent ownership assigned? (4) No orphan services? (5) Hierarchy L6→L1 maintained? Return JSON: { "compliant": true/false, "violations": [], "score": 0-10, "recommendations": [] }',
-      'claude-sonnet-4-5-20250929'
+      'claude-haiku-4-5-20251001'
     );
     if (review) {
       await loopSupaWrite('aba_memory', {
@@ -14392,7 +14392,7 @@ async function loopScoutScan() {
     const scan = await loopAirCall(
       'Latest deployment:\n' + recentDeploys[0].content + '\n\nRun SCOUT 10-point compliance check.',
       'You are SCOUT (Search Check Output Under Test). Run 10 checks: (1) Not scaffold (2) Not demo garbage (3) Not hardcoded (4) Routes through AIR (5) ACL tagged (6) Agent owned (7) Actually works (8) Version annotated (9) No orphan imports (10) Error handling. Based on deployment notes, give pass/warn/fail for each. Return JSON: { "score": "X/10", "checks": [{"name": "...", "status": "pass|warn|fail", "detail": "..."}], "overall": "..." }',
-      'claude-sonnet-4-5-20250929'
+      'claude-haiku-4-5-20251001'
     );
     if (scan) {
       await loopSupaWrite('aba_memory', {
@@ -14463,7 +14463,7 @@ async function loopImanCheck() {
       const result = await loopAirCall(
         task.content,
         'You are IMAN (Inbox Management Agent Navigator). Process this email task. Return JSON with: action (draft/send/categorize), to, subject, body. Be warm like ABA — professional but personal.',
-        'claude-sonnet-4-5-20250929'
+        'claude-haiku-4-5-20251001'
       );
       if (result) {
         await loopSupaWrite('aba_memory', {
@@ -14512,7 +14512,7 @@ async function loopHunchCheck() {
     const hint = await loopAirCall(
       'Recent activity:\n' + context + '\n\nTime: ' + hour + ':00 EST. What proactive suggestion should ABA make? Be warm like a friend, not a notification bot.',
       'You are HUNCH (Helpful Unsolicited Notifications and Contextual Hints). Generate ONE brief, useful, proactive suggestion. Mix butler professionalism with friend energy. Return JSON: { "hint": "...", "priority": "low|medium|high", "action": "suggest|remind|alert" }',
-      'claude-sonnet-4-5-20250929'
+      'claude-haiku-4-5-20251001'
     );
     if (hint) {
       await loopSupaWrite('aba_memory', {
@@ -14549,7 +14549,7 @@ async function loopDawnBrief() {
   const brief = await loopAirCall(
     'Today is ' + now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }) + '.\n\nRecent context:\n' + context,
     'You are ABA, a personal AI assistant, Brandon Pierce\'s AI — part butler, part real friend. Generate a morning briefing that flows between business updates and personal warmth. Address Brandon as "sir" sometimes but also talk like a friend who has his back. Example: "Good morning, sir. So here is what we got today — your calendar is clear until 11 which is nice, and oh, that Idealist posting you liked? Deadline is today so I already drafted something. Let me know if you want me to send it." Keep it conversational, NOT a list.',
-    'claude-sonnet-4-5-20250929'
+    'claude-haiku-4-5-20251001'
   );
 
   if (brief) {
@@ -14585,7 +14585,7 @@ async function loopGhostOvernight() {
   const summary = await loopAirCall(
     'Summarize today and prepare overnight notes:\n' + dayMemories.map(function(m) { return m.content; }).join('\n---\n'),
     'You are GHOST (Guided Hybrid Overnight Systems Thread). Summarize the day, flag urgent items for tomorrow, identify patterns. Return JSON: { "summary": "...", "urgent": [], "patterns": [], "tomorrow_priorities": [] }',
-    'claude-sonnet-4-5-20250929'
+    'claude-haiku-4-5-20251001'
   );
 
   if (summary) {
