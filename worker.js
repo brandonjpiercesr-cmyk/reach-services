@@ -4517,8 +4517,8 @@ async function pulseCheck() {
       if (heartResult.shouldCall) {
         console.log('[PULSE→HEART] Triggering proactive call:', heartResult.reason);
         // Use /api/call/dial endpoint to make the call
-        // LiveKit outbound not configured (no outbound trunk) - use ElevenLabs
-        const callResult = await DIAL_callWithElevenLabs('+13363898116', heartResult.message, {});
+        // LiveKit outbound NOW configured - trunk ST_wpAhznWsxYYF
+        const callResult = await DIAL_callWithLiveKit('+13363898116', heartResult.message);
         if (callResult.success) {
           console.log('[PULSE→HEART] Proactive call initiated:', callResult.conversation_id);
           // Store that we called so we don't spam
@@ -14915,7 +14915,7 @@ async function DIAL_callWithLiveKit(phoneNumber, firstMessage) {
     const roomName = 'outbound-' + Date.now();
     
     const requestBody = {
-      sip_trunk_id: 'ST_stfuwxzorVVd', // Need to configure in LiveKit
+      sip_trunk_id: 'ST_wpAhznWsxYYF', // Need to configure in LiveKit
       sip_call_to: phoneNumber,
       room_name: roomName,
       participant_identity: 'aba-outbound',
@@ -15140,7 +15140,7 @@ async function LIVEKIT_createSIPOutbound(phoneNumber, firstMessage) {
         'Content-Type': 'application/json'
       }
     }, JSON.stringify({
-      sip_trunk_id: 'ST_stfuwxzorVVd', // Need to configure this in LiveKit dashboard
+      sip_trunk_id: 'ST_wpAhznWsxYYF', // Need to configure this in LiveKit dashboard
       sip_call_to: phoneNumber,
       room_name: roomName,
       participant_identity: participantId,
