@@ -2502,21 +2502,36 @@ async function COLE_scour(analysis) {
       } catch (e) { console.log('[COLE] HAM search error:', e.message); }
     }
 
-    // Also search for brandon_context (family, kids, etc)
+    // Also search for brandon_context (family, kids, etc) with keyword matching
     try {
+      // Build keyword filter for more relevant context
+      const queryKeywords = analysis.raw.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+      let contextPath = '/rest/v1/aba_memory?or=(memory_type.eq.brandon_context,memory_type.eq.brandon_family)&limit=15';
+      
+      // If query mentions specific topics, filter for them
+      const hasFamily = queryKeywords.some(w => ['kids', 'children', 'family', 'wife', 'brother', 'names', 'bethany'].includes(w));
+      const hasFood = queryKeywords.some(w => ['eat', 'ate', 'food', 'restaurant', 'bbq', 'dallas', 'wings'].includes(w));
+      
+      if (hasFamily) {
+        contextPath = '/rest/v1/aba_memory?or=(memory_type.eq.brandon_context,memory_type.eq.brandon_family)&or=(content.ilike.*family*,content.ilike.*children*,content.ilike.*wife*,content.ilike.*Bailey*)&limit=10';
+      } else if (hasFood) {
+        contextPath = '/rest/v1/aba_memory?memory_type=eq.brandon_context&content=ilike.*' + queryKeywords.find(w => ['bbq', 'dallas', 'restaurant', 'food'].includes(w)) + '*&limit=5';
+      }
+      
       const contextResult = await httpsRequest({
         hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-        path: '/rest/v1/aba_memory?or=(memory_type.eq.brandon_context,memory_type.eq.brandon_family)&limit=5',
+        path: contextPath,
         method: 'GET',
         headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON }
       });
       if (contextResult.status === 200) {
         const ctxData = JSON.parse(contextResult.data.toString());
+        console.log('[COLE] Found', ctxData.length, 'brandon_context entries');
         for (const c of ctxData) {
           memories.push({ id: c.id, content: c.content, type: 'brandon_context', importance: 9 });
         }
       }
-    } catch (e) {}
+    } catch (e) { console.log('[COLE] brandon_context error:', e.message); }
 
     for (const keyword of keywords) {
       const url = `/rest/v1/aba_memory?content=ilike.*${encodeURIComponent(keyword)}*&order=importance.desc&limit=3`;
