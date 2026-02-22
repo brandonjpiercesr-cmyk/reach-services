@@ -4517,7 +4517,7 @@ async function pulseCheck() {
       if (heartResult.shouldCall) {
         console.log('[PULSE→HEART] Triggering proactive call:', heartResult.reason);
         // Use /api/call/dial endpoint to make the call
-        // LiveKit outbound NOW configured - trunk ST_wpAhznWsxYYF
+        // LiveKit outbound NOW configured - trunk ST_PhgMGDVjtNHy
         const callResult = await DIAL_callWithLiveKit('+13363898116', heartResult.message);
         if (callResult.success) {
           console.log('[PULSE→HEART] Proactive call initiated:', callResult.conversation_id);
@@ -8208,6 +8208,23 @@ async function AIR_text(userMessage, history, context = {}) {
   }
   
   const coleResult = await COLE_scour(lukeAnalysis);
+  
+  // ⬡B:AIR:THINK:v1.0.0:20260222⬡ - Deep reasoning before responding
+  let airThinking = null;
+  try {
+    airThinking = await AIR_think(userMessage, coleResult.context, hamIdentity);
+    agents_deployed.push('THINK');
+    if (airThinking.success) {
+      console.log('[AIR] THINK complete - confidence:', airThinking.reasoning?.confidence);
+      
+      // If thinking says we should take action, do it NOW
+      if (airThinking.reasoning?.action_required && airThinking.reasoning.action_required !== 'none') {
+        console.log('[AIR] THINK says action required:', airThinking.reasoning.action_required);
+      }
+    }
+  } catch (e) {
+    console.log('[AIR] THINK skipped:', e.message);
+  }
   agents_deployed.push('COLE');
   
   // JUDE - Smart routing based on intent
@@ -9168,6 +9185,28 @@ Respond as this agent specifically — stay in character.`;
           result.response = validation.suggestion;
           console.log('[AIR:VALIDATOR] Using fallback suggestion');
         }
+      }
+      
+      // ⬡B:AIR:JUDGE:CHECK:final.quality:v1.0.0:20260222⬡
+      // Final quality judgment by AIR_judge
+      try {
+        const judgment = await AIR_judge(message, result.response, result.reasoning);
+        if (judgment.success && judgment.judgment) {
+          console.log('[AIR:JUDGE] Quality score:', judgment.judgment.quality_score);
+          if (!judgment.judgment.approved && judgment.judgment.quality_score < 5) {
+            console.log('[AIR:JUDGE] Low quality - attempting fix');
+            // Try to fix based on suggestion
+            if (judgment.judgment.fix_suggestion) {
+              const fixedResult = await AIR_text(judgment.judgment.fix_suggestion + ' Answer this: ' + message, history || [], { source: 'judge_fix' });
+              if (fixedResult.response) {
+                result.response = fixedResult.response;
+                console.log('[AIR:JUDGE] Applied fix');
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.log('[AIR:JUDGE] Skipped:', e.message);
       }
       
       // RETURN-TO-ME: Post-process logging
@@ -14933,7 +14972,7 @@ async function DIAL_callWithLiveKit(phoneNumber, firstMessage) {
     const roomName = 'outbound-' + Date.now();
     
     const requestBody = {
-      sip_trunk_id: 'ST_wpAhznWsxYYF', // Need to configure in LiveKit
+      sip_trunk_id: SIP_TRUNK_ID,
       sip_call_to: phoneNumber,
       room_name: roomName,
       participant_identity: 'aba-outbound',
@@ -14980,7 +15019,8 @@ function createLiveKitJWT(apiKey, apiSecret, roomName) {
     sub: 'aba-outbound',
     iat: now,
     exp: now + 3600,
-    video: { room: roomName, roomCreate: true, canPublish: true }
+    video: { room: roomName, roomCreate: true, canPublish: true, canSubscribe: true },
+    sip: { call: true, admin: true }
   })).toString('base64url');
   
   const crypto = require('crypto');
@@ -15158,7 +15198,7 @@ async function LIVEKIT_createSIPOutbound(phoneNumber, firstMessage) {
         'Content-Type': 'application/json'
       }
     }, JSON.stringify({
-      sip_trunk_id: 'ST_wpAhznWsxYYF', // Need to configure this in LiveKit dashboard
+      sip_trunk_id: 'ST_PhgMGDVjtNHy', // Need to configure this in LiveKit dashboard
       sip_call_to: phoneNumber,
       room_name: roomName,
       participant_identity: participantId,
@@ -15229,5 +15269,159 @@ function AIR_validateResponse(response, originalQuery) {
   
   // Passed all checks
   return { valid: true };
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:AIR:REACH.THINK:FUNC:deep.reasoning:v1.0.0:20260222⬡
+// AIR_think - Deep reasoning layer before responding
+// Makes AIR think through problems like Claude does internally
+// ═══════════════════════════════════════════════════════════════════════════════
+
+async function AIR_think(query, context, callerIdentity) {
+  console.log('[AIR:THINK] Starting deep reasoning...');
+  
+  const thinkingPrompt = `You are AIR's internal reasoning engine. Think through this step by step BEFORE generating a response.
+
+QUERY: "${query}"
+
+CONTEXT AVAILABLE:
+${context ? context.substring(0, 2000) : 'No context loaded'}
+
+CALLER: ${callerIdentity?.name || 'Unknown'} (Trust: ${callerIdentity?.trust || 'Unknown'})
+
+THINK THROUGH:
+1. INTENT: What is the user REALLY asking for? (not surface level)
+2. AGENTS: Which agents should handle this? Why?
+3. DATA: What data do I need? Do I have it?
+4. GAPS: What information am I missing?
+5. RISKS: Could this response be wrong/harmful/unhelpful?
+6. QUALITY: How can I make this response EXCELLENT, not just okay?
+7. ACTION: Should I DO something (call, text, email) or just ANSWER?
+8. VALIDATE: Is my planned response actually answering the question?
+
+OUTPUT your reasoning as JSON:
+{
+  "intent": "what they really want",
+  "agents_needed": ["AGENT1", "AGENT2"],
+  "have_data": true/false,
+  "missing_info": "what I don't know",
+  "risks": "potential problems",
+  "quality_boost": "how to make response excellent",
+  "action_required": "call/text/email/none",
+  "response_plan": "exactly what I will say/do",
+  "confidence": 1-10
+}`;
+
+  try {
+    const thinkResult = await httpsRequest({
+      hostname: 'api.anthropic.com',
+      path: '/v1/messages',
+      method: 'POST',
+      headers: {
+        'x-api-key': ANTHROPIC_KEY,
+        'anthropic-version': '2023-06-01',
+        'Content-Type': 'application/json'
+      }
+    }, JSON.stringify({
+      model: 'claude-sonnet-4-5-20250929',
+      max_tokens: 1000,
+      messages: [{ role: 'user', content: thinkingPrompt }]
+    }));
+    
+    if (thinkResult.status === 200) {
+      const data = JSON.parse(thinkResult.data.toString());
+      const thinking = data.content?.[0]?.text || '';
+      
+      // Parse the JSON reasoning
+      const jsonMatch = thinking.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const reasoning = JSON.parse(jsonMatch[0]);
+        console.log('[AIR:THINK] Intent:', reasoning.intent);
+        console.log('[AIR:THINK] Agents:', reasoning.agents_needed?.join(', '));
+        console.log('[AIR:THINK] Confidence:', reasoning.confidence);
+        console.log('[AIR:THINK] Action:', reasoning.action_required);
+        return { success: true, reasoning, raw: thinking };
+      }
+    }
+    return { success: false, error: 'Could not parse thinking' };
+  } catch (e) {
+    console.log('[AIR:THINK] Error:', e.message);
+    return { success: false, error: e.message };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:AIR:REACH.JUDGE:FUNC:response.quality:v1.0.0:20260222⬡
+// AIR_judge - Quality check before sending response
+// Like a senior reviewer checking work before it ships
+// ═══════════════════════════════════════════════════════════════════════════════
+
+async function AIR_judge(query, proposedResponse, reasoning) {
+  console.log('[AIR:JUDGE] Evaluating response quality...');
+  
+  const judgePrompt = `You are AIR's quality judge. Evaluate this response BEFORE it goes to the user.
+
+ORIGINAL QUERY: "${query}"
+
+PROPOSED RESPONSE: "${proposedResponse}"
+
+REASONING USED: ${JSON.stringify(reasoning || {})}
+
+JUDGE THIS RESPONSE:
+1. Does it ACTUALLY answer the question? (Yes/No/Partial)
+2. Is there garbage/irrelevant content? (OMI transcripts, logs, etc.)
+3. Is it hallucinating information not in context?
+4. Is the tone right? (warm butler, not robotic)
+5. Should it DO something instead of just talking? (call/text/email)
+6. Overall quality score (1-10)
+
+OUTPUT JSON:
+{
+  "answers_question": "yes/no/partial",
+  "has_garbage": true/false,
+  "garbage_found": "what garbage if any",
+  "hallucinating": true/false,
+  "tone_correct": true/false,
+  "should_take_action": "call/text/email/none",
+  "quality_score": 1-10,
+  "approved": true/false,
+  "fix_suggestion": "how to fix if not approved"
+}`;
+
+  try {
+    const judgeResult = await httpsRequest({
+      hostname: 'api.anthropic.com',
+      path: '/v1/messages',
+      method: 'POST',
+      headers: {
+        'x-api-key': ANTHROPIC_KEY,
+        'anthropic-version': '2023-06-01',
+        'Content-Type': 'application/json'
+      }
+    }, JSON.stringify({
+      model: 'claude-sonnet-4-5-20250929',
+      max_tokens: 500,
+      messages: [{ role: 'user', content: judgePrompt }]
+    }));
+    
+    if (judgeResult.status === 200) {
+      const data = JSON.parse(judgeResult.data.toString());
+      const judgment = data.content?.[0]?.text || '';
+      
+      const jsonMatch = judgment.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const result = JSON.parse(jsonMatch[0]);
+        console.log('[AIR:JUDGE] Quality:', result.quality_score, '/10');
+        console.log('[AIR:JUDGE] Approved:', result.approved);
+        if (!result.approved) console.log('[AIR:JUDGE] Fix:', result.fix_suggestion);
+        return { success: true, judgment: result };
+      }
+    }
+    return { success: false, approved: true }; // Default approve if can't judge
+  } catch (e) {
+    console.log('[AIR:JUDGE] Error:', e.message);
+    return { success: false, approved: true, error: e.message };
+  }
 }
 
