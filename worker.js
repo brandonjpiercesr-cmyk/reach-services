@@ -2506,7 +2506,7 @@ async function COLE_scour(analysis) {
     try {
       const contextResult = await httpsRequest({
         hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-        path: '/rest/v1/aba_memory?memory_type=eq.brandon_context&limit=5',
+        path: '/rest/v1/aba_memory?or=(memory_type.eq.brandon_context,memory_type.eq.brandon_family)&limit=5',
         method: 'GET',
         headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON }
       });
