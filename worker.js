@@ -5535,8 +5535,13 @@ async function AIR_DISPATCH(lukeAnalysis, judeResult, callerIdentity) {
     console.log('[AIR DISPATCH] → L3: DIAL (Outbound Call Agent)');
     try {
       // Extract who to call from query
-      const callMatch = query.match(/(?:call|dial|phone)\s+([\w\s]+)/i);
-      const targetName = callMatch ? callMatch[1].trim() : null;
+      // Parse: "call eric", "call eric lane", "call eric lane for me" → extract "eric lane"
+      const callMatch = query.match(/(?:call|dial|phone)\s+([a-zA-Z]+(?:\s+[a-zA-Z]+)?)/i);
+      let targetName = callMatch ? callMatch[1].trim().toLowerCase() : null;
+      // Remove filler words
+      if (targetName) {
+        targetName = targetName.replace(/\b(for|me|real|quick|now|please|right|up)\b/gi, '').trim();
+      }
       
       if (targetName) {
         // Look up contact in HAM identities
@@ -5575,9 +5580,10 @@ async function AIR_DISPATCH(lukeAnalysis, judeResult, callerIdentity) {
     console.log('[AIR DISPATCH] → L3: CARA (SMS Agent)');
     try {
       // Parse: "text BJ say whats up" or "send sms to mom saying hello"
-      const smsMatch = query.match(/(?:text|sms|message)\s+([\w\s]+?)\s+(?:say|saying|tell|send)\s+(.+)/i);
+      // Parse: "text BJ say whats up" or "text BJ and say yo" → extract name and message
+      const smsMatch = query.match(/(?:text|sms|message)\s+([a-zA-Z]+(?:\s+[a-zA-Z]+)?)(?:\s+and)?\s+(?:say|saying|tell)\s+(.+)/i);
       if (smsMatch) {
-        const targetName = smsMatch[1].trim();
+        let targetName = smsMatch[1].trim().toLowerCase();
         const messageText = smsMatch[2].trim();
         
         // Look up contact
