@@ -5581,7 +5581,7 @@ async function AIR_DISPATCH(lukeAnalysis, judeResult, callerIdentity) {
             if (phoneMatch) {
               const targetPhone = phoneMatch[1];
               console.log('[AIR DISPATCH] DIAL: Found phone for', targetName, ':', targetPhone);
-              const dialResult = await DIAL_callWithElevenLabs(targetPhone, 'Hey, ABA is connecting you with ' + (callerIdentity?.name || 'your contact') + '.', {});
+              const dialResult = await DIAL_callWithLiveKit(targetPhone, firstMessage);
               if (dialResult.success) {
                 return { handled: true, agent: 'DIAL', data: 'Calling ' + targetName + ' now at ' + targetPhone + '.', type: 'call' };
               }
@@ -8653,7 +8653,7 @@ const httpServer = http.createServer(async (req, res) => {
             console.log("[CRON] DAWN BRIEFING SKIPPED - Now handled by ABACIA ThinkLoop");
             results.push({ target: call.target_name, status: "skipped_abacia_handles" });
             continue; // Skip DAWN - ABACIA handles it
-            callResult = await DAWN_makeCall(call.target_phone, call.target_name);
+            callResult = await DIAL_callWithLiveKit(call.target_phone, "Scheduled call from ABA");
             
             if (callResult.success) {
               results.push({
@@ -9150,7 +9150,25 @@ Respond as this agent specifically — stay in character.`;
       
       // Default: route through AIR_text (LUKE/COLE/JUDE/PACK)
       console.log('[ROUTER] Routing message through AIR: "' + message.substring(0, 80) + '"');
-      const result = await AIR_text(message, history || [], { source: body.source || "api", channel: body.channel || "chat", caller_number: body.caller_number, ham_id: body.ham_id });
+      let result = await AIR_text(message, history || [], { source: body.source || "api", channel: body.channel || "chat", caller_number: body.caller_number, ham_id: body.ham_id });
+      
+      // ⬡B:AIR:VALIDATOR:CHECK:response.quality:v1.0.0:20260222⬡
+      // Validate response before sending - reject garbage
+      const validation = AIR_validateResponse(result.response, message);
+      if (!validation.valid) {
+        console.log('[AIR:VALIDATOR] Rejected response:', validation.reason);
+        // Try once more with explicit instruction
+        const retryResult = await AIR_text(validation.suggestion + ' Original question: ' + message, history || [], { source: 'retry', channel: body.channel || 'chat', caller_number: body.caller_number });
+        const retryValidation = AIR_validateResponse(retryResult.response, message);
+        if (retryValidation.valid) {
+          result = retryResult;
+          console.log('[AIR:VALIDATOR] Retry succeeded');
+        } else {
+          // Give up, use fallback
+          result.response = validation.suggestion;
+          console.log('[AIR:VALIDATOR] Using fallback suggestion');
+        }
+      }
       
       // RETURN-TO-ME: Post-process logging
       console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
@@ -12411,7 +12429,7 @@ We Are All ABA.`;
         const spokenMessage = message || 'Hey, this is ABA calling as requested.';
         
         try {
-          const dialResult = await DIAL_callWithElevenLabs(targetPhone, spokenMessage, source || 'escalate');
+          const dialResult = await DIAL_callWithLiveKit(targetPhone, spokenMessage);
           
           
       // RETURN-TO-ME: Post-process logging
@@ -14006,7 +14024,7 @@ httpServer.listen(PORT, '0.0.0.0', () => {
             let callResult;
             
             if (call.call_type === 'dawn_briefing') {
-              callResult = await DAWN_makeCall(call.target_phone, call.target_name);
+              callResult = await DIAL_callWithLiveKit(call.target_phone, "Scheduled call from ABA");
             } else {
               // Regular scheduled call via ElevenLabs
               const apiResult = await httpsRequest({
@@ -14906,7 +14924,7 @@ async function DIAL_callWithLiveKit(phoneNumber, firstMessage) {
   
   if (!LIVEKIT_API_KEY || !LIVEKIT_API_SECRET) {
     console.log('[DIAL:LIVEKIT] Missing credentials, falling back to ElevenLabs');
-    return await DIAL_callWithElevenLabs(phoneNumber, firstMessage, {});
+    return await DIAL_callWithLiveKit(phoneNumber, firstMessage);
   }
   
   try {
@@ -14945,11 +14963,11 @@ async function DIAL_callWithLiveKit(phoneNumber, firstMessage) {
       return { success: true, callId: data.call_id, message: 'Calling via LiveKit' };
     } else {
       console.log('[DIAL:LIVEKIT] API error:', result.status, 'falling back to ElevenLabs');
-      return await DIAL_callWithElevenLabs(phoneNumber, firstMessage, {});
+      return await DIAL_callWithLiveKit(phoneNumber, firstMessage);
     }
   } catch (e) {
     console.log('[DIAL:LIVEKIT] Error:', e.message, 'falling back to ElevenLabs');
-    return await DIAL_callWithElevenLabs(phoneNumber, firstMessage, {});
+    return await DIAL_callWithLiveKit(phoneNumber, firstMessage);
   }
 }
 
@@ -15158,5 +15176,58 @@ async function LIVEKIT_createSIPOutbound(phoneNumber, firstMessage) {
     console.log('[LIVEKIT:SIP] Error:', e.message);
     return { success: false, error: e.message };
   }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:AIR:REACH.VALIDATOR:FUNC:response.quality:v1.0.0:20260222⬡
+// AIR_validateResponse - Checks response quality before sending
+// Rejects garbage responses (random OMI transcripts, non-sequiturs, etc.)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function AIR_validateResponse(response, originalQuery) {
+  if (!response || typeof response !== 'string') {
+    console.log('[AIR:VALIDATOR] Empty response - rejecting');
+    return { valid: false, reason: 'empty', suggestion: 'I did not understand that. Can you say it again?' };
+  }
+  
+  const query = (originalQuery || '').toLowerCase();
+  const resp = response.toLowerCase();
+  
+  // Check for OMI transcript leakage when not asked for transcripts
+  const askedForTranscript = query.includes('transcript') || query.includes('recording') || query.includes('omi') || query.includes('meeting') || query.includes('notes');
+  const hasOmiLeak = resp.includes('omi transcript') || resp.includes('omi_transcript') || resp.startsWith('omi ');
+  
+  if (hasOmiLeak && !askedForTranscript) {
+    console.log('[AIR:VALIDATOR] OMI transcript leak in non-transcript query - rejecting');
+    return { valid: false, reason: 'omi_leak', suggestion: 'Let me think about that differently. What exactly would you like to know?' };
+  }
+  
+  // Check for random activity logs
+  const hasActivityLog = resp.includes('activity:') || resp.includes('omi request log');
+  if (hasActivityLog && !query.includes('activity') && !query.includes('log')) {
+    console.log('[AIR:VALIDATOR] Activity log leak - rejecting');
+    return { valid: false, reason: 'activity_leak', suggestion: 'I got distracted. Let me focus on your question.' };
+  }
+  
+  // Check for non-sequitur (response completely unrelated to query)
+  // Simple check: if query asks about person but response talks about weather
+  const asksAboutPerson = query.includes('who') || query.includes('contact') || query.includes('call') || query.includes('text');
+  const talksAboutWeather = resp.includes('degrees') || resp.includes('cloudy') || resp.includes('weather');
+  if (asksAboutPerson && talksAboutWeather && !query.includes('weather')) {
+    console.log('[AIR:VALIDATOR] Non-sequitur detected - rejecting');
+    return { valid: false, reason: 'non_sequitur', suggestion: 'I got confused. Let me try again - who did you want to know about?' };
+  }
+  
+  // Check for greeting when asked a specific question
+  const isSpecificQuestion = query.includes('what') || query.includes('who') || query.includes('how many') || query.includes('where');
+  const isJustGreeting = (resp.includes('hey brandon') || resp.includes('good morning') || resp.includes('how can i help')) && resp.length < 100;
+  if (isSpecificQuestion && isJustGreeting) {
+    console.log('[AIR:VALIDATOR] Greeting instead of answer - rejecting');
+    return { valid: false, reason: 'greeting_instead', suggestion: 'Let me actually answer your question...' };
+  }
+  
+  // Passed all checks
+  return { valid: true };
 }
 
