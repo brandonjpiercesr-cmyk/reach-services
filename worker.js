@@ -5620,9 +5620,10 @@ async function AIR_DISPATCH(lukeAnalysis, judeResult, callerIdentity) {
   if ((query.includes('send email') || query.includes('email ')) && (query.includes('say') || query.includes('tell') || query.includes('about'))) {
     console.log('[AIR DISPATCH] → L3: IMAN SEND (Email Send Agent)');
     try {
-      const emailMatch = query.match(/(?:send email to|email)\s+([\w\s]+?)\s+(?:say|saying|tell|about)\s+(.+)/i);
+      // Parse: "email eric lane and tell him X" or "send email to eric say X"
+      const emailMatch = query.match(/(?:send email to|email)\s+([a-zA-Z]+(?:\s+[a-zA-Z]+)?)(?:\s+and)?\s+(?:say|saying|tell|tell him|tell her|about)\s+(.+)/i);
       if (emailMatch) {
-        const targetName = emailMatch[1].trim();
+        let targetName = emailMatch[1].trim().toLowerCase();
         const messageText = emailMatch[2].trim();
         
         // Look up contact email
