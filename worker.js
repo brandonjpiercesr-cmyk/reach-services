@@ -2719,7 +2719,11 @@ Be conversational, natural. You are not an assistant reading a script. You know 
 
   if (coleResult.context) {
     prompt += '\n\nRELEVANT CONTEXT FROM MEMORY:\n' + coleResult.context;
-    prompt += '\n\nCRITICAL: ONLY use information from the RELEVANT CONTEXT above. If asked about people, family, work, location - ONLY answer from context. If the answer is not in context, say you do not have that information. NEVER make up names, places, or facts. NEVER hallucinate. Brandon has 4 kids, works at Envolve, lives in Greensboro NC, and is Trust Level T10.';
+    // Log context for debugging
+    console.log('[PACK] Context length:', (coleResult.context || '').length, 'chars');
+    console.log('[PACK] Context preview:', (coleResult.context || '').substring(0, 200));
+    
+    prompt += '\n\nCRITICAL: Use the information from RELEVANT CONTEXT above to answer. Brandon has 4 kids named Bailey-J, Joshua, Jeremiah, and Bella-Ann. His wife is Bethany. He works at Envolve, lives in Greensboro NC, and is Trust Level T10. If asked about family, use these names.';
   }
   
   if (judeResult.capabilities) {
