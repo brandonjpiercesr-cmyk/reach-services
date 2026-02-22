@@ -4517,7 +4517,7 @@ async function pulseCheck() {
       if (heartResult.shouldCall) {
         console.log('[PULSE→HEART] Triggering proactive call:', heartResult.reason);
         // Use /api/call/dial endpoint to make the call
-        // LiveKit outbound NOW configured - trunk ST_PhgMGDVjtNHy
+        // LiveKit outbound NOW configured - trunk ST_TXoR3s2TEDfK
         const callResult = await DIAL_callWithLiveKit('+13363898116', heartResult.message);
         if (callResult.success) {
           console.log('[PULSE→HEART] Proactive call initiated:', callResult.conversation_id);
@@ -15198,7 +15198,7 @@ async function LIVEKIT_createSIPOutbound(phoneNumber, firstMessage) {
         'Content-Type': 'application/json'
       }
     }, JSON.stringify({
-      sip_trunk_id: 'ST_PhgMGDVjtNHy', // Need to configure this in LiveKit dashboard
+      sip_trunk_id: 'ST_TXoR3s2TEDfK', // Need to configure this in LiveKit dashboard
       sip_call_to: phoneNumber,
       room_name: roomName,
       participant_identity: participantId,
