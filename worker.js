@@ -9666,62 +9666,108 @@ Respond as this agent specifically — stay in character.`;
       addToConversationHistory(conversationId, 'user', userMessage);
       
       let responseText = "I understand. Let me help you with that.";
+      let airResult = null;
+      let agentsDeployed = [];
+      let missionTrace = '';
+      let missionNumber = '';
       
-      // ⬡B:AIR:VOICE_TOOL_DIRECT:v3.1.0:20260222⬡
-      // Use AIR_text DIRECTLY instead of calling external ABACIA service
-      // This gives voice the SAME brain access as text chat
+      // ⬡B:AIR:VOICE_TOOL_SMART:v4.0.0:20260222⬡
+      // FULL AIR deployment - same as text router
+      // THINK → AGENTS → JUDGE → RETURN-TO-ME
       try {
-        console.log('[AIR VOICE TOOL] Using AIR_text directly for:', userMessage);
-        const airResult = await AIR_text(userMessage, conversationHistory || [], {
+        console.log('[AIR VOICE TOOL] ═══ FULL AIR DEPLOYMENT ═══');
+        console.log('[AIR VOICE TOOL] Query:', userMessage);
+        console.log('[AIR VOICE TOOL] Caller:', callerIdentity?.name || 'Unknown');
+        
+        // STEP 1: AIR_text with FULL agent deployment
+        airResult = await AIR_text(userMessage, conversationHistory || [], {
           source: 'elevenlabs_voice',
           channel: 'phone',
           caller_number: callerNumber,
           ham_id: callerIdentity?.id
         });
         
-        if (airResult && airResult.response) {
-          responseText = airResult.response;
-          console.log('[AIR VOICE TOOL] AIR_text success, response:', responseText.substring(0, 100));
-        } else {
-          console.log('[AIR VOICE TOOL] AIR_text returned empty');
+        if (airResult) {
+          responseText = airResult.response || responseText;
+          agentsDeployed = airResult.agents || [];
+          missionTrace = airResult.trace || '';
+          missionNumber = airResult.missionNumber || '';
+          
+          console.log('[AIR VOICE TOOL] ✓ Agents deployed:', agentsDeployed.join(', '));
+          console.log('[AIR VOICE TOOL] ✓ Trace:', missionTrace);
+          console.log('[AIR VOICE TOOL] ✓ Mission:', missionNumber);
         }
+        
+        // STEP 2: AIR_judge quality check
+        if (responseText && responseText.length > 10) {
+          try {
+            const judgment = await AIR_judge(userMessage, responseText, { agents: agentsDeployed });
+            if (judgment.success && judgment.judgment) {
+              console.log('[AIR VOICE TOOL] Quality score:', judgment.judgment.quality_score, '/10');
+              
+              // If low quality, try to improve
+              if (judgment.judgment.quality_score < 5 && judgment.judgment.fix_suggestion) {
+                console.log('[AIR VOICE TOOL] Low quality - attempting fix...');
+                const retryResult = await AIR_text(judgment.judgment.fix_suggestion + ' ' + userMessage, [], { source: 'voice_retry' });
+                if (retryResult && retryResult.response && retryResult.response.length > responseText.length) {
+                  responseText = retryResult.response;
+                  agentsDeployed = [...agentsDeployed, 'JUDGE_RETRY'];
+                  console.log('[AIR VOICE TOOL] ✓ Improved response');
+                }
+              }
+            }
+          } catch (e) {
+            console.log('[AIR VOICE TOOL] Judge skipped:', e.message);
+          }
+        }
+        
       } catch (e) {
         console.log('[AIR VOICE TOOL] AIR_text error:', e.message);
       }
       
-      console.log('[AIR VOICE TOOL] Response:', responseText.substring(0, 100) + '...');
+      console.log('[AIR VOICE TOOL] Final response:', responseText.substring(0, 150) + '...');
       
-      // Add ABA response to conversation history
+      // Add to conversation history
       addToConversationHistory(conversationId, 'assistant', responseText);
       
-      // Broadcast response to Command Center
+      // RETURN-TO-ME: ACTUAL implementation
+      // 1. LOGFUL - Log to brain with full context
+      const missionLog = {
+        content: 'VOICE MISSION [' + (missionNumber || conversationId) + ']: ' +
+                 'Query="' + userMessage + '" | ' +
+                 'Agents=[' + agentsDeployed.join(',') + '] | ' +
+                 'Trace=' + missionTrace + ' | ' +
+                 'Response="' + responseText.substring(0, 200) + '"',
+        memory_type: 'mission_log',
+        categories: ['voice', 'mission', 'air'],
+        importance: 6,
+        source: 'voice_mission_' + Date.now(),
+        tags: ['voice', 'mission', 'agents', ...agentsDeployed.slice(0, 5)]
+      };
+      storeToBrain(missionLog).catch(e => console.log('[LOGFUL] Error:', e.message));
+      
+      // 2. Broadcast to Command Center with FULL mission data
       broadcastToCommandCenter({
-        type: 'voice_response',
-        source: 'abacia',
+        type: 'voice_mission_complete',
+        source: 'AIR',
         conversation_id: conversationId,
-        aba_said: responseText,
+        mission_number: missionNumber,
+        query: userMessage,
+        response: responseText,
+        agents_deployed: agentsDeployed,
+        trace: missionTrace,
         timestamp: new Date().toISOString()
       });
       
-      // Store in brain
-      storeToBrain({
-        content: 'VOICE CALL [' + conversationId + ']: User said "' + userMessage + '" | ABA responded "' + responseText + '"',
-        memory_type: 'voice_transcript',
-        categories: ['voice', 'elevenlabs', 'conversation'],
-        importance: 5,
-        tags: ['voice', 'elevenlabs', 'transcript']
-      }).catch(e => console.log('[BRAIN] Store error:', e.message));
+      console.log('[AIR VOICE TOOL] ═══ MISSION COMPLETE ═══');
       
       // Return response for ElevenLabs to speak
-      
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, {
         response: responseText,
-        conversation_id: conversationId
+        conversation_id: conversationId,
+        agents: agentsDeployed,
+        trace: missionTrace,
+        mission: missionNumber
       });
       
     } catch (e) {
