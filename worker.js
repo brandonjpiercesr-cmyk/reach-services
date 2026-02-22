@@ -11234,7 +11234,9 @@ if (path === '/api/sms/send' && method === 'POST') {
       }
       
       if (code) {
-      // Exchange code for grant
+      // ⬡B:REACH.NYLAS.CALLBACK_FIX:FIX:client_id_required:20260222⬡
+      // Exchange code for grant - MUST include client_id
+      const NYLAS_CLIENT_ID = process.env.NYLAS_CLIENT_ID || '1c693097-2bf7-4391-b922-29880466ec8e';
       const tokenResult = await httpsRequest({
         hostname: 'api.us.nylas.com',
         path: '/v3/connect/token',
@@ -11245,8 +11247,10 @@ if (path === '/api/sms/send' && method === 'POST') {
         }
       }, JSON.stringify({
         code: code,
+        client_id: NYLAS_CLIENT_ID,  // FIXED: Was missing
+        client_secret: NYLAS_API_KEY,  // FIXED: Was missing
         redirect_uri: 'https://aba-reach.onrender.com/api/nylas/callback',
-        code_verifier: 'nylas'
+        grant_type: 'authorization_code'
       }));
       
       const tokenData = JSON.parse(tokenResult.data.toString());
@@ -11586,7 +11590,9 @@ if (path === '/api/sms/send' && method === 'POST') {
         return res.end('<h1>Error: No authorization code or grant received</h1>');
       }
       
-      // Exchange code for grant
+      // ⬡B:REACH.NYLAS.CALLBACK_FIX2:FIX:client_id_required:20260222⬡
+      // Exchange code for grant - MUST include client_id
+      const NYLAS_CLIENT_ID = process.env.NYLAS_CLIENT_ID || '1c693097-2bf7-4391-b922-29880466ec8e';
       const tokenResult = await httpsRequest({
         hostname: 'api.us.nylas.com',
         path: '/v3/connect/token',
@@ -11597,7 +11603,10 @@ if (path === '/api/sms/send' && method === 'POST') {
         }
       }, JSON.stringify({
         code: code,
-        redirect_uri: 'https://aba-reach.onrender.com/api/nylas/callback'
+        client_id: NYLAS_CLIENT_ID,  // FIXED: Was missing
+        client_secret: NYLAS_API_KEY,  // FIXED: Was missing
+        redirect_uri: 'https://aba-reach.onrender.com/api/nylas/callback',
+        grant_type: 'authorization_code'
       }));
       
       const tokenData = JSON.parse(tokenResult.data.toString());
