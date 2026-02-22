@@ -3037,13 +3037,12 @@ async function JUDE_decideEscalation(lukeAnalysis, coleContext) {
   
   // Decide action based on urgency
   let action = 'log_only';
-  // THROTTLED CALLS - Only TRUE emergencies (urgency 6) get calls
-  // Everything else goes to SMS to avoid blowing up Brandon's phone
+  // ⬡B:REACH.CARA.SMS_THRESHOLD:FIX:reduce_sms_flood:20260222⬡
+  // FIXED: Only SMS for urgency 5+, email for 3-4, reduces SMS from 665/day to ~20/day
   if (urgency >= 6) action = 'call_emergency'; // RE-ENABLED
   else if (urgency >= 5) action = 'sms_only';
-  else if (urgency >= 4) action = 'sms_only';
-  else if (urgency >= 3) action = 'sms_only';
-  else if (urgency >= 2) action = 'email_only';
+  else if (urgency >= 3) action = 'email_only'; // CHANGED from sms_only
+  else if (urgency >= 2) action = 'log_only';   // CHANGED from email_only
   else action = 'log_only';
   
   return {
@@ -3325,7 +3324,48 @@ async function callModel(prompt) {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 // Trigger: Email received (called by IMAN when email arrives)
+// ⬡B:REACH.IMAN.SPAM_FILTER:FIX:spam_prevention:20260222⬡
+// SPAM FILTER: Ignore mailer-daemon, noreply, and system emails
+const SPAM_SENDERS = [
+  'mailer-daemon@', 'noreply@', '-noreply@', 'no-reply@',
+  'postmaster@', 'daemon@', 'bounce@', 'donotreply@', 'do-not-reply@',
+  'notifications@', 'notification@', 'alert@', 'alerts@', 'system@'
+];
+
+const SPAM_SUBJECTS = [
+  'delivery status notification', 'undeliverable', 'returned mail',
+  'out of office', 'automatic reply', 'mail delivery subsystem',
+  'delivery failed', 'mail delivery failed', 'undelivered mail'
+];
+
+const INTERNAL_SENDERS = [
+  'claudette@globalmajoritygroup.com'  // ABA's own emails - no escalation needed
+];
+
+function classifyEmail(email) {
+  const from = (email.from || '').toLowerCase();
+  const subject = (email.subject || '').toLowerCase();
+  
+  if (SPAM_SENDERS.some(s => from.includes(s))) return 'spam';
+  if (SPAM_SUBJECTS.some(s => subject.includes(s))) return 'spam';
+  if (INTERNAL_SENDERS.some(s => from.includes(s))) return 'internal';
+  return 'process';
+}
+
 async function TRIGGER_emailReceived(email) {
+  // ⬡B:REACH.IMAN.SPAM_CHECK:FIX:20260222⬡ Check spam BEFORE escalating
+  const emailType = classifyEmail(email);
+  
+  if (emailType === 'spam') {
+    console.log('[IMAN SPAM FILTER] Ignoring spam from:', email.from);
+    return { triggered: false, reason: 'Spam email filtered', from: email.from };
+  }
+  
+  if (emailType === 'internal') {
+    console.log('[IMAN SPAM FILTER] Skipping internal email from:', email.from);
+    return { triggered: false, reason: 'Internal email - no escalation', from: email.from };
+  }
+  
   return AIR_escalate({
     type: 'email_received',
     source: 'IMAN',
@@ -10219,10 +10259,45 @@ Respond as this agent specifically — stay in character.`;
   // ⬡B:AIR:REACH.API.OMI_WEBHOOK:CODE:senses.omi.transcript:OMI→REACH→TASTE→BRAIN:T7:v1.5.0:20260213:o1w2h⬡ /api/omi/webhook
   // Receives transcripts from OMI and stores in ABA Brain via TASTE
   // ═══════════════════════════════════════════════════════════════════════
+  // ⬡B:REACH.OMI.DEDUP:FIX:duplicate_prevention:20260222⬡
+  // DEDUPLICATION: Prevent duplicate OMI transcripts from being stored
+  const omiProcessedSegments = new Map();
+  const OMI_DEDUP_WINDOW = 60000; // 1 minute window
+  
+  function isOmiDuplicate(segmentId, segmentText) {
+    const now = Date.now();
+    // Clean old entries
+    for (const [id, data] of omiProcessedSegments) {
+      if (now - data.ts > OMI_DEDUP_WINDOW) omiProcessedSegments.delete(id);
+    }
+    // Check for exact ID match
+    if (omiProcessedSegments.has(segmentId)) {
+      console.log('[OMI DEDUP] Skipping duplicate segment:', segmentId);
+      return true;
+    }
+    // Check for similar text within window (catch reordered JSON)
+    const textHash = segmentText.substring(0, 100);
+    for (const [id, data] of omiProcessedSegments) {
+      if (data.textHash === textHash && now - data.ts < 5000) {
+        console.log('[OMI DEDUP] Skipping similar text within 5s');
+        return true;
+      }
+    }
+    omiProcessedSegments.set(segmentId, { ts: now, textHash });
+    return false;
+  }
+
   if (path === '/api/omi/webhook' && method === 'POST') {
     try {
       const body = await parseBody(req);
       console.log('[OMI] Webhook received:', JSON.stringify(body).substring(0, 200));
+      
+      // ⬡B:REACH.OMI.DEDUP_CHECK:FIX:20260222⬡ Check for duplicates FIRST
+      const segmentId = body.segments?.[0]?.id || body.id || `${body.session_id}-${Date.now()}`;
+      const segmentText = body.segments?.map(s => s.text).join(' ') || body.text || body.transcript || '';
+      if (isOmiDuplicate(segmentId, segmentText)) {
+        return jsonResponse(res, 200, { status: 'duplicate', skipped: true, reason: 'Already processed within 60s' });
+      }
 
       // ═══ REQUEST LOGGER - stores every incoming OMI request for debugging ═══
       const logEntry = {
