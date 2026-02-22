@@ -80,6 +80,91 @@ const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://htlxjkbrst
 const SUPABASE_KEY = process.env.SUPABASE_KEY_KEY || process.env.SUPABASE_KEY_ROLE_KEY;
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0bHhqa2Jyc3Rwd3d0enNieXZiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA1MzI4MjEsImV4cCI6MjA4NjEwODgyMX0.MOgNYkezWpgxTO3ZHd0omZ0WLJOOR-tL7hONXWG9eBw';
 
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:AIR:REACH.TRAINING.LOADER:CODE:training.brain:v1.0.0:20260222⬡
+// Load AIR training from brain - makes AIR think like LLMs
+// ═══════════════════════════════════════════════════════════════════════════════
+
+let AIR_TRAINING_CACHE = null;
+let AIR_TRAINING_LOADED_AT = null;
+
+async function loadAIRTraining() {
+  // Cache for 5 minutes
+  if (AIR_TRAINING_CACHE && AIR_TRAINING_LOADED_AT && (Date.now() - AIR_TRAINING_LOADED_AT) < 300000) {
+    return AIR_TRAINING_CACHE;
+  }
+  
+  try {
+    const url = SUPABASE_URL + '/rest/v1/aba_memory?source=ilike.air.%.system%25&select=content&is_system=eq.true';
+    const response = await fetch(url, {
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': 'Bearer ' + SUPABASE_KEY
+      }
+    });
+    
+    if (!response.ok) {
+      console.log('[AIR TRAINING] Failed to load from brain:', response.status);
+      return '';
+    }
+    
+    const data = await response.json();
+    if (data && data.length > 0) {
+      AIR_TRAINING_CACHE = data.map(d => d.content).join('\n\n---\n\n');
+      AIR_TRAINING_LOADED_AT = Date.now();
+      console.log('[AIR TRAINING] Loaded', data.length, 'training docs from brain');
+      return AIR_TRAINING_CACHE;
+    }
+    return '';
+  } catch (e) {
+    console.log('[AIR TRAINING] Error loading:', e.message);
+    return '';
+  }
+}
+
+// Load HAM-specific context (replaces hardcoded Brandon info)
+async function loadHAMContext(callerIdentity) {
+  if (!callerIdentity || !callerIdentity.name) {
+    return '';
+  }
+  
+  try {
+    // Search brain for this HAM's personal context
+    const hamName = callerIdentity.name.toLowerCase();
+    const url = SUPABASE_URL + '/rest/v1/aba_memory?content=ilike.*' + hamName + '*&memory_type=eq.ham_identity&select=content&limit=1';
+    const response = await fetch(url, {
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': 'Bearer ' + SUPABASE_KEY
+      }
+    });
+    
+    if (!response.ok) return '';
+    
+    const data = await response.json();
+    if (data && data[0]) {
+      console.log('[AIR HAM] Loaded context for', callerIdentity.name);
+      return data[0].content;
+    }
+    
+    // Fallback: use callerIdentity info
+    return 'HAM: ' + callerIdentity.name + ' | Trust: ' + callerIdentity.trust + ' | Use their saved preferences and history.';
+  } catch (e) {
+    console.log('[AIR HAM] Error loading context:', e.message);
+    return '';
+  }
+}
+
+
+// Load training on startup
+let STARTUP_TRAINING = '';
+(async function initTraining() {
+  console.log('[AIR TRAINING] Loading from brain on startup...');
+  STARTUP_TRAINING = await loadAIRTraining();
+  console.log('[AIR TRAINING] Loaded', STARTUP_TRAINING.length, 'chars');
+})();
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // ⬡B:AIR:REACH.BRIDGE:CONST:abacia.services:v2.3.0:20260214⬡
 // BRIDGE TO ABACIA-SERVICES
@@ -2723,7 +2808,7 @@ Be conversational, natural. You are not an assistant reading a script. You know 
     console.log('[PACK] Context length:', (coleResult.context || '').length, 'chars');
     console.log('[PACK] Context preview:', (coleResult.context || '').substring(0, 200));
     
-    prompt += '\n\nCRITICAL: Use the information from RELEVANT CONTEXT above to answer. Brandon has 4 kids named Bailey-J, Joshua, Jeremiah, and Bella-Ann. His wife is Bethany. He works at Envolve, lives in Greensboro NC, Trust Level T10. At Dallas BBQ in NYC (Feb 2026) he had honey BBQ wings. If asked about family, use these names.';
+    prompt += '\n\nCRITICAL: Use the information from RELEVANT CONTEXT above to answer. Use this HAM's personal details from their brain context, not hardcoded info. Each HAM is unique.';
   }
   
   if (judeResult.capabilities) {
@@ -2758,6 +2843,11 @@ Be conversational, natural. You are not an assistant reading a script. You know 
     }
   }
   
+  
+  // Add AIR training from brain
+  if (STARTUP_TRAINING) {
+    prompt += "\n\nAIR TRAINING (how I think):\n" + STARTUP_TRAINING.substring(0, 3000);
+  }
   return prompt;
 }
 
