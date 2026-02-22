@@ -130,7 +130,7 @@ async function loadHAMContext(callerIdentity) {
   }
   
   try {
-    // Search brain for this HAM's personal context
+    // Search brain for this HAMs personal context
     const hamName = callerIdentity.name.toLowerCase();
     const url = SUPABASE_URL + '/rest/v1/aba_memory?content=ilike.*' + hamName + '*&memory_type=eq.ham_identity&select=content&limit=1';
     const response = await fetch(url, {
@@ -2808,7 +2808,7 @@ Be conversational, natural. You are not an assistant reading a script. You know 
     console.log('[PACK] Context length:', (coleResult.context || '').length, 'chars');
     console.log('[PACK] Context preview:', (coleResult.context || '').substring(0, 200));
     
-    prompt += '\n\nCRITICAL: Use the information from RELEVANT CONTEXT above to answer. Use this HAM's personal details from their brain context, not hardcoded info. Each HAM is unique.';
+    prompt += '\n\nCRITICAL: Use the information from RELEVANT CONTEXT above to answer. Use this HAMs personal details from their brain context, not hardcoded info. Each HAM is unique.';
   }
   
   if (judeResult.capabilities) {
