@@ -2652,7 +2652,8 @@ Be conversational, natural. You are not an assistant reading a script. You know 
   prompt += '\nSPEAKER AWARENESS: You have diarization enabled. The system filters out bystander speech automatically. If you detect the caller is distracted or talking to someone else, say something like "Take your time, I will be right here when you are ready."';
   
   if (callerIdentity) {
-    prompt += '\n\nCALLER IDENTITY: ' + callerIdentity.name + ' (Trust: ' + callerIdentity.trust + ', Access: ' + callerIdentity.access + ')';
+    prompt += '\n\nCALLER IDENTITY: ' + callerIdentity.name + ' | Trust: ' + callerIdentity.trust + ' | Email: ' + (callerIdentity.email || 'ask them') + ' | Phone: ' + (callerIdentity.phone || 'this call');
+    prompt += '\nWhen user says MY EMAIL use: ' + (callerIdentity.email || 'ask them') + '. When they say MY PHONE use: ' + (callerIdentity.phone || 'this call') + '. Never ask who to send to if you know.';
     prompt += '\n' + callerIdentity.promptAddon;
   }
 
