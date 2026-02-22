@@ -9937,28 +9937,10 @@ Respond as this agent specifically — stay in character.`;
           console.log('[AIR VOICE TOOL] ✓ Mission:', missionNumber);
         }
         
-        // STEP 2: AIR_judge quality check
-        if (responseText && responseText.length > 10) {
-          try {
-            const judgment = await AIR_judge(userMessage, responseText, { agents: agentsDeployed });
-            if (judgment.success && judgment.judgment) {
-              console.log('[AIR VOICE TOOL] Quality score:', judgment.judgment.quality_score, '/10');
-              
-              // If low quality, try to improve
-              if (judgment.judgment.quality_score < 5 && judgment.judgment.fix_suggestion) {
-                console.log('[AIR VOICE TOOL] Low quality - attempting fix...');
-                const retryResult = await AIR_text(judgment.judgment.fix_suggestion + ' ' + userMessage, [], { source: 'voice_retry' });
-                if (retryResult && retryResult.response && retryResult.response.length > responseText.length) {
-                  responseText = retryResult.response;
-                  agentsDeployed = [...agentsDeployed, 'JUDGE_RETRY'];
-                  console.log('[AIR VOICE TOOL] ✓ Improved response');
-                }
-              }
-            }
-          } catch (e) {
-            console.log('[AIR VOICE TOOL] Judge skipped:', e.message);
-          }
-        }
+        // STEP 2: Skip AIR_judge for voice (speed over quality)
+        // Voice needs fast responses - judge adds ~3-5s latency
+        console.log('[AIR VOICE TOOL] Skipping judge for speed');
+        agentsDeployed.push('SPEED_MODE');
         
       } catch (e) {
         console.log('[AIR VOICE TOOL] AIR_text error:', e.message);
