@@ -267,6 +267,158 @@ let STARTUP_WRITING_STANDARDS = '';
 // ⬡B:AIR:REACH.BRIDGE:CONST:abacia.services:v2.3.0:20260214⬡
 // BRIDGE TO ABACIA-SERVICES
 // This is where the 22+ agents actually live and run
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:AIR:REACH.AGENT.DRAFT:CODE:output.scanner.bs_detector:v1.0.0:20260223⬡
+// DRAFT - Detection and Review of AI-Fabricated Text
+// Scans EVERY human-facing output BEFORE delivery
+// Trace: A*AGENTS*A → A*DRAFT*A → A*MEMOS*A → DELIVERY
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const DRAFT_VIOLATIONS = {
+  // FIREABLE - instant fail
+  EM_DASH: { pattern: /[—–]|--/g, severity: 'FIREABLE', penalty: 30, desc: 'Em dash or double dash' },
+  COLD_GREETING: { pattern: /^(Eric,|Brandon,|Hey,\s*$|Hi,\s*$)/m, severity: 'FIREABLE', penalty: 25, desc: 'Cold greeting without name' },
+  CTA_ENDING: { pattern: /(let me know if you have any questions|feel free to reach out|don't hesitate to|please don't hesitate)/i, severity: 'FIREABLE', penalty: 20, desc: 'Generic CTA ending' },
+  
+  // HIGH - major deductions
+  CHOPPY_TECH_BRO: { pattern: /\. [A-Z][a-z]{2,10}\. [A-Z][a-z]{2,10}\./g, severity: 'HIGH', penalty: 15, desc: 'Choppy tech bro style' },
+  PARALLEL_ROBOTIC: { pattern: /This isn't [^.]+\. This is [^.]+\./gi, severity: 'HIGH', penalty: 15, desc: 'Robotic parallel structure' },
+  AI_HAPPY_TO: { pattern: /I('d| would) be happy to|I'm happy to help/gi, severity: 'HIGH', penalty: 10, desc: 'AI phrase: happy to' },
+  AI_HERES_THE_THING: { pattern: /here's the thing|at the end of the day/gi, severity: 'HIGH', penalty: 10, desc: 'AI phrase: heres the thing' },
+  
+  // MEDIUM - deductions
+  META_COMMENTARY: { pattern: /this (document|email|message|report) (outlines|provides|contains|summarizes)/gi, severity: 'MEDIUM', penalty: 8, desc: 'Meta commentary' },
+  HEDGING: { pattern: /(it appears that|it seems like|it would seem|arguably|potentially)/gi, severity: 'MEDIUM', penalty: 5, desc: 'Hedging language' },
+  CORPORATE_SPEAK: { pattern: /(leverage|synergize|bandwidth|circle back|touch base|deep dive)/gi, severity: 'MEDIUM', penalty: 5, desc: 'Corporate buzzwords' },
+  OVER_FORMAL: { pattern: /(furthermore|moreover|additionally|in conclusion|to summarize)/gi, severity: 'MEDIUM', penalty: 5, desc: 'Over-formal transitions' },
+  AI_RESONATED: { pattern: /(deeply resonated|truly appreciate|genuinely believe)/gi, severity: 'MEDIUM', penalty: 5, desc: 'AI emotional phrases' },
+  
+  // LOW - minor deductions
+  PASSIVE_VOICE: { pattern: /(was written|were created|has been|have been) by/gi, severity: 'LOW', penalty: 3, desc: 'Passive voice' },
+  FILLER_PHRASES: { pattern: /(in order to|due to the fact that|at this point in time)/gi, severity: 'LOW', penalty: 2, desc: 'Filler phrases' }
+};
+
+function DRAFT_scanOutput(text) {
+  if (!text || typeof text !== 'string') {
+    return { score: 100, violations: [], passed: true };
+  }
+  
+  let score = 100;
+  const violations = [];
+  
+  for (const [name, rule] of Object.entries(DRAFT_VIOLATIONS)) {
+    const matches = text.match(rule.pattern);
+    if (matches && matches.length > 0) {
+      const deduction = rule.penalty * Math.min(matches.length, 3); // Cap at 3x
+      score -= deduction;
+      violations.push({
+        rule: name,
+        severity: rule.severity,
+        description: rule.desc,
+        matches: matches.slice(0, 3),
+        deduction: deduction
+      });
+    }
+  }
+  
+  // Bonus checks
+  // +5 for warm greeting
+  if (/^(Hi |Hey |Hello )[A-Z][a-z]+,/m.test(text)) {
+    score = Math.min(100, score + 5);
+  }
+  
+  // +3 for flowing sentences (commas connecting thoughts)
+  const sentences = text.split(/[.!?]+/).filter(s => s.trim().length > 20);
+  const flowingSentences = sentences.filter(s => (s.match(/,/g) || []).length >= 2);
+  if (flowingSentences.length >= 2) {
+    score = Math.min(100, score + 3);
+  }
+  
+  score = Math.max(0, score);
+  
+  return {
+    score: score,
+    violations: violations,
+    passed: score >= 85,
+    summary: violations.length === 0 ? 'CLEAN' : violations.map(v => v.rule).join(', ')
+  };
+}
+
+async function DRAFT_validateAndRegenerate(text, regenerateFunc, context) {
+  const scan1 = DRAFT_scanOutput(text);
+  console.log('[DRAFT] First scan:', scan1.score, scan1.summary);
+  
+  if (scan1.passed) {
+    return { text: text, scan: scan1, regenerated: false };
+  }
+  
+  // Failed - try to regenerate once with explicit instructions
+  if (regenerateFunc && typeof regenerateFunc === 'function') {
+    console.log('[DRAFT] Score', scan1.score, '< 85, regenerating...');
+    const violationList = scan1.violations.map(v => v.description).join(', ');
+    const fixPrompt = `REWRITE THE FOLLOWING. VIOLATIONS FOUND: ${violationList}. 
+FIX THESE SPECIFIC ISSUES:
+- Remove all em dashes (—) and double dashes (--)
+- Use warm greeting like "Hi Name," not just "Name,"
+- Remove generic CTAs like "let me know if you have questions"
+- Use flowing sentences with commas, not choppy fragments
+- Remove AI phrases like "happy to help", "here's the thing"
+
+ORIGINAL TEXT:
+${text}
+
+REWRITE NOW:`;
+    
+    try {
+      const regenerated = await regenerateFunc(fixPrompt, context);
+      const scan2 = DRAFT_scanOutput(regenerated);
+      console.log('[DRAFT] Regenerated scan:', scan2.score, scan2.summary);
+      
+      // Return whichever is better
+      if (scan2.score >= scan1.score) {
+        return { text: regenerated, scan: scan2, regenerated: true };
+      }
+    } catch (e) {
+      console.log('[DRAFT] Regeneration failed:', e.message);
+    }
+  }
+  
+  // Return original with warning
+  return { text: text, scan: scan1, regenerated: false, warning: 'Failed DRAFT scan' };
+}
+
+// Log DRAFT results to brain
+async function DRAFT_logToBrain(scanResult, outputType, agentName) {
+  try {
+    const logEntry = {
+      source: 'draft_scan_' + Date.now(),
+      memory_type: 'draft_audit',
+      content: JSON.stringify({
+        timestamp: new Date().toISOString(),
+        agent: agentName,
+        outputType: outputType,
+        score: scanResult.score,
+        passed: scanResult.passed,
+        violations: scanResult.violations,
+        regenerated: scanResult.regenerated || false
+      }),
+      tags: ['draft', 'output_audit', agentName.toLowerCase()],
+      importance: scanResult.passed ? 3 : 7
+    };
+    
+    await fetch(SUPABASE_URL + '/rest/v1/aba_memory', {
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_KEY || SUPABASE_ANON,
+        'Authorization': 'Bearer ' + (SUPABASE_KEY || SUPABASE_ANON),
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(logEntry)
+    });
+  } catch (e) {
+    console.log('[DRAFT] Failed to log to brain:', e.message);
+  }
+}
 // ABA-REACH (voice) → ABACIA-SERVICES (agents) → Response
 // ═══════════════════════════════════════════════════════════════════════════════
 const ABACIA_SERVICES_URL = 'https://abacia-services.onrender.com';
@@ -6328,7 +6480,14 @@ async function AIR_process(userSaid, history, callerIdentity, demoState) {
   console.log('[AIR] Response: "' + response + '"');
   console.log('═══════════════════════════════════════════════════════════');
   
-  return { response, isGoodbye: false, missionNumber: missionPackage.missionNumber };
+  // ⬡B:AIR:REACH.DRAFT.SCAN:CODE:output.validation:AIR→DRAFT→DELIVERY:v1.0.0:20260223⬡
+  const draftScan = DRAFT_scanOutput(response);
+  console.log('[DRAFT] Voice output scan:', draftScan.score, draftScan.passed ? 'PASS' : 'FAIL');
+  if (!draftScan.passed && draftScan.violations.length > 0) {
+    console.log('[DRAFT] Violations:', draftScan.violations.map(v => v.rule).join(', '));
+  }
+  
+  return { response, isGoodbye: false, missionNumber: missionPackage.missionNumber, draftScan };
 }
 
 /**
@@ -10428,6 +10587,10 @@ Respond as this agent specifically — stay in character.`;
       
       console.log('[AIR VOICE TOOL] ═══ MISSION COMPLETE ═══');
       
+      // ⬡B:AIR:REACH.DRAFT.SCAN.VOICE:CODE:output.validation:v1.0.0:20260223⬡
+      const voiceDraftScan = DRAFT_scanOutput(responseText);
+      console.log('[DRAFT] Voice tool scan:', voiceDraftScan.score, voiceDraftScan.passed ? 'PASS' : 'FAIL');
+      
       // Return response for ElevenLabs to speak
       return jsonResponse(res, 200, {
         response: responseText,
@@ -11547,6 +11710,31 @@ if (path === '/api/sms/send' && method === 'POST') {
   }
 
   // ═══════════════════════════════════════════════════════════════════════
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // ⬡B:AIR:REACH.API.DRAFT:CODE:output.validation.endpoint:v1.0.0:20260223⬡
+  // DRAFT - Detection and Review of AI-Fabricated Text
+  // Scans text for Brandon writing standards violations
+  // ═══════════════════════════════════════════════════════════════════════
+  if (path === '/api/draft' && method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      const { text } = body;
+      if (!text) {
+        return jsonResponse(res, 400, { error: 'Required: text' });
+      }
+      const scan = DRAFT_scanOutput(text);
+      console.log('[DRAFT API] Scan result:', scan.score, scan.passed ? 'PASS' : 'FAIL');
+      return jsonResponse(res, 200, {
+        score: scan.score,
+        passed: scan.passed,
+        violations: scan.violations,
+        summary: scan.summary
+      });
+    } catch (e) {
+      return jsonResponse(res, 500, { error: e.message });
+    }
+  }
   // ⬡B:AIR:REACH.API.BRAIN_SEMANTIC:CODE:memory.semantic.search:AIR→BRAIN:T10:v2.6.5:20260214:s1m2s⬡
   // SEMANTIC SEARCH — pgvector cosine similarity via match_memories RPC
   // Takes text query → generates embedding → finds similar memories
