@@ -194,6 +194,76 @@ let STARTUP_TRAINING = '';
 })();
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:AIR:REACH.WRITING.STANDARDS:CODE:output.quality.enforcement:v1.0.0:20260223⬡
+// WRITING STANDARDS INJECTION - FOR OUTPUT AGENTS (VARA, IMAN, CARA, DRAFT, SCRIBE)
+// Brandon directive: All human-facing text MUST follow these standards
+// Source of truth: brandon_directive_writing_standards_v1 in aba_memory
+// ═══════════════════════════════════════════════════════════════════════════════
+
+let WRITING_STANDARDS_CACHE = null;
+let WRITING_STANDARDS_LOADED_AT = null;
+const OUTPUT_AGENTS = ['VARA', 'IMAN', 'CARA', 'DRAFT', 'SCRIBE', 'QUILL'];
+
+async function loadWritingStandards() {
+  // Cache for 1 hour (3600000ms)
+  if (WRITING_STANDARDS_CACHE && WRITING_STANDARDS_LOADED_AT && (Date.now() - WRITING_STANDARDS_LOADED_AT) < 3600000) {
+    return WRITING_STANDARDS_CACHE;
+  }
+  
+  try {
+    const url = SUPABASE_URL + '/rest/v1/aba_memory?source=eq.brandon_directive_writing_standards_v1&select=content&is_system=eq.true';
+    const response = await fetch(url, {
+      headers: {
+        'apikey': SUPABASE_KEY || SUPABASE_ANON,
+        'Authorization': 'Bearer ' + (SUPABASE_KEY || SUPABASE_ANON)
+      }
+    });
+    
+    if (!response.ok) {
+      console.log('[WRITING STANDARDS] Failed to load from brain:', response.status);
+      return '';
+    }
+    
+    const data = await response.json();
+    if (data && data[0] && data[0].content) {
+      WRITING_STANDARDS_CACHE = data[0].content;
+      WRITING_STANDARDS_LOADED_AT = Date.now();
+      console.log('[WRITING STANDARDS] Loaded from brain:', WRITING_STANDARDS_CACHE.length, 'chars');
+      return WRITING_STANDARDS_CACHE;
+    }
+    console.log('[WRITING STANDARDS] No standards found in brain');
+    return '';
+  } catch (e) {
+    console.log('[WRITING STANDARDS] Error loading:', e.message);
+    return '';
+  }
+}
+
+function shouldInjectWritingStandards(agentName) {
+  if (!agentName) return true; // Default: inject for safety
+  return OUTPUT_AGENTS.some(a => agentName.toUpperCase().includes(a));
+}
+
+async function injectWritingStandards(prompt, agentName) {
+  if (!shouldInjectWritingStandards(agentName)) {
+    return prompt;
+  }
+  
+  const standards = await loadWritingStandards();
+  if (standards) {
+    return prompt + '\n\n' + standards + '\n\nCRITICAL: Follow ALL writing standards above. No em dashes. No choppy sentences. Warm greetings always.';
+  }
+  return prompt;
+}
+
+// Load writing standards on startup
+let STARTUP_WRITING_STANDARDS = '';
+(async function initWritingStandards() {
+  console.log('[WRITING STANDARDS] Loading from brain on startup...');
+  STARTUP_WRITING_STANDARDS = await loadWritingStandards();
+  console.log('[WRITING STANDARDS] Ready:', STARTUP_WRITING_STANDARDS ? 'LOADED' : 'EMPTY');
+})();
 // ⬡B:AIR:REACH.BRIDGE:CONST:abacia.services:v2.3.0:20260214⬡
 // BRIDGE TO ABACIA-SERVICES
 // This is where the 22+ agents actually live and run
@@ -2916,6 +2986,10 @@ Be conversational, natural. You are not an assistant reading a script. You know 
   // Add AIR training from brain
   if (STARTUP_TRAINING) {
     prompt += "\n\nAIR TRAINING (how I think):\n" + STARTUP_TRAINING.substring(0, 3000);
+  }
+  // Inject writing standards for output quality
+  if (STARTUP_WRITING_STANDARDS) {
+    prompt += "\n\n" + STARTUP_WRITING_STANDARDS + "\n\nCRITICAL: Follow ALL writing standards above.";
   }
   return prompt;
 }
