@@ -5462,6 +5462,10 @@ async function IMAN_draftEmail(context) {
   
   const prompt = `You are IMAN (Inbox Management Agent Navigator), drafting a professional email.
 
+` + (STARTUP_WRITING_STANDARDS || "") + `
+
+CRITICAL: Follow all writing standards above. No em dashes. Warm greeting (Hi/Hey). No CTA endings.
+
 TO: ${to}
 REGARDING: ${regarding}
 TONE: ${tone || 'professional'}
@@ -8981,7 +8985,7 @@ async function IMAN_draftEmail(context) {
   
   console.log('[IMAN] Drafting email to:', to, '| Regarding:', regarding);
   
-  const prompt = 'You are IMAN (Inbox Management Agent Navigator), drafting a professional email.\n\n' +
+  const prompt = 'You are IMAN (Inbox Management Agent Navigator), drafting a professional email.\n\n' + (STARTUP_WRITING_STANDARDS || '') + '\n\nCRITICAL: Follow all writing standards above. No em dashes. Warm greeting. No CTAs.\n\n' +
     'TO: ' + to + '\n' +
     'REGARDING: ' + regarding + '\n' +
     'TONE: ' + (tone || 'professional') + '\n' +
