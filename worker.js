@@ -12528,7 +12528,11 @@ if (path === '/api/sms/send' && method === 'POST') {
     }
     try {
       const body = await parseBody(req);
-      const result = await agent.execute(body);
+      const action = body.action || Object.keys(agent).find(k => typeof agent[k] === "function");
+      if (!action || typeof agent[action] !== "function") {
+        return jsonResponse(res, 400, { error: "No valid action. Available: " + Object.keys(agent).filter(k => typeof agent[k] === "function").join(", ") });
+      }
+      const result = await agent[action](body.params || {});
       return jsonResponse(res, 200, result);
     } catch (e) {
       return jsonResponse(res, 500, { error: e.message });
