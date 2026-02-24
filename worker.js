@@ -1749,34 +1749,183 @@ AGENTS.FIND = {
 };
 
 // FORGE - Fast Output and Rapid Generation Engine
+// ═══════════════════════════════════════════════════════════════════════════════
+// FORGE - Fast Output and Rapid Generation Engine
+// ⬡B:AGENTS.FORGE:CODE:agent_creation:v2.0.0:20260224⬡
+// 
+// THIS AGENT CAN ACTUALLY CREATE NEW AGENTS!
+// It writes to Supabase AND registers in the runtime AGENTS object.
+// ═══════════════════════════════════════════════════════════════════════════════
+
 AGENTS.FORGE = {
   name: 'FORGE',
   fullName: 'Fast Output and Rapid Generation Engine',
   department: 'CODING',
-  type: 'CONTEXT_WRAPPER',
+  type: 'COMMANDABLE',
   runtime: 'on-demand',
   active: true,
   runCount: 0,
-  
-  getContext(message, context) {
+  canCreate: true, // ← THIS IS THE KEY - FORGE CAN CREATE!
+
+  // CREATE a new agent - writes to database AND registers at runtime
+  async create(spec) {
     this.runCount++;
+    console.log('[FORGE] Creating new agent:', spec.acronym);
+    
+    if (!spec.acronym || !spec.fullName) {
+      return { error: true, message: 'FORGE requires acronym and fullName' };
+    }
+    
+    const acronym = spec.acronym.toUpperCase();
+    
+    // Check if already exists in runtime
+    if (AGENTS[acronym]) {
+      return { error: true, message: `Agent ${acronym} already exists in runtime` };
+    }
+    
+    // Step 1: Write JD to Supabase
+    console.log('[FORGE] Step 1: Writing JD to aba_agent_jds...');
+    try {
+      const jdPayload = {
+        acronym: acronym,
+        agent_id: acronym,
+        full_name: spec.fullName,
+        department: spec.department || 'GENERAL',
+        agent_type: spec.agentType || 'CONTEXT_WRAPPER',
+        runtime: spec.runtime || 'on-demand',
+        responsibilities: spec.responsibilities || `Agent ${acronym} handles ${spec.department || 'general'} tasks.`,
+        summoned_by: spec.summonedBy || ['air', 'forge'],
+        status: 'active',
+        tier: spec.tier || 3,
+        source: 'FORGE_runtime_creation',
+        acl_stamp: `⬡B:agent:${acronym}:JD:forged⬡`,
+        abcd_tag: `${acronym}_${spec.department || 'GENERAL'}`
+      };
+      
+      const insertResult = await fetch(SUPABASE_URL + '/rest/v1/aba_agent_jds', {
+        method: 'POST',
+        headers: {
+          'apikey': SUPABASE_KEY,
+          'Authorization': 'Bearer ' + SUPABASE_KEY,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=representation'
+        },
+        body: JSON.stringify(jdPayload)
+      });
+      
+      if (!insertResult.ok) {
+        const err = await insertResult.text();
+        console.log('[FORGE] Supabase error:', err);
+        return { error: true, message: 'Failed to write JD: ' + err };
+      }
+      
+      const insertedJD = await insertResult.json();
+      console.log('[FORGE] JD written successfully, ID:', insertedJD[0]?.id);
+      
+      // Step 2: Register agent in runtime AGENTS object
+      console.log('[FORGE] Step 2: Registering in runtime AGENTS object...');
+      const newAgentDept = spec.department || 'GENERAL';
+      const newAgentFullName = spec.fullName;
+      
+      AGENTS[acronym] = {
+        name: acronym,
+        fullName: newAgentFullName,
+        department: newAgentDept,
+        type: spec.agentType || 'CONTEXT_WRAPPER',
+        runtime: spec.runtime || 'on-demand',
+        active: true,
+        runCount: 0,
+        forgedAt: new Date().toISOString(),
+        forgedBy: 'FORGE',
+        
+        getContext(message, context) {
+          this.runCount++;
+          return {
+            agent: acronym,
+            fullName: newAgentFullName,
+            department: newAgentDept,
+            contextAddition: `Agent ${acronym} (${newAgentFullName}) is available for ${newAgentDept.toLowerCase()} tasks.`,
+            capabilities: [newAgentDept.toLowerCase()],
+            status: 'forged_runtime_v1'
+          };
+        },
+        
+        async execute(action, params) {
+          this.runCount++;
+          return {
+            agent: acronym,
+            action: action || 'getContext',
+            result: this.getContext(params?.message, params?.context),
+            message: `${acronym} ready - forged by FORGE at runtime`
+          };
+        }
+      };
+      
+      console.log('[FORGE] Agent registered in runtime!');
+      
+      // Step 3: Verify
+      const verified = AGENTS[acronym] !== undefined;
+      
+      return {
+        agent: 'FORGE',
+        action: 'create',
+        created: true,
+        newAgent: {
+          acronym: acronym,
+          fullName: spec.fullName,
+          department: spec.department || 'GENERAL',
+          id: insertedJD[0]?.id
+        },
+        checks: {
+          jd_in_database: true,
+          registered_in_runtime: verified
+        },
+        message: `✅ Agent ${acronym} CREATED! JD in database, registered in runtime. Callable via /api/v2/agents/${acronym}/execute`
+      };
+      
+    } catch (e) {
+      console.log('[FORGE] Error:', e.message);
+      return { error: true, message: 'FORGE error: ' + e.message };
+    }
+  },
+
+  // List what FORGE can do
+  async help() {
     return {
       agent: 'FORGE',
-      fullName: 'Fast Output and Rapid Generation Engine',
-      department: 'CODING',
-      contextAddition: 'Agent FORGE (Fast Output and Rapid Generation Engine) is available for coding tasks.',
-      capabilities: ['coding'],
-      status: 'context_wrapper_v1'
+      action: 'help',
+      capabilities: [
+        'create - Create a new agent (requires: acronym, fullName, department)',
+        'help - Show this help'
+      ],
+      example: {
+        action: 'create',
+        params: {
+          acronym: 'NEWAGENT',
+          fullName: 'New Agent Full Name',
+          department: 'SECURITY',
+          responsibilities: 'What this agent does'
+        }
+      }
     };
   },
-  
+
+  // Main execute handler
   async execute(action, params) {
     this.runCount++;
-    return {
-      agent: 'FORGE',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'FORGE ready - context wrapper active'
+    
+    if (action === 'create') {
+      return await this.create(params);
+    }
+    if (action === 'help') {
+      return await this.help();
+    }
+    
+    return { 
+      agent: 'FORGE', 
+      error: true, 
+      message: 'Unknown action. Use: create, help',
+      canCreate: true
     };
   }
 };
@@ -8859,6 +9008,92 @@ async function AIR_DISPATCH(lukeAnalysis, judeResult, callerIdentity) {
   
   const query = (lukeAnalysis?.raw || '').toLowerCase();
   const intent = lukeAnalysis.intent;
+  
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // FORGE DISPATCH - Route 'create agent' requests to FORGE
+  // ⬡B:AIR:FORGE_DISPATCH:CODE:agent_creation_routing:v1.0.0:20260224⬡
+  // ═══════════════════════════════════════════════════════════════════════════════
+  
+  // Check if this is a "create agent" request
+  const createAgentKeywords = ['create agent', 'create a new agent', 'make an agent', 'forge agent', 'new agent called', 'create a security agent', 'create a phishing agent'];
+  const msgLower = (lukeAnalysis.original || lukeAnalysis.raw || query).toLowerCase();
+  const isCreateAgentRequest = createAgentKeywords.some(kw => msgLower.includes(kw));
+  
+  if (isCreateAgentRequest && AGENTS.FORGE && AGENTS.FORGE.canCreate) {
+    console.log('[AIR_DISPATCH] ★★★ DETECTED CREATE AGENT REQUEST - routing to FORGE ★★★');
+    
+    // Extract agent details from message
+    // Pattern: "agent called ACRONYM" or "agent ACRONYM" or "ACRONYM agent"
+    let acronym = null;
+    const patterns = [
+      /agent\s+called\s+([a-z]+)/i,
+      /create\s+(?:a\s+)?(?:new\s+)?(?:security\s+)?agent\s+(?:called\s+)?([a-z]+)/i,
+      /([a-z]+)\s+agent/i,
+      /agent\s+([a-z]+)/i
+    ];
+    
+    for (const pattern of patterns) {
+      const match = msgLower.match(pattern);
+      if (match && match[1] && match[1].length >= 3 && !['the', 'new', 'for', 'and', 'that'].includes(match[1])) {
+        acronym = match[1].toUpperCase();
+        break;
+      }
+    }
+    
+    // Try to extract department from keywords
+    const deptKeywords = {
+      'security': 'SECURITY',
+      'phishing': 'SECURITY', 
+      'malicious': 'SECURITY',
+      'threat': 'SECURITY',
+      'coding': 'CODING',
+      'code': 'CODING',
+      'voice': 'VOICE',
+      'email': 'OUTREACH',
+      'proactive': 'PROACTIVE',
+      'monitor': 'PROACTIVE',
+      'suspicious': 'SECURITY'
+    };
+    let department = 'GENERAL';
+    for (const [kw, dept] of Object.entries(deptKeywords)) {
+      if (msgLower.includes(kw)) {
+        department = dept;
+        break;
+      }
+    }
+    
+    // Generate description from the message
+    const description = msgLower.replace(/create|agent|called|new|please|a|the/gi, '').trim();
+    
+    if (acronym) {
+      // Build full name from context
+      const fullName = `${acronym} - ${department} Agent (Forged)`;
+      
+      console.log(`[AIR_DISPATCH] Calling FORGE.create for: ${acronym} (${department})`);
+      
+      const forgeResult = await AGENTS.FORGE.execute('create', {
+        acronym: acronym,
+        fullName: fullName,
+        department: department,
+        responsibilities: `Agent ${acronym} handles ${department.toLowerCase()} tasks. ${description}`,
+        summonedBy: ['air', 'forge']
+      });
+      
+      if (forgeResult.created) {
+        console.log('[AIR_DISPATCH] ✅ FORGE successfully created agent:', acronym);
+        return { 
+          handled: true, 
+          agent: 'FORGE', 
+          data: forgeResult,
+          trace: 'AIR*FORGE*CREATE'
+        };
+      } else {
+        console.log('[AIR_DISPATCH] ⚠️ FORGE returned:', forgeResult);
+      }
+    } else {
+      console.log('[AIR_DISPATCH] Could not extract acronym from message');
+    }
+  }
   
   // Check JUDE's findings for relevant agents
   const agentNames = (judeResult?.agents || []).map(a => (a.name || '').toLowerCase());
