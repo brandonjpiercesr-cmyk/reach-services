@@ -426,9 +426,9 @@ async function DRAFT_logToBrain(scanResult, outputType, agentName) {
 
 // PHASE 1: FOUNDATION - REAL
 const COST_CAPS = {
-  daily: { limit: 20.00, current: 0, reset: null },
-  hourly: { limit: 5.00, current: 0, reset: null },
-  perCall: { limit: 0.50 },
+  daily: { limit: 5.00, current: 0, reset: null },
+  hourly: { limit: 1.00, current: 0, reset: null },
+  perCall: { limit: 0.15 },
   modelCosts: { 'claude-opus-4-20250514': 0.015, 'claude-sonnet-4-20250514': 0.003, 'claude-3-haiku-20240307': 0.00025 }
 };
 
@@ -16754,7 +16754,7 @@ console.log('[♥] 60s heartbeat initialized');
 // ████████████████████████████████████████████████████████████████████████████
 // ⬡B:AIR:REACH.AUTONOMOUS.LOOP:CODE:agents.autonomous.dispatch:AIR→PULSE→ALL:T10:v2.6.2:20260214:a1l2p⬡
 
-const LOOP_INTERVAL = 5 * 60 * 1000; // 5 minutes
+const LOOP_INTERVAL = 30 * 60 * 1000; // SAFEGUARD: Was 5 min, now 30 min // 5 minutes
 const TIMEZONE = 'America/New_York';
 let loopCount = 0;
 
@@ -16787,7 +16787,23 @@ async function loopSupaWrite(table, data) {
 
 // ── AIR CALL (server-side, uses existing ANTHROPIC_KEY) ─────────────────────
 async function loopAirCall(message, systemPrompt, model) {
+  // ⬡B:SAFEGUARD:loopAirCall:v2.0.0:20260224⬡ - Now enforces cost caps!
   if (!ANTHROPIC_KEY) { console.warn('[AIR-LOOP] No ANTHROPIC_KEY'); return null; }
+  
+  // SAFEGUARD 1: Check cost cap BEFORE calling
+  const selectedModel = model || 'claude-haiku-4-5-20251001'; // Default HAIKU not Sonnet!
+  const estimatedCost = 0.01; // Conservative estimate
+  const costCheck = checkCostCap(estimatedCost);
+  
+  if (!costCheck.allowed) {
+    console.log('[AIR-LOOP] ❌ COST CAP REACHED - Skipping. Daily: $' + COST_CAPS.daily.current.toFixed(2) + '/$' + COST_CAPS.daily.limit);
+    return null;
+  }
+  
+  // SAFEGUARD 2: Downgrade to Haiku when budget tight
+  const actualModel = costCheck.downgrade === 'haiku' ? 'claude-haiku-4-5-20251001' : selectedModel;
+  if (costCheck.downgrade) console.log('[AIR-LOOP] ⚠️ Budget tight - using Haiku');
+  
   try {
     const r = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -16797,14 +16813,21 @@ async function loopAirCall(message, systemPrompt, model) {
         'anthropic-version': '2023-06-01'
       },
       body: JSON.stringify({
-        model: model || 'claude-sonnet-4-5-20250929',
-        max_tokens: 2000,
+        model: actualModel,
+        max_tokens: 1000, // SAFEGUARD 3: Reduced from 2000
         system: systemPrompt,
-        messages: [{ role: 'user', content: message }]
+        messages: [{ role: 'user', content: (message || '').substring(0, 2000) }] // SAFEGUARD 4: Limit input
       })
     });
     if (!r.ok) throw new Error('API ' + r.status);
     const d = await r.json();
+    
+    // SAFEGUARD 5: Record actual cost
+    const tokens = (d.usage?.input_tokens || 0) + (d.usage?.output_tokens || 0);
+    const actualCost = tokens * 0.000003;
+    recordCost(actualCost);
+    console.log('[AIR-LOOP] ✅ Cost: $' + actualCost.toFixed(4) + ' | Daily: $' + COST_CAPS.daily.current.toFixed(2) + '/$' + COST_CAPS.daily.limit);
+    
     return (d.content && d.content[0] && d.content[0].text) || '';
   } catch (e) { console.error('[AIR-LOOP] AI call failed:', e.message); return null; }
 }
@@ -16814,7 +16837,7 @@ async function loopAirCall(message, systemPrompt, model) {
 // RADAR (Request Analysis and Directive Assignment Router): Validates work requests
 async function loopRadarScan() {
   const tasks = await loopSupaRead('aba_memory',
-    'memory_type=eq.system&content=ilike.*work_request*&tags=cs.{unprocessed}&order=created_at.desc&limit=5'
+    'memory_type=eq.system&content=ilike.*work_request*&tags=cs.{unprocessed}&order=created_at.desc&limit=2'
   );
   if (tasks.length > 0) {
     console.log('[AIR*RADAR*LOOP] ' + tasks.length + ' work requests to validate');
@@ -16943,7 +16966,7 @@ async function loopSageEmbed() {
 // IMAN: Check for queued email tasks
 async function loopImanCheck() {
   const tasks = await loopSupaRead('aba_memory',
-    'memory_type=eq.system&content=ilike.*email_task*&tags=cs.{unprocessed}&order=created_at.desc&limit=5'
+    'memory_type=eq.system&content=ilike.*email_task*&tags=cs.{unprocessed}&order=created_at.desc&limit=2'
   );
   if (tasks.length > 0) {
     console.log('[AIR*IMAN*LOOP] ' + tasks.length + ' email tasks found');
@@ -17145,9 +17168,9 @@ console.log('[AIR-LOOP] Agents: IMAN, HUNTER, HUNCH, DAWN, GHOST, PULSE, RADAR, 
 console.log('[AIR-LOOP] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
 // First tick after 30 seconds (let server finish starting)
-// COST_FIX_20260224: setTimeout(runAutonomousLoop, 30000);
+setTimeout(runAutonomousLoop, 60000); // SAFEGUARD: 60s startup delay
 // Then every 5 minutes
-// COST_FIX_20260224: setInterval(runAutonomousLoop, LOOP_INTERVAL);
+setInterval(runAutonomousLoop, LOOP_INTERVAL); // SAFEGUARD: 30min interval, cost-capped
 
 
 // ═══════════════════════════════════════════════════════════════════════════════
