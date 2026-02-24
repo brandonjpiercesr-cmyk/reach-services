@@ -337,6 +337,7 @@ function DRAFT_scanOutput(text) {
   score = Math.max(0, score);
   
   return {
+    functions,  // FIXED: Include functions for direct access
     score: score,
     violations: violations,
     passed: score >= 85,
@@ -502,6 +503,7 @@ function createAgent(config) {
   } = config;
   
   return {
+    functions,  // FIXED: Include functions for direct access
     id,
     name,
     fullName,
@@ -532,6 +534,7 @@ function createAgent(config) {
       }
       
       return {
+    functions,  // FIXED: Include functions for direct access
         agent: this.name,
         timestamp: new Date().toISOString(),
         results
@@ -780,6 +783,7 @@ AGENTS.NOW = createAgent({
       const day = now.getDay();
       
       return {
+    functions,  // FIXED: Include functions for direct access
         iso: now.toISOString(),
         readable: now.toLocaleString('en-US', { timeZone: 'America/New_York' }),
         hour,
@@ -865,6 +869,7 @@ AGENTS.TRUTH = createAgent({
       
       const confidence = Math.min(100, Math.round((matchCount / claimWords.length) * 100));
       return {
+    functions,  // FIXED: Include functions for direct access
         verified: confidence > 50,
         confidence,
         note: confidence > 70 ? 'High confidence' : confidence > 50 ? 'Moderate confidence' : 'Low confidence - may need to say I dont know'
@@ -910,6 +915,7 @@ AGENTS.GRIT = createAgent({
       ];
       
       return {
+    functions,  // FIXED: Include functions for direct access
         giveUp: false,
         attempt: attempts + 1,
         suggestions: alternatives.slice(0, MAX_ATTEMPTS - attempts),
@@ -1035,6 +1041,7 @@ AGENTS.CARA = createAgent({
       if (urgency === 'critical') channel = 'call';
       
       return {
+    functions,  // FIXED: Include functions for direct access
         channel,
         target,
         purpose,
@@ -1166,6 +1173,7 @@ AGENTS.SHADOW = createAgent({
       const { claim, evidence } = context;
       // Compare claim vs reality
       return {
+    functions,  // FIXED: Include functions for direct access
         audited: true,
         discrepancies: [],
         note: 'SHADOW watches silently'
@@ -1325,6 +1333,7 @@ async function semanticRoute(message, context = {}) {
   OBSERVABILITY.endTrace(traceId);
   
   return {
+    functions,  // FIXED: Include functions for direct access
     analysis,
     agentsToSummon: [...new Set(agentsToSummon)], // Dedupe
     route: analysis.intent
@@ -1577,6 +1586,7 @@ function getTimeInTimezone(tzName = 'America/New_York') {
   const get = (type) => parts.find(p => p.type === type)?.value || '00';
   
   return {
+    functions,  // FIXED: Include functions for direct access
     year: parseInt(get('year')),
     month: parseInt(get('month')),
     day: parseInt(get('day')),
@@ -1763,6 +1773,7 @@ async function startGroupCall(participants) {
   }).catch(e => console.log('[GROUP CALL] Brain store error:', e.message));
   
   return {
+    functions,  // FIXED: Include functions for direct access
     success: results.every(r => r.success),
     conferenceName,
     participants: results
@@ -1905,6 +1916,7 @@ async function scheduleCall(message, callerIdentity) {
   console.log('[SCHEDULED CALL] Stored:', scheduleData);
   
   return {
+    functions,  // FIXED: Include functions for direct access
     success: true,
     scheduledTime: scheduleData.scheduled_time_est,
     target: targetContact.name
@@ -2183,6 +2195,7 @@ Do NOT ask "Why are you calling me?" - YOU called THEM with the briefing above.`
     });
     
     return {
+    functions,  // FIXED: Include functions for direct access
       success: true,
       conversation_id: data.conversation_id,
       briefingId: briefingId
@@ -2217,6 +2230,7 @@ async function warmTransfer(currentCallSid, targetPhone, targetName) {
   if (!callResult.success) return callResult;
   
   return {
+    functions,  // FIXED: Include functions for direct access
     success: true,
     type: 'warm',
     target: targetName,
@@ -2313,6 +2327,7 @@ function parseTransferRequest(message) {
   for (const contactName of Object.keys(MASTER_CONTACTS)) {
     if (msgLower.includes(contactName)) {
       return {
+    functions,  // FIXED: Include functions for direct access
         target: MASTER_CONTACTS[contactName],
         type: msgLower.includes('warm') ? 'warm' : 'cold'
       };
@@ -2666,6 +2681,7 @@ async function lookupCallerByPhone(phoneNumber) {
         
         console.log('[CONTACT LOOKUP] Found in brain:', name, trust);
         return {
+    functions,  // FIXED: Include functions for direct access
           name: name.split(' ')[0], // First name only for greeting
           role: role,
           trust: trust,
@@ -2713,6 +2729,7 @@ async function lookupCallerByPhone(phoneNumber) {
         const trustMatch = contact.match(/Trust:\s*(\w+)/);
         
         return {
+    functions,  // FIXED: Include functions for direct access
           name: nameMatch ? nameMatch[1].trim() : 'Contact',
           role: roleMatch ? roleMatch[1] : 'contact',
           trust: trustMatch ? trustMatch[1] : 'T5',
@@ -2730,6 +2747,7 @@ async function lookupCallerByPhone(phoneNumber) {
   
   // Unknown caller
   return {
+    functions,  // FIXED: Include functions for direct access
     name: 'Caller',
     role: 'unknown',
     trust: 'T2',
@@ -2780,6 +2798,7 @@ async function RECALL_lastConversation(callerIdentity) {
       if (data.length > 0) {
         console.log('[RECALL] Found', data.length, 'previous conversations');
         return {
+    functions,  // FIXED: Include functions for direct access
           found: true,
           lastTopic: data[0].content,
           conversationCount: data.length
@@ -2803,6 +2822,7 @@ async function RECALL_lastConversation(callerIdentity) {
       if (nameData.length > 0) {
         console.log('[RECALL] Found', nameData.length, 'previous conversations by name');
         return {
+    functions,  // FIXED: Include functions for direct access
           found: true,
           lastTopic: nameData[0].content,
           conversationCount: nameData.length
@@ -3128,6 +3148,7 @@ async function SHADOW_accessVault(query, callerIdentity) {
   
   if (foundContent.length === 0) {
     return {
+    functions,  // FIXED: Include functions for direct access
       response: "Boss, I searched my vault but couldn't find any meeting notes or transcripts.",
       needsConsent: false
     };
@@ -3146,6 +3167,7 @@ async function SHADOW_accessVault(query, callerIdentity) {
     const typeSummary = Object.entries(typeCount).map(([t,c]) => `${c} ${t}`).join(', ');
     
     return {
+    functions,  // FIXED: Include functions for direct access
       response: `I found ${foundContent.length} entries in my vault: ${typeSummary}. This is protected under Shadow protocol. Do you consent to unlock?`,
       needsConsent: true,
       entryCount: foundContent.length
@@ -3174,6 +3196,7 @@ async function SHADOW_accessVault(query, callerIdentity) {
   }
   
   return {
+    functions,  // FIXED: Include functions for direct access
     response: compiledNotes,
     needsConsent: false,
     released: true,
@@ -3814,6 +3837,7 @@ async function DIAL_callWithElevenLabs(phoneNumber, firstMessage, callerContext)
       });
       
       return {
+    functions,  // FIXED: Include functions for direct access
         success: true,
         conversation_id: data.conversation_id,
         message: 'I am calling ' + phoneNumber + ' now with a full two-way conversation capability.'
@@ -4342,6 +4366,7 @@ async function AIR_escalate(event) {
   await AIR_logEscalation(event, lukeAnalysis, coleContext, judeDecision, packMessage, executionResult);
   
   return {
+    functions,  // FIXED: Include functions for direct access
     success: true,
     routing: `AIR*LUKE*COLE*JUDE*PACK*${judeDecision.action.toUpperCase()}`,
     analysis: lukeAnalysis,
@@ -4393,6 +4418,7 @@ Respond in JSON only:
     else if (contentLower.includes('legal') || contentLower.includes('nda') || contentLower.includes('contract')) category = 'legal';
     
     return {
+    functions,  // FIXED: Include functions for direct access
       urgency,
       intent: 'Review and respond',
       category,
@@ -4422,6 +4448,7 @@ async function COLE_getEscalationContext(lukeAnalysis) {
     const memories = await res.json();
     
     return {
+    functions,  // FIXED: Include functions for direct access
       relevantMemories: memories || [],
       previousEscalations: memories.filter(m => m.memory_type === 'escalation'),
       hasHistory: memories.length > 0
@@ -4466,6 +4493,7 @@ async function JUDE_decideEscalation(lukeAnalysis, coleContext) {
   else action = 'log_only';
   
   return {
+    functions,  // FIXED: Include functions for direct access
     action,
     target,
     urgency,
@@ -4504,6 +4532,7 @@ Format: Just the spoken message, nothing else.`;
   try {
     const spokenMessage = await callModel(prompt);
     return {
+    functions,  // FIXED: Include functions for direct access
       spokenMessage: spokenMessage.trim(),
       smsMessage: `[ABA] ${summary}. Urgency: ${urgency}/6. Call back or respond.`,
       emailSubject: `[ABA Alert] ${category}: ${summary.substring(0, 50)}`,
@@ -4512,6 +4541,7 @@ Format: Just the spoken message, nothing else.`;
   } catch (e) {
     // Fallback message
     return {
+    functions,  // FIXED: Include functions for direct access
       spokenMessage: `Hello ${target.name.split(' ')[0]}. This is ABA with an important update. ${summary}. This is ${urgency >= 5 ? 'urgent' : 'important'} and requires your attention. Please respond when you can.`,
       smsMessage: `[ABA] ${summary}. Urgency: ${urgency}/6.`,
       emailSubject: `[ABA Alert] ${summary.substring(0, 50)}`,
@@ -6619,6 +6649,7 @@ async function SAGE_search(query, options = {}) {
       brainResults = results.map(r => {
         const aclMatch = (r.content || '').match(/⬡B:[^⬡]+⬡/g) || [];
         return {
+    functions,  // FIXED: Include functions for direct access
           id: r.id,
           content: r.content?.substring(0, 200),
           acl_tags: aclMatch,
@@ -7724,6 +7755,7 @@ const DEMO_TOUCHPOINTS = {
 
 function createDemoState() {
   return {
+    functions,  // FIXED: Include functions for direct access
     INTRO: false,
     PORTAL: false,
     STATUS: false,
@@ -8055,6 +8087,7 @@ function getTouchpointsForCaller(callerIdentity, callHistory) {
   // RETURNING CALLER - has called before
   if (callHistory) {
     return {
+    functions,  // FIXED: Include functions for direct access
       type: 'returning',
       WELCOME_BACK: false,  // "Hey [name]! Good to hear from you again!"
       RECAP: false,         // "Last time we talked about X"
@@ -8072,6 +8105,7 @@ function getTouchpointsForCaller(callerIdentity, callHistory) {
   // KNOWN CONTACT (found in brain) - shorter onboarding
   if (callerIdentity?.role === 'contact') {
     return {
+    functions,  // FIXED: Include functions for direct access
       type: 'known',
       HELLO: false,         // Warm hello, acknowledge relationship
       QUICK_INTRO: false,   // Brief ABA capabilities
@@ -8082,6 +8116,7 @@ function getTouchpointsForCaller(callerIdentity, callHistory) {
   
   // FIRST-TIME UNKNOWN - full onboarding (what was "demo mode")
   return {
+    functions,  // FIXED: Include functions for direct access
     type: 'first_time',
     INTRO: false,       // Life partner, not assistant
     PORTAL: false,      // What the portal does
@@ -8279,6 +8314,7 @@ async function sendEmailFromCall(toEmail, toName, subject, htmlBody) {
 
 function createTranscriptBuilder() {
   return {
+    functions,  // FIXED: Include functions for direct access
     entries: [],
     startTime: Date.now(),
     addUtterance(text, role, speaker) {
@@ -8355,6 +8391,7 @@ async function storeFullTranscript(session) {
 
 function createSpeakerTracker() {
   return {
+    functions,  // FIXED: Include functions for direct access
     primarySpeaker: null,
     speakerHistory: [],
     bystanderDetected: false,
@@ -8567,6 +8604,7 @@ function extractSpeakers(data) {
 // Real-time sentiment tracking during call
 function createSentimentTracker() {
   return {
+    functions,  // FIXED: Include functions for direct access
     segments: [],
     overallScore: 0,
     trend: 'neutral',
@@ -8596,6 +8634,7 @@ function createSentimentTracker() {
       const avgSentiment = this.overallScore > 0.2 ? 'positive' : 
                           this.overallScore < -0.2 ? 'negative' : 'neutral';
       return {
+    functions,  // FIXED: Include functions for direct access
         sentiment: avgSentiment,
         score: Math.round(this.overallScore * 100) / 100,
         trend: this.trend,
@@ -8767,6 +8806,7 @@ async function IMAN_voiceEmailCommand(message, callerIdentity) {
   
   // Return draft for confirmation
   return {
+    functions,  // FIXED: Include functions for direct access
     success: true,
     draft: draftResult,
     response: `I've drafted an email to ${recipientName} about ${topic}. Here's what I have: Subject: ${draftResult.subject}. ${draftResult.body.substring(0, 100)}... Should I send it?`,
@@ -9588,6 +9628,7 @@ Generate ONLY the greeting, nothing else:`;
     const greeting = greetingResponse.trim().replace(/^["']|["']$/g, '');
     console.log('[GREET] Generated:', greeting);
     return {
+    functions,  // FIXED: Include functions for direct access
       greeting,
       context: greetingContext,
       trace: 'AIR*HAM,TIME,COLE,GREET*VARA'
@@ -9599,6 +9640,7 @@ Generate ONLY the greeting, nothing else:`;
       ? `Hey ${greetingContext.firstName}! Good to hear from you.`
       : `Hello! How can I help?`;
     return {
+    functions,  // FIXED: Include functions for direct access
       greeting: fallback,
       context: greetingContext,
       trace: 'AIR*GREET_FALLBACK*VARA'
@@ -10284,6 +10326,7 @@ async function IMAN_draftEmail(context) {
     const bodyMatch = response.match(/BODY:\s*([\s\S]+)/i);
     
     return {
+    functions,  // FIXED: Include functions for direct access
       to,
       subject: subjectMatch ? subjectMatch[1].trim() : 'Re: ' + regarding,
       body: bodyMatch ? bodyMatch[1].trim() : response,
@@ -12602,6 +12645,7 @@ if (path === '/api/sms/send' && method === 'POST') {
           try {
             const intel = JSON.parse(d.content);
             return {
+    functions,  // FIXED: Include functions for direct access
               conversation_id: intel.conversation_id,
               created_at: d.created_at,
               duration: intel.duration,
