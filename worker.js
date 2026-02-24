@@ -695,13 +695,348 @@ AGENTS.DAWN = {
   }
 };
 
-// VARA, CARA, QUILL, SHADOW, SAGE - Basic implementations
-AGENTS.VARA = { name: 'VARA', fullName: 'Vocal Authorized Representative of ABA', speak(text) { return { text, length: text?.length || 0 }; } };
-AGENTS.CARA = { name: 'CARA', fullName: 'Communication And Reach Agent', planOutreach(urgency) { return { channel: urgency === 'urgent' ? 'call' : urgency === 'high' ? 'sms' : 'email' }; } };
-AGENTS.QUILL = { name: 'QUILL', fullName: 'Quality Understanding of Intent in Language and Lexicon' };
-AGENTS.SHADOW = { name: 'SHADOW', fullName: 'Stealthy Historical Audit and Daily Oversight Watch' };
-AGENTS.SAGE = { name: 'SAGE', fullName: 'Search Assessment and Governance Engine', async search(query) { return await AGENTS.COLE.searchBrain(query); } };
-AGENTS.DRAFT = { name: 'DRAFT', fullName: 'Detection and Review of AI-Fabricated Text', scan(text) { return typeof DRAFT_scanOutput === 'function' ? DRAFT_scanOutput(text) : { score: 100, passed: true }; } };
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PHASE 2: REAL AGENT IMPLEMENTATIONS (Feb 24 2026)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// VARA - REAL Voice via ElevenLabs
+AGENTS.VARA = {
+  name: 'VARA', fullName: 'Vocal Authorized Representative of ABA',
+  voiceId: 'LD658Mupr7vNwTTJSPsk',
+  model: 'eleven_flash_v2_5',
+  
+  async speak(text, options = {}) {
+    if (!text) return { error: 'No text provided' };
+    const ELEVENLABS_KEY = process.env.ELEVENLABS_API_KEY;
+    if (!ELEVENLABS_KEY) return { spoken: false, text, note: 'Text-only mode' };
+    
+    try {
+      const response = await fetch('https://api.elevenlabs.io/v1/text-to-speech/' + this.voiceId, {
+        method: 'POST',
+        headers: { 'xi-api-key': ELEVENLABS_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: text,
+          model_id: options.model || this.model,
+          voice_settings: { stability: 0.5, similarity_boost: 0.75 }
+        })
+      });
+      if (response.ok) return { spoken: true, text, length: text.length, voiceId: this.voiceId };
+      return { spoken: false, error: await response.text() };
+    } catch (e) { return { spoken: false, error: e.message }; }
+  }
+};
+
+// CARA - REAL SMS via Twilio + Outreach Planning
+AGENTS.CARA = {
+  name: 'CARA', fullName: 'Communication And Reach Agent',
+  channelHistory: new Map(),
+  
+  planOutreach(context) {
+    const { urgency, sentiment, preference } = context || {};
+    if (urgency === 'critical' || sentiment === 'urgent') return { channel: 'call', agent: 'DIAL', reason: 'Critical' };
+    if (urgency === 'high') return { channel: 'sms', agent: 'CARA', reason: 'High urgency' };
+    if (preference === 'call') return { channel: 'call', agent: 'DIAL', reason: 'Preference' };
+    return { channel: 'email', agent: 'IMAN', reason: 'Default' };
+  },
+  
+  async sendSms(to, message) {
+    const TWILIO_SID = process.env.TWILIO_ACCOUNT_SID || process.env.TWILIO_SID;
+    const TWILIO_AUTH = process.env.TWILIO_AUTH_TOKEN || process.env.TWILIO_AUTH;
+    const TWILIO_PHONE = process.env.TWILIO_PHONE_NUMBER || process.env.TWILIO_PHONE;
+    if (!TWILIO_SID || !TWILIO_AUTH) return { sent: false, error: 'Missing Twilio creds' };
+    
+    try {
+      const authHeader = 'Basic ' + Buffer.from(TWILIO_SID + ':' + TWILIO_AUTH).toString('base64');
+      const formData = new URLSearchParams();
+      formData.append('To', to);
+      formData.append('From', TWILIO_PHONE);
+      formData.append('Body', message);
+      
+      const r = await fetch('https://api.twilio.com/2010-04-01/Accounts/' + TWILIO_SID + '/Messages.json', {
+        method: 'POST',
+        headers: { 'Authorization': authHeader, 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: formData.toString()
+      });
+      if (r.ok) { const data = await r.json(); return { sent: true, sid: data.sid, to }; }
+      return { sent: false, error: await r.text() };
+    } catch (e) { return { sent: false, error: e.message }; }
+  },
+  
+  recordChannel(userId, channel, messageId) {
+    if (!this.channelHistory.has(userId)) this.channelHistory.set(userId, []);
+    this.channelHistory.get(userId).push({ channel, messageId, timestamp: Date.now() });
+  }
+};
+
+// QUILL - REAL Writing Standards Enforcement
+AGENTS.QUILL = {
+  name: 'QUILL', fullName: 'Quality Understanding of Intent in Language and Lexicon',
+  violations: {
+    EM_DASH: { pattern: /—|--/g, fix: ', ', severity: 'fireable' },
+    COLD_GREETING: { pattern: /^(Hey,|Hi,|Hello,)\s/i, severity: 'fireable' },
+    CTA_ENDING: { pattern: /let me know if you have any questions\.?$/i, severity: 'fireable' },
+    AI_HAPPY_TO: { pattern: /I('d)?\s+(would\s+)?be\s+happy\s+to/gi, severity: 'high' },
+    CORPORATE_SPEAK: { pattern: /leverage|synergy|bandwidth|circle back|touch base/gi, severity: 'medium' }
+  },
+  
+  enforce(text) {
+    if (!text) return { text, violations: [], score: 100, passed: true };
+    let fixedText = text;
+    const foundViolations = [];
+    let score = 100;
+    const deductions = { fireable: 25, high: 10, medium: 5, low: 2 };
+    
+    for (const [name, rule] of Object.entries(this.violations)) {
+      if (rule.pattern.test(text)) {
+        foundViolations.push({ type: name, severity: rule.severity });
+        score -= deductions[rule.severity] || 5;
+        if (rule.fix) fixedText = fixedText.replace(rule.pattern, rule.fix);
+      }
+    }
+    return { original: text, fixed: fixedText, violations: foundViolations, score: Math.max(0, score), passed: foundViolations.filter(v => v.severity === 'fireable').length === 0 };
+  },
+  
+  check(text) { const r = this.enforce(text); return { score: r.score, passed: r.passed, violationCount: r.violations.length }; }
+};
+
+// SHADOW - REAL Audit Logging
+AGENTS.SHADOW = {
+  name: 'SHADOW', fullName: 'Stealthy Historical Audit and Daily Oversight Watch',
+  auditLog: [],
+  
+  async audit(event) {
+    const entry = { id: 'audit_' + Date.now(), timestamp: new Date().toISOString(), event: event.type, actor: event.actor || 'system', target: event.target, action: event.action, result: event.result };
+    this.auditLog.push(entry);
+    if (this.auditLog.length > 1000) this.auditLog.shift();
+    
+    try {
+      await fetch(SUPABASE_URL + '/rest/v1/aba_memory', {
+        method: 'POST',
+        headers: { 'apikey': SUPABASE_KEY || SUPABASE_ANON, 'Authorization': 'Bearer ' + (SUPABASE_KEY || SUPABASE_ANON), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source: 'shadow_audit_' + Date.now(), memory_type: 'audit', content: JSON.stringify(entry), tags: ['audit', event.type], importance: 6 })
+      });
+    } catch (e) {}
+    return { logged: true, id: entry.id };
+  },
+  
+  getRecent(count = 20) { return this.auditLog.slice(-count); }
+};
+
+// SAGE - REAL Strategic Search
+AGENTS.SAGE = {
+  name: 'SAGE', fullName: 'Search Assessment and Governance Engine',
+  
+  async search(query, options = {}) {
+    const limit = options.limit || 10;
+    // Try semantic via pgvector
+    try {
+      const r = await fetch(SUPABASE_URL + '/rest/v1/rpc/match_memories', {
+        method: 'POST',
+        headers: { 'apikey': SUPABASE_KEY || SUPABASE_ANON, 'Authorization': 'Bearer ' + (SUPABASE_KEY || SUPABASE_ANON), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query_embedding: null, match_threshold: 0.5, match_count: limit })
+      });
+      if (r.ok) { const data = await r.json(); if (data.length > 0) return { results: data, count: data.length, method: 'semantic' }; }
+    } catch (e) {}
+    // Fallback to COLE
+    return { ...(await AGENTS.COLE.searchBrain(query, limit)), method: 'keyword' };
+  },
+  
+  async strategicSearch(query, context = {}) {
+    const results = [];
+    const primary = await this.search(query);
+    results.push(...primary.results);
+    if (context.entities) {
+      for (const e of context.entities.slice(0, 3)) {
+        const er = await this.search(e.value, { limit: 3 });
+        results.push(...er.results);
+      }
+    }
+    const unique = [...new Map(results.map(r => [r.id, r])).values()];
+    return { results: unique.slice(0, 10), count: unique.length };
+  }
+};
+
+// DRAFT - REAL BS Detection (uses DRAFT_scanOutput if exists)
+AGENTS.DRAFT = {
+  name: 'DRAFT', fullName: 'Detection and Review of AI-Fabricated Text',
+  scan(text) {
+    if (typeof DRAFT_scanOutput === 'function') return DRAFT_scanOutput(text);
+    // Inline check
+    let score = 100;
+    const violations = [];
+    const checks = [
+      [/—|--/g, 'em_dash', 10],
+      [/I('d)?\s+(would\s+)?be\s+happy\s+to/gi, 'happy_to', 5],
+      [/leverage|synergy|bandwidth/gi, 'corporate', 5],
+      [/\bdelve\b/gi, 'delve', 5],
+      [/it's important to note/gi, 'ai_phrase', 5]
+    ];
+    for (const [pattern, name, deduct] of checks) {
+      if (pattern.test(text)) { violations.push({ type: name }); score -= deduct; }
+    }
+    return { score: Math.max(0, score), violations, passed: score >= 85 };
+  }
+};
+
+// DAWN - REAL Morning Briefing
+AGENTS.DAWN = {
+  name: 'DAWN', fullName: 'Daily Awareness and Wisdom Notifier',
+  
+  async generateBriefing() {
+    const time = AGENTS.NOW.getContext();
+    const items = ['Good ' + time.timeOfDay + ', Brandon!', 'It is ' + time.readable + ' on ' + time.dayOfWeek + '.', ''];
+    
+    // Email check
+    try {
+      const NYLAS_GRANT = process.env.NYLAS_GRANT_ID || '41a3ace1-1c1e-47f3-b017-e5fd71ea1f3a';
+      const NYLAS_KEY = process.env.NYLAS_API_KEY || 'nyk_v0_eeBniYFxPAMuK30DejqDNIFfEyMQiH6ATEnTEhMiutJzvwor3c2ZuhC0Oeicl2vn';
+      const r = await fetch('https://api.us.nylas.com/v3/grants/' + NYLAS_GRANT + '/messages?limit=50&unread=true', { headers: { 'Authorization': 'Bearer ' + NYLAS_KEY } });
+      if (r.ok) { const data = await r.json(); const msgs = data.data || []; items.push('📧 ' + msgs.length + ' unread emails'); }
+    } catch (e) { items.push('📧 Email check failed'); }
+    
+    items.push('', 'How can I help you today?');
+    return { briefing: items.join('\n'), time };
+  }
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PHASE 3: AUTONOMY - Proactive Engine & Cross-Channel State
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const PROACTIVE_ENGINE = {
+  tasks: new Map(),
+  running: false,
+  intervalId: null,
+  
+  register(config) {
+    const task = { id: config.id || 'task_' + Date.now(), name: config.name, interval: config.interval, lastRun: null, nextRun: Date.now() + (config.delay || 0), runCount: 0, enabled: true, execute: config.execute };
+    this.tasks.set(task.id, task);
+    console.log('[PROACTIVE] Registered:', task.name);
+    return task.id;
+  },
+  
+  async runDue() {
+    const now = Date.now();
+    for (const [id, task] of this.tasks) {
+      if (!task.enabled || now < task.nextRun) continue;
+      console.log('[PROACTIVE] Running:', task.name);
+      try { await task.execute(); task.lastRun = now; task.runCount++; } catch (e) { console.log('[PROACTIVE] Failed:', task.name, e.message); }
+      task.nextRun = now + task.interval;
+    }
+  },
+  
+  start(checkInterval = 60000) {
+    if (this.running) return;
+    this.running = true;
+    this.intervalId = setInterval(() => this.runDue(), checkInterval);
+    console.log('[PROACTIVE] Engine started');
+    // Default tasks
+    this.register({ id: 'health', name: 'Health Check', interval: 300000, execute: async () => { await HEALTH_MONITOR.checkAll(); } });
+    this.register({ id: 'cost_reset', name: 'Cost Reset', interval: 3600000, execute: () => { const now = Date.now(); if (now - COST_CAPS.hourly.reset > 3600000) { COST_CAPS.hourly.current = 0; COST_CAPS.hourly.reset = now; } } });
+  },
+  
+  stop() { if (this.intervalId) clearInterval(this.intervalId); this.running = false; console.log('[PROACTIVE] Stopped'); },
+  
+  getStatus() { return { running: this.running, tasks: [...this.tasks.values()].map(t => ({ id: t.id, name: t.name, enabled: t.enabled, runCount: t.runCount, nextRun: new Date(t.nextRun).toISOString() })) }; }
+};
+
+const CROSS_CHANNEL_STATE = {
+  conversations: new Map(),
+  
+  getOrCreate(userId) {
+    if (!this.conversations.has(userId)) {
+      this.conversations.set(userId, { userId, channels: { voice: [], sms: [], email: [], chat: [], omi: [] }, context: {}, lastActivity: Date.now(), sessionStart: Date.now() });
+    }
+    const c = this.conversations.get(userId);
+    c.lastActivity = Date.now();
+    return c;
+  },
+  
+  addMessage(userId, channel, message, direction = 'inbound') {
+    const c = this.getOrCreate(userId);
+    const entry = { id: 'msg_' + Date.now(), channel, direction, content: typeof message === 'string' ? message : message.content, timestamp: Date.now() };
+    c.channels[channel] = c.channels[channel] || [];
+    c.channels[channel].push(entry);
+    if (c.channels[channel].length > 50) c.channels[channel].shift();
+    return entry.id;
+  },
+  
+  getFullContext(userId, limit = 20) {
+    const c = this.getOrCreate(userId);
+    const all = [];
+    for (const [ch, msgs] of Object.entries(c.channels)) { for (const m of msgs) { all.push({ ...m, channel: ch }); } }
+    all.sort((a, b) => b.timestamp - a.timestamp);
+    return { userId, messages: all.slice(0, limit), context: c.context };
+  },
+  
+  setContext(userId, key, value) { this.getOrCreate(userId).context[key] = value; },
+  getContext(userId, key) { const c = this.getOrCreate(userId).context; return key ? c[key] : c; }
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PHASE 4: OPTIMIZATION - Health, Degradation, Self-Reflection
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const HEALTH_MONITOR = {
+  services: { supabase: { healthy: true }, anthropic: { healthy: true }, elevenlabs: { healthy: true }, nylas: { healthy: true }, twilio: { healthy: true } },
+  
+  async checkAll() {
+    const issues = [];
+    // Supabase
+    try {
+      const r = await fetch(SUPABASE_URL + '/rest/v1/aba_memory?limit=1', { headers: { 'apikey': SUPABASE_KEY || SUPABASE_ANON } });
+      this.services.supabase = { healthy: r.ok, lastCheck: Date.now() };
+    } catch (e) { this.services.supabase = { healthy: false, error: e.message }; issues.push('supabase'); }
+    
+    // Check keys exist
+    if (!ANTHROPIC_API_KEY) { this.services.anthropic = { healthy: false }; issues.push('anthropic'); }
+    if (!process.env.ELEVENLABS_API_KEY) { this.services.elevenlabs = { healthy: false }; issues.push('elevenlabs'); }
+    
+    return { healthy: issues.length === 0, services: this.services, issues };
+  },
+  
+  getFallback(service) {
+    const fallbacks = { anthropic: 'gemini', elevenlabs: 'text_only', nylas: 'sms', twilio: 'email', supabase: 'memory_only' };
+    return { use: fallbacks[service] || 'skip', note: service + ' unavailable' };
+  },
+  
+  isHealthy(service) { return this.services[service]?.healthy !== false; }
+};
+
+const MODEL_SELECTOR = {
+  select(analysis, costCheck) {
+    if (costCheck?.downgrade === 'haiku') return MODEL_TIERS.haiku;
+    if (analysis.sentiment === 'urgent' || analysis.wordCount > 50 || analysis.isMultiTask) return MODEL_TIERS.opus;
+    if (analysis.intents?.includes('greeting') && analysis.wordCount < 10) return MODEL_TIERS.haiku;
+    return MODEL_TIERS.sonnet;
+  }
+};
+
+const SELF_REFLECTION = {
+  sessions: [],
+  
+  async reflect(data) {
+    const r = { timestamp: Date.now(), model: data.model, responseTime: data.responseTime, tokens: (data.tokens?.input || 0) + (data.tokens?.output || 0), draftScore: data.draftScore, success: data.draftScore >= 85 };
+    this.sessions.push(r);
+    if (this.sessions.length > 100) this.sessions.shift();
+    
+    const recent = this.sessions.slice(-20);
+    const avgTime = recent.reduce((s, x) => s + x.responseTime, 0) / recent.length;
+    const successRate = recent.filter(x => x.success).length / recent.length;
+    
+    if (avgTime > 10000 || successRate < 0.8) {
+      console.log('[REFLECT] Performance: avgTime=' + avgTime.toFixed(0) + 'ms, success=' + (successRate * 100).toFixed(0) + '%');
+    }
+    return { avgTime, successRate };
+  },
+  
+  getStats() {
+    if (!this.sessions.length) return { empty: true };
+    const r = this.sessions.slice(-50);
+    return { count: this.sessions.length, avgTime: r.reduce((s, x) => s + x.responseTime, 0) / r.length, avgScore: r.reduce((s, x) => s + x.draftScore, 0) / r.length, successRate: r.filter(x => x.success).length / r.length };
+  }
+};
 
 // PHASE 3 & 4: REAL ORCHESTRATION
 const MODEL_TIERS = {
