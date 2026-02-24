@@ -1386,8 +1386,8 @@ AGENTS.BURST = {
 };
 
 // CeeCee - Command Center Entry and Exit Coordinator
-AGENTS.CeeCee = {
-  name: 'CeeCee',
+AGENTS.CEECEE = {
+  name: 'CEECEE',
   fullName: 'Command Center Entry and Exit Coordinator',
   department: 'VOICE',
   type: 'CONTEXT_WRAPPER',
@@ -1398,7 +1398,7 @@ AGENTS.CeeCee = {
   getContext(message, context) {
     this.runCount++;
     return {
-      agent: 'CeeCee',
+      agent: 'CEECEE',
       fullName: 'Command Center Entry and Exit Coordinator',
       department: 'VOICE',
       contextAddition: 'Agent CeeCee (Command Center Entry and Exit Coordinator) is available for voice tasks.',
@@ -1410,7 +1410,7 @@ AGENTS.CeeCee = {
   async execute(action, params) {
     this.runCount++;
     return {
-      agent: 'CeeCee',
+      agent: 'CEECEE',
       action: action || 'getContext',
       result: this.getContext(params?.message, params?.context),
       message: 'CeeCee ready - context wrapper active'
