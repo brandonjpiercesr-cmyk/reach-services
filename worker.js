@@ -9081,14 +9081,29 @@ async function AIR_DISPATCH(lukeAnalysis, judeResult, callerIdentity) {
       
       if (forgeResult.created) {
         console.log('[AIR_DISPATCH] ✅ FORGE successfully created agent:', acronym);
+        // Convert object result to nice message string for PAM_filter compatibility
+        const successMessage = `✅ Agent ${forgeResult.newAgent?.acronym || acronym} created successfully!\n\n` +
+          `Full Name: ${forgeResult.newAgent?.fullName || 'N/A'}\n` +
+          `Department: ${forgeResult.newAgent?.department || 'GENERAL'}\n` +
+          `ID: ${forgeResult.newAgent?.id || 'N/A'}\n\n` +
+          `The agent is now registered and callable via /api/v2/agents/${forgeResult.newAgent?.acronym || acronym}/execute`;
         return { 
           handled: true, 
           agent: 'FORGE', 
-          data: forgeResult,
-          trace: 'AIR*FORGE*CREATE'
+          data: successMessage,
+          trace: 'AIR*FORGE*CREATE',
+          forgeResult: forgeResult // Keep raw result for reference
         };
       } else {
         console.log('[AIR_DISPATCH] ⚠️ FORGE returned:', forgeResult);
+        // Return error message as string
+        const errorMessage = `❌ Could not create agent: ${forgeResult.message || 'Unknown error'}`;
+        return {
+          handled: true,
+          agent: 'FORGE',
+          data: errorMessage,
+          trace: 'AIR*FORGE*ERROR'
+        };
       }
     } else {
       console.log('[AIR_DISPATCH] Could not extract acronym from message');
