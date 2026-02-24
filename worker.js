@@ -77,7 +77,7 @@ const PORT = process.env.PORT || 3000;
 
 // ⬡B:AIR:REACH.CONFIG.SUPABASE:CONFIG:brain.connection.persistence:AIR→REACH→BRAIN:T10:v1.5.0:20260213:s1b2a⬡
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://htlxjkbrstpwwtzsbyvb.supabase.co';
-const SUPABASE_KEY = process.env.SUPABASE_KEY_KEY || process.env.SUPABASE_KEY_ROLE_KEY;
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0bHhqa2Jyc3Rwd3d0enNieXZiIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MDUzMjgyMSwiZXhwIjoyMDg2MTA4ODIxfQ.G55zXnfanoUxRAoaYz-tD9FDJ53xHH-pRgDrKss_Iqo';
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0bHhqa2Jyc3Rwd3d0enNieXZiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA1MzI4MjEsImV4cCI6MjA4NjEwODgyMX0.MOgNYkezWpgxTO3ZHd0omZ0WLJOOR-tL7hONXWG9eBw';
 
 
@@ -523,7 +523,11 @@ AGENTS.LUKE = {
     // ALL phone numbers
     (message.match(/\+?[\d\s().-]{10,}/g) || []).forEach(p => entities.push({ type: 'phone', value: p.trim().replace(/\s+/g, '') }));
     // ALL person names
-    const namePatterns = [/(?:to|for|with|from|tell|email|call|text|contact)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/g, /([A-Z][a-z]+)\s+(?:at|knows|said|wants|needs)/g];
+    const namePatterns = [
+      /(?:to|for|with|from|tell|email|call|text|contact)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/g,
+      /([A-Z][a-z]+)\s+(?:at|knows|said|wants|needs)/g,
+      /(?:call|text|email|tell|contact)\s+([A-Z]{2,3})\b/g
+    ];
     const skip = ['The','This','That','Here','What','When','Where','How','Why','Who','I','You','He','She','We','They','My','Your','Good','Hi','Hello','Hey','Please','Also','Then','First','Second','Finally','URGENT','CRITICAL','ASAP'];
     const foundNames = new Set();
     namePatterns.forEach(p => { let m; while ((m = p.exec(message)) !== null) { if (!skip.includes(m[1])) foundNames.add(m[1]); } });
