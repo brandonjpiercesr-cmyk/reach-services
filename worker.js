@@ -80,6 +80,12 @@ const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://htlxjkbrst
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0bHhqa2Jyc3Rwd3d0enNieXZiIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MDUzMjgyMSwiZXhwIjoyMDg2MTA4ODIxfQ.G55zXnfanoUxRAoaYz-tD9FDJ53xHH-pRgDrKss_Iqo';
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0bHhqa2Jyc3Rwd3d0enNieXZiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA1MzI4MjEsImV4cCI6MjA4NjEwODgyMX0.MOgNYkezWpgxTO3ZHd0omZ0WLJOOR-tL7hONXWG9eBw';
 
+// ⬡B:AIR:REACH.CONFIG.GITHUB:CONFIG:code.deployment:v1.0.0:20260224⬡
+// GitHub token for autonomous code deployment
+const GITHUB_TOKEN = process.env.GITHUB_TOKEN || '';
+const GITHUB_REPO = 'brandonjpiercesr-cmyk/reach-services';
+const GITHUB_BRANCH = 'main';
+
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // ⬡B:AIR:REACH.TRAINING.LOADER:CODE:training.brain:v1.0.0:20260222⬡
@@ -20219,69 +20225,3 @@ OUTPUT JSON:
     return { success: false, approved: true, error: e.message };
   }
 }
-
-
-// PHISH - Phishing and Hostile Input Security Handler
-// ⬡B:AGENT.PHISH:CODE:security:v1.0.0:20260224⬡
-// Created by Claude AI as PROOF that it can create agents
-AGENTS.PHISH = {
-  name: 'PHISH',
-  fullName: 'Phishing and Hostile Input Security Handler',
-  department: 'SECURITY',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'always',
-  active: true,
-  runCount: 0,
-  
-  // Known phishing indicators
-  phishingPatterns: [
-    /urgent.*action.*required/i,
-    /verify.*account.*immediately/i,
-    /click.*here.*to.*confirm/i,
-    /password.*expired/i,
-    /suspended.*account/i
-  ],
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'PHISH',
-      fullName: 'Phishing and Hostile Input Security Handler',
-      department: 'SECURITY',
-      contextAddition: 'Agent PHISH is scanning for phishing attempts and malicious content.',
-      capabilities: ['phishing_detection', 'url_scanning', 'social_engineering_detection'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    
-    if (action === 'scan') {
-      const text = params?.text || params?.message || '';
-      let threats = [];
-      
-      for (const pattern of this.phishingPatterns) {
-        if (pattern.test(text)) {
-          threats.push({ type: 'phishing_language', pattern: pattern.toString() });
-        }
-      }
-      
-      return {
-        agent: 'PHISH',
-        action: 'scan',
-        scanned: text.substring(0, 100),
-        threats: threats,
-        threatLevel: threats.length > 0 ? 'HIGH' : 'LOW',
-        message: threats.length > 0 ? `⚠️ ${threats.length} phishing indicators detected` : '✅ No phishing detected'
-      };
-    }
-    
-    return {
-      agent: 'PHISH',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'PHISH ready - security scanning active'
-    };
-  }
-};
