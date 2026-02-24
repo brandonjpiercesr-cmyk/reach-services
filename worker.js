@@ -12148,7 +12148,7 @@ if (path === '/api/sms/send' && method === 'POST') {
       if (!message) {
         return jsonResponse(res, 400, { error: 'Required: message' });
       }
-      const result = await AIR_orchestrate(message, context);
+      const result = await AIR_orchestrate_REAL(message, context);
       return jsonResponse(res, 200, result);
     } catch (e) {
       console.error('[V2 ORCHESTRATE] Error:', e);
