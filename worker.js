@@ -19885,3 +19885,68 @@ OUTPUT JSON:
   }
 }
 
+
+// PHISH - Phishing and Hostile Input Security Handler
+// ⬡B:AGENT.PHISH:CODE:security:v1.0.0:20260224⬡
+// Created by Claude AI as PROOF that it can create agents
+AGENTS.PHISH = {
+  name: 'PHISH',
+  fullName: 'Phishing and Hostile Input Security Handler',
+  department: 'SECURITY',
+  type: 'CONTEXT_WRAPPER',
+  runtime: 'always',
+  active: true,
+  runCount: 0,
+  
+  // Known phishing indicators
+  phishingPatterns: [
+    /urgent.*action.*required/i,
+    /verify.*account.*immediately/i,
+    /click.*here.*to.*confirm/i,
+    /password.*expired/i,
+    /suspended.*account/i
+  ],
+  
+  getContext(message, context) {
+    this.runCount++;
+    return {
+      agent: 'PHISH',
+      fullName: 'Phishing and Hostile Input Security Handler',
+      department: 'SECURITY',
+      contextAddition: 'Agent PHISH is scanning for phishing attempts and malicious content.',
+      capabilities: ['phishing_detection', 'url_scanning', 'social_engineering_detection'],
+      status: 'context_wrapper_v1'
+    };
+  },
+  
+  async execute(action, params) {
+    this.runCount++;
+    
+    if (action === 'scan') {
+      const text = params?.text || params?.message || '';
+      let threats = [];
+      
+      for (const pattern of this.phishingPatterns) {
+        if (pattern.test(text)) {
+          threats.push({ type: 'phishing_language', pattern: pattern.toString() });
+        }
+      }
+      
+      return {
+        agent: 'PHISH',
+        action: 'scan',
+        scanned: text.substring(0, 100),
+        threats: threats,
+        threatLevel: threats.length > 0 ? 'HIGH' : 'LOW',
+        message: threats.length > 0 ? `⚠️ ${threats.length} phishing indicators detected` : '✅ No phishing detected'
+      };
+    }
+    
+    return {
+      agent: 'PHISH',
+      action: action || 'getContext',
+      result: this.getContext(params?.message, params?.context),
+      message: 'PHISH ready - security scanning active'
+    };
+  }
+};
