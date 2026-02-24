@@ -12388,6 +12388,91 @@ async function IMAN_draftEmail(context) {
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// DYNAMIC AGENT LOADER - Loads agents from aba_agent_jds at startup
+// ⬡B:AIR:DYNAMIC_LOADER:CODE:startup_agents:v1.0.0:20260224⬡
+//
+// This function runs at startup to load any FORGE-created agents from the database
+// ═══════════════════════════════════════════════════════════════════════════════
+
+async function loadDynamicAgents() {
+  console.log('[STARTUP] Loading dynamic agents from aba_agent_jds...');
+  
+  try {
+    const response = await fetch(SUPABASE_URL + '/rest/v1/aba_agent_jds?source=eq.FORGE_runtime_creation&select=*', {
+      headers: {
+        'apikey': SUPABASE_KEY || SUPABASE_ANON,
+        'Authorization': 'Bearer ' + (SUPABASE_KEY || SUPABASE_ANON)
+      }
+    });
+    
+    if (!response.ok) {
+      console.log('[STARTUP] Failed to load dynamic agents:', response.status);
+      return;
+    }
+    
+    const agents = await response.json();
+    console.log(`[STARTUP] Found ${agents.length} FORGE-created agents to load`);
+    
+    for (const agent of agents) {
+      const acronym = agent.acronym;
+      
+      // Skip if already exists
+      if (AGENTS[acronym]) {
+        console.log(`[STARTUP] Agent ${acronym} already exists, skipping`);
+        continue;
+      }
+      
+      // Create runtime agent
+      console.log(`[STARTUP] Loading dynamic agent: ${acronym}`);
+      const agentDept = agent.department || 'GENERAL';
+      const agentFullName = agent.full_name;
+      
+      AGENTS[acronym] = {
+        name: acronym,
+        fullName: agentFullName,
+        department: agentDept,
+        type: agent.agent_type || 'CONTEXT_WRAPPER',
+        runtime: agent.runtime || 'on-demand',
+        active: true,
+        runCount: 0,
+        loadedFrom: 'aba_agent_jds',
+        forgedAt: agent.created_at,
+        
+        getContext(message, context) {
+          this.runCount++;
+          return {
+            agent: acronym,
+            fullName: agentFullName,
+            department: agentDept,
+            contextAddition: `Agent ${acronym} (${agentFullName}) is available for ${agentDept.toLowerCase()} tasks.`,
+            capabilities: [agentDept.toLowerCase()],
+            status: 'dynamic_loaded_v1'
+          };
+        },
+        
+        async execute(action, params) {
+          this.runCount++;
+          return {
+            agent: acronym,
+            action: action || 'getContext',
+            result: this.getContext(params?.message, params?.context),
+            message: `${acronym} ready - dynamically loaded from database`
+          };
+        }
+      };
+    }
+    
+    console.log(`[STARTUP] Dynamic agent loading complete. Total agents: ${Object.keys(AGENTS).length}`);
+    
+  } catch (e) {
+    console.log('[STARTUP] Error loading dynamic agents:', e.message);
+  }
+}
+
+// Call the loader at startup
+loadDynamicAgents().catch(e => console.log('[STARTUP] Loader error:', e.message));
+
 const httpServer = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const path = url.pathname;
