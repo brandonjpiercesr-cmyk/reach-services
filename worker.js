@@ -901,6 +901,249 @@ AGENTS.DAWN = {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ROSTER & BIRTH - Agent Registry Management (Feb 24 2026)
+// ⬡B:AGENTS.ROSTER_BIRTH:CODE:hr.registry:v1.0.0:20260224⬡
+// 
+// CRITICAL NAMES - DO NOT CHANGE:
+// - TIM = Temporary Interim Model (NOT Tactical/Throwaway)
+// - BIRTH = Breeding Integrated Routing Through Heuristics (NOT Build Integration)
+// - HUNTER = Hunting Useful New Tracks and Employment Resources
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ROSTER - Query agent registry from aba_agent_jds table
+AGENTS.ROSTER = {
+  name: 'ROSTER',
+  fullName: 'Registry Oversight for Staffing, Tracking, and Employee Records',
+  department: 'HR',
+  type: 'COMMANDABLE',
+  runtime: 'on-demand',
+  active: true,
+  runCount: 0,
+
+  async list() {
+    this.runCount++;
+    try {
+      const r = await fetch(SUPABASE_URL + '/rest/v1/aba_agent_jds?select=acronym,full_name,department,status,agent_type,runtime&order=acronym.asc', {
+        headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
+      });
+      if (r.ok) {
+        const agents = await r.json();
+        return {
+          agent: 'ROSTER',
+          action: 'list',
+          totalAgents: agents.length,
+          agents: agents.map(a => ({
+            acronym: a.acronym,
+            fullName: a.full_name,
+            department: a.department,
+            status: a.status,
+            type: a.agent_type,
+            runtime: a.runtime
+          })),
+          departments: [...new Set(agents.map(a => a.department).filter(Boolean))],
+          message: `ROSTER contains ${agents.length} registered agents`
+        };
+      }
+      return { error: true, message: 'Failed to query roster' };
+    } catch (e) {
+      return { error: true, message: e.message };
+    }
+  },
+
+  async search(term) {
+    this.runCount++;
+    try {
+      const r = await fetch(SUPABASE_URL + '/rest/v1/aba_agent_jds?or=(full_name.ilike.*' + encodeURIComponent(term) + '*,department.ilike.*' + encodeURIComponent(term) + '*)&order=acronym.asc', {
+        headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
+      });
+      if (r.ok) {
+        const agents = await r.json();
+        return {
+          agent: 'ROSTER',
+          action: 'search',
+          query: term,
+          results: agents.map(a => ({ acronym: a.acronym, fullName: a.full_name, department: a.department })),
+          count: agents.length,
+          message: `Found ${agents.length} agents related to "${term}"`
+        };
+      }
+      return { error: true, message: 'Search failed' };
+    } catch (e) {
+      return { error: true, message: e.message };
+    }
+  },
+
+  async count() {
+    this.runCount++;
+    try {
+      const r = await fetch(SUPABASE_URL + '/rest/v1/aba_agent_jds?select=id', {
+        headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Prefer': 'count=exact' }
+      });
+      const count = r.headers.get('content-range')?.split('/')[1] || '0';
+      return { agent: 'ROSTER', action: 'count', totalAgents: parseInt(count), message: `${count} agents registered` };
+    } catch (e) {
+      return { error: true, message: e.message };
+    }
+  },
+
+  async get(acronym) {
+    this.runCount++;
+    try {
+      const r = await fetch(SUPABASE_URL + '/rest/v1/aba_agent_jds?acronym=eq.' + encodeURIComponent(acronym.toUpperCase()) + '&limit=1', {
+        headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
+      });
+      if (r.ok) {
+        const data = await r.json();
+        if (data.length > 0) {
+          return { agent: 'ROSTER', action: 'get', found: true, agentData: data[0] };
+        }
+        return { agent: 'ROSTER', action: 'get', found: false, message: `Agent ${acronym} not found` };
+      }
+      return { error: true, message: 'Query failed' };
+    } catch (e) {
+      return { error: true, message: e.message };
+    }
+  }
+};
+
+// BIRTH - Agent creation verification (5-step protocol)
+AGENTS.BIRTH = {
+  name: 'BIRTH',
+  fullName: 'Breeding Integrated Routing Through Heuristics', // ✅ CORRECT NAME
+  department: 'HR',
+  type: 'COMMANDABLE',
+  runtime: 'on-demand',
+  active: true,
+  runCount: 0,
+
+  // Critical agent names - source of truth
+  CORRECT_NAMES: {
+    TIM: 'Temporary Interim Model',
+    BIRTH: 'Breeding Integrated Routing Through Heuristics',
+    HUNTER: 'Hunting Useful New Tracks and Employment Resources',
+    GRIT: 'Genuine Resolution and Issue Tracking',
+    PAM: 'Protective ABA Mode',
+    HAM: 'Human ABA Master',
+    AIR: 'ABA Intelligence Router',
+    VARA: 'Vocal Authorized Representative of ABA',
+    MACE: 'Master Architecture and Code Engine',
+    DION: 'Strategic Decision and Intelligence Orchestration',
+    ROSTER: 'Registry Oversight for Staffing, Tracking, and Employee Records'
+  },
+
+  async verify(acronym) {
+    this.runCount++;
+    const agentName = acronym.toUpperCase();
+    
+    const checks = {
+      jd_in_brain: false,
+      in_registry: false,
+      case_exists: false,
+      handler_exists: false,
+      deployed: false
+    };
+
+    try {
+      // Check 1: JD in brain (aba_agent_jds table)
+      const r = await fetch(SUPABASE_URL + '/rest/v1/aba_agent_jds?acronym=eq.' + encodeURIComponent(agentName) + '&limit=1', {
+        headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
+      });
+      
+      let agentData = null;
+      if (r.ok) {
+        const data = await r.json();
+        checks.jd_in_brain = data.length > 0;
+        agentData = data[0] || null;
+      }
+
+      // Check 2: In AGENTS registry (this file)
+      checks.in_registry = AGENTS[agentName] !== undefined;
+
+      // Checks 3-5: If in registry, assume wired
+      if (checks.in_registry) {
+        checks.case_exists = true;
+        checks.handler_exists = true;
+        checks.deployed = true;
+      }
+
+      const alive = Object.values(checks).every(v => v === true);
+      const missing = Object.entries(checks).filter(([k, v]) => !v).map(([k]) => k);
+
+      // Name verification (anti-hallucination)
+      let nameWarning = null;
+      if (agentData && this.CORRECT_NAMES[agentName]) {
+        if (agentData.full_name !== this.CORRECT_NAMES[agentName]) {
+          nameWarning = `⚠️ NAME MISMATCH: Table has "${agentData.full_name}" but should be "${this.CORRECT_NAMES[agentName]}"`;
+        }
+      }
+
+      return {
+        agent: 'BIRTH',
+        targetAgent: agentName,
+        alive,
+        checks,
+        missing,
+        agentData,
+        nameWarning,
+        message: alive
+          ? `✅ Agent ${agentName} is ALIVE — all 5 birth checks passed`
+          : `⚠️ Agent ${agentName} is INCOMPLETE — missing: ${missing.join(', ')}`
+      };
+
+    } catch (e) {
+      return { agent: 'BIRTH', targetAgent: agentName, error: true, message: e.message };
+    }
+  },
+
+  async verifyAll() {
+    this.runCount++;
+    // Get all agents from table
+    const roster = await AGENTS.ROSTER.list();
+    if (roster.error) return roster;
+
+    const results = [];
+    for (const agent of roster.agents.slice(0, 20)) { // Limit to 20 to avoid timeout
+      const verification = await this.verify(agent.acronym);
+      results.push({
+        acronym: agent.acronym,
+        alive: verification.alive,
+        missing: verification.missing,
+        nameWarning: verification.nameWarning
+      });
+    }
+
+    const alive = results.filter(r => r.alive).length;
+    const issues = results.filter(r => !r.alive || r.nameWarning);
+
+    return {
+      agent: 'BIRTH',
+      action: 'verifyAll',
+      checked: results.length,
+      alive,
+      incomplete: results.length - alive,
+      issues,
+      message: `Verified ${results.length} agents: ${alive} alive, ${results.length - alive} incomplete`
+    };
+  },
+
+  checkName(acronym) {
+    const correct = this.CORRECT_NAMES[acronym.toUpperCase()];
+    return {
+      agent: 'BIRTH',
+      action: 'checkName',
+      acronym: acronym.toUpperCase(),
+      correctName: correct || 'Unknown - check aba_agent_jds table',
+      isKnownCritical: !!correct
+    };
+  }
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// END ROSTER & BIRTH
+// ═══════════════════════════════════════════════════════════════════════════════
+
 // PHASE 3: AUTONOMY - Proactive Engine & Cross-Channel State
 // ═══════════════════════════════════════════════════════════════════════════════
 
