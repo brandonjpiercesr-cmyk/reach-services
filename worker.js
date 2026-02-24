@@ -5671,11 +5671,11 @@ async function pulseCheck() {
     await healthCheck(pulseId);
     
     // Check 5: Progress Report (every 2 hours)
-    await generateProgressReport(pulseId);
+    // COST_FIX_20260224: await generateProgressReport(pulseId);
     
     // Check 6: ERICA Self-Build (every 30 min if roadmap items exist)
     try {
-      const ericaResult = await ERICA_selfBuild();
+      // COST_FIX_20260224: const ericaResult = await ERICA_selfBuild();
       if (ericaResult.status === 'code_generated') {
         console.log(`[PULSE→ERICA] Self-build completed: ${ericaResult.ericaId}`);
       }
@@ -17145,9 +17145,9 @@ console.log('[AIR-LOOP] Agents: IMAN, HUNTER, HUNCH, DAWN, GHOST, PULSE, RADAR, 
 console.log('[AIR-LOOP] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
 // First tick after 30 seconds (let server finish starting)
-setTimeout(runAutonomousLoop, 30000);
+// COST_FIX_20260224: setTimeout(runAutonomousLoop, 30000);
 // Then every 5 minutes
-setInterval(runAutonomousLoop, LOOP_INTERVAL);
+// COST_FIX_20260224: setInterval(runAutonomousLoop, LOOP_INTERVAL);
 
 
 // ═══════════════════════════════════════════════════════════════════════════════
