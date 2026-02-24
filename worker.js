@@ -1143,6 +1143,16 @@ Respond naturally. For actions (email, call), describe what you're doing.`;
   const responseTime = Date.now() - startTime;
   console.log('[AIR] Complete in ' + responseTime + 'ms');
   
+  // PHASE 4: Self-reflection
+  if (typeof SELF_REFLECTION !== 'undefined') {
+    SELF_REFLECTION.reflect({ model: finalModel.model, responseTime, tokens: usage, draftScore: scan.score, intents: analysis.intents });
+  }
+  
+  // PHASE 2: Shadow audit
+  if (typeof AGENTS.SHADOW !== 'undefined' && AGENTS.SHADOW.audit) {
+    AGENTS.SHADOW.audit({ type: 'orchestration', actor: 'AIR', target: message.substring(0, 50), action: 'process', result: scan.passed ? 'success' : 'warning' });
+  }
+  
   return {
     response,
     analysis,
