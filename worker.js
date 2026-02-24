@@ -12595,7 +12595,7 @@ if (path === '/api/sms/send' && method === 'POST') {
         optimization: 'COMPLETE'
       },
       agents: Object.keys(AGENTS).length,
-      services: DEGRADATION.healthChecks,
+      services: (typeof HEALTH_MONITOR !== "undefined" ? HEALTH_MONITOR.services : {}),
       memory: {
         short: MEMORY_TIERS.short.size,
         working: MEMORY_TIERS.working.size
@@ -12651,6 +12651,28 @@ if (path === '/api/sms/send' && method === 'POST') {
   if (path === '/api/v2/proactive/stop' && method === 'POST') {
     PROACTIVE_ENGINE.stop();
     return jsonResponse(res, 200, { stopped: true });
+  }
+
+  // V2 PROACTIVE - Get status
+  if (path === '/api/v2/proactive/status' && method === 'GET') {
+    return jsonResponse(res, 200, PROACTIVE_ENGINE.getStatus());
+  }
+
+  // V2 SELF REFLECTION - Get stats
+  if (path === '/api/v2/reflection/stats' && method === 'GET') {
+    return jsonResponse(res, 200, SELF_REFLECTION.getStats());
+  }
+
+  // V2 CROSS CHANNEL - Get user context
+  if (path.match(/^\/api\/v2\/channel\/[^/]+\/context$/) && method === 'GET') {
+    const userId = path.split('/')[4];
+    const context = CROSS_CHANNEL_STATE.getFullContext(userId);
+    return jsonResponse(res, 200, context);
+  }
+
+  // V2 SHADOW - Get recent audits
+  if (path === '/api/v2/shadow/audits' && method === 'GET') {
+    return jsonResponse(res, 200, { audits: AGENTS.SHADOW.getRecent(50) });
   }
 
   // ⬡B:AIR:REACH.API.BRAIN_SEMANTIC:CODE:memory.semantic.search:AIR→BRAIN:T10:v2.6.5:20260214:s1m2s⬡
