@@ -13404,6 +13404,7 @@ Phone: (336) 389-8116</p>
         // STEP 1: Query brain for login screen content, AIR generates if missing
         if (body.type === 'login_greeting') {
           try {
+            // Check brain first for stored greeting
             const brainRes = await fetch(
               `https://htlxjkbrstpwwtzsbyvb.supabase.co/rest/v1/aba_memory?memory_type=eq.login_greeting&select=content&limit=1`,
               { headers: { 'apikey': process.env.SUPABASE_ANON_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}` } }
@@ -13414,13 +13415,24 @@ Phone: (336) 389-8116</p>
               console.log('[LOGIN_GREETING] Found in brain');
               return jsonResponse(res, 200, { response: parsed.greeting || parsed.content || 'Welcome back.', source: 'brain' });
             }
-            // Not in brain — AIR composes one
-            const composed = await AIR_text(
-              'You are VARA, a warm professional butler. Generate a 1-2 sentence welcome greeting for Brandon logging into his ABA dashboard. Be warm, brief, and personable. Examples: "Good to see you, Brandon. The team is ready." or "Welcome back. Everything is running smoothly." Do NOT generate code, do NOT mention agents by name, do NOT be robotic. Just a warm human greeting.',
-              [], { source: 'login_greeting', channel: 'chat', systemPrompt: 'You are VARA, a warm and professional butler-style AI assistant. Respond with ONLY a greeting. No code. No technical details. Just warmth.' }
-            );
-            console.log('[LOGIN_GREETING] AIR composed');
-            return jsonResponse(res, 200, { response: composed.response || 'Welcome back, Brandon.', source: 'air_composed' });
+            // Not in brain — VARA composes via Groq (bypass AIR brain retrieval)
+            const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.GROQ_API_KEY}` },
+              body: JSON.stringify({
+                model: 'llama-3.1-8b-instant',
+                messages: [
+                  { role: 'system', content: 'You are VARA, a warm professional butler-style AI assistant. Generate ONLY a greeting. No code. No lists. No technical details.' },
+                  { role: 'user', content: 'Generate a warm 1-2 sentence welcome greeting for Brandon logging into his ABA dashboard. Be warm and personable like a trusted butler.' }
+                ],
+                max_tokens: 60,
+                temperature: 0.7
+              })
+            });
+            const groqData = await groqRes.json();
+            const greeting = groqData.choices?.[0]?.message?.content?.trim() || 'Welcome back, Brandon.';
+            console.log('[LOGIN_GREETING] VARA composed:', greeting);
+            return jsonResponse(res, 200, { response: greeting, source: 'vara_composed' });
           } catch (err) {
             console.error('[LOGIN_GREETING] Error:', err.message);
             return jsonResponse(res, 200, { response: 'Welcome back, Brandon.', source: 'fallback' });
@@ -13435,12 +13447,27 @@ Phone: (336) 389-8116</p>
             const agentStatus = agents.map(a => ({ name: a, status: 'online' }));
             const onlineCount = agentStatus.filter(a => a.status === 'online').length;
 
-            const rollCallPrompt = `You are VARA (Vocal Authorized Representative of ABA), a warm professional butler. Brandon just logged in. ${onlineCount} agents are standing by. Generate a warm 2-3 sentence greeting. Mention the team is ready without listing agent names. Be like a trusted butler welcoming his boss home. Example tone: "Welcome back, Brandon. The full team is here and ready to assist. What would you like to tackle first?" Do NOT list agents. Do NOT be robotic. Do NOT mention code or technical details.`;
+            const rollCallPrompt = `Generate a warm 2-3 sentence greeting for Brandon who just logged in. ${onlineCount} agents are standing by and ready. Be like a trusted butler welcoming his boss. Do NOT list agent names. Do NOT be robotic. Example: "Welcome back, Brandon. The full team is here and ready to assist. What would you like to tackle first?"`;
 
-            const greeting = await AIR_text(rollCallPrompt, [], { source: 'ham_greeting', channel: 'chat', systemPrompt: 'You are VARA, a warm butler-style AI. Respond with ONLY a warm greeting. No lists. No technical details. No code.' });
+            // Use Groq directly to bypass AIR brain retrieval
+            const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.GROQ_API_KEY}` },
+              body: JSON.stringify({
+                model: 'llama-3.1-8b-instant',
+                messages: [
+                  { role: 'system', content: 'You are VARA, a warm professional butler-style AI assistant. Generate ONLY a greeting. No code. No lists. No technical details. No agent names.' },
+                  { role: 'user', content: rollCallPrompt }
+                ],
+                max_tokens: 100,
+                temperature: 0.7
+              })
+            });
+            const groqData = await groqRes.json();
+            const greetingText = groqData.choices?.[0]?.message?.content?.trim() || `Good to see you, Brandon. All ${onlineCount} agents standing by.`;
             console.log('[HAM_GREETING] Roll call delivered');
             return jsonResponse(res, 200, {
-              response: greeting.response || `Good to see you, Brandon. All ${onlineCount} agents standing by.`,
+              response: greetingText,
               agents: agentStatus,
               source: 'roll_call'
             });
