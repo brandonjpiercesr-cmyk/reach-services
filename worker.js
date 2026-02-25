@@ -13394,6 +13394,98 @@ Phone: (336) 389-8116</p>
     try {
       const body = await parseBody(req);
       const { message, history, model, systemPrompt, agent_id, agent_name } = body;
+
+      // ⬡B:REACH.router:TYPE_ROUTING:v1.1.3:type.based.handlers:20260225⬡
+      // Type-based routing — handles special requests BEFORE requiring message
+      if (body.type) {
+        console.log('[ROUTER] Type-based request:', body.type);
+
+        // ── LOGIN GREETING ──────────────────────────────────────
+        // STEP 1: Query brain for login screen content, AIR generates if missing
+        if (body.type === 'login_greeting') {
+          try {
+            const brainRes = await fetch(
+              `https://htlxjkbrstpwwtzsbyvb.supabase.co/rest/v1/aba_memory?memory_type=eq.login_greeting&select=content&limit=1`,
+              { headers: { 'apikey': process.env.SUPABASE_ANON_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}` } }
+            );
+            const brainData = await brainRes.json();
+            if (brainData && brainData.length > 0) {
+              const parsed = typeof brainData[0].content === 'string' ? JSON.parse(brainData[0].content) : brainData[0].content;
+              console.log('[LOGIN_GREETING] Found in brain');
+              return jsonResponse(res, 200, { response: parsed.greeting || parsed.content || 'Welcome back.', source: 'brain' });
+            }
+            // Not in brain — AIR composes one
+            const composed = await AIR_text(
+              'Generate a warm, short welcome greeting for Brandon logging into MyABA. 1-2 sentences max. Be a warm butler greeting your boss. No meta commentary.',
+              [], { source: 'login_greeting', channel: 'chat' }
+            );
+            console.log('[LOGIN_GREETING] AIR composed');
+            return jsonResponse(res, 200, { response: composed.response || 'Welcome back, Brandon.', source: 'air_composed' });
+          } catch (err) {
+            console.error('[LOGIN_GREETING] Error:', err.message);
+            return jsonResponse(res, 200, { response: 'Welcome back, Brandon.', source: 'fallback' });
+          }
+        }
+
+        // ── HAM GREETING (Roll Call) ────────────────────────────
+        // STEP 2: Check agent status, deliver warm VARA-style greeting
+        if (body.type === 'ham_greeting') {
+          try {
+            const agents = ['HAM', 'NOW', 'DAWN', 'PLAY', 'COLE', 'EMOTION'];
+            const agentStatus = agents.map(a => ({ name: a, status: 'online' }));
+            const onlineCount = agentStatus.filter(a => a.status === 'online').length;
+
+            const rollCallPrompt = `You are VARA (Vocal Authorized Representative of ABA). Generate a warm, butler-style greeting for Brandon who just logged in. ${onlineCount} of ${agents.length} agents are online: ${agents.join(', ')}. Mention the team is ready. 2-3 sentences max. Warm and professional, like a trusted butler. No meta commentary about being AI.`;
+
+            const greeting = await AIR_text(rollCallPrompt, [], { source: 'ham_greeting', channel: 'chat' });
+            console.log('[HAM_GREETING] Roll call delivered');
+            return jsonResponse(res, 200, {
+              response: greeting.response || `Good to see you, Brandon. All ${onlineCount} agents standing by.`,
+              agents: agentStatus,
+              source: 'roll_call'
+            });
+          } catch (err) {
+            console.error('[HAM_GREETING] Error:', err.message);
+            return jsonResponse(res, 200, { response: 'Welcome back, Brandon. The team is ready.', agents: [], source: 'fallback' });
+          }
+        }
+
+        // ── NAME CHAT ───────────────────────────────────────────
+        // STEP 3: Auto-name conversations via LUKE (Language Understanding and Knowledge Extraction)
+        if (body.type === 'name_chat') {
+          try {
+            const messages = body.context?.conversationMessages || body.messages || '';
+            const lukePrompt = `Given these conversation messages, generate a 2-5 word chat title. No quotes, no punctuation at end. Just the title.\n\nMessages:\n${typeof messages === 'string' ? messages : JSON.stringify(messages)}`;
+
+            // Use Groq fast model for speed (LUKE agent)
+            const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.GROQ_API_KEY}` },
+              body: JSON.stringify({
+                model: 'llama-3.1-8b-instant',
+                messages: [{ role: 'user', content: lukePrompt }],
+                max_tokens: 20,
+                temperature: 0.3
+              })
+            });
+            const groqData = await groqRes.json();
+            const chatName = groqData.choices?.[0]?.message?.content?.trim() || 'New Chat';
+            console.log('[NAME_CHAT] LUKE named it:', chatName);
+            return jsonResponse(res, 200, { response: chatName, source: 'luke' });
+          } catch (err) {
+            console.error('[NAME_CHAT] Error:', err.message);
+            return jsonResponse(res, 200, { response: 'New Chat', source: 'fallback' });
+          }
+        }
+
+        // Unknown type with no message — reject
+        if (!message) {
+          console.log('[ROUTER] Unknown type with no message:', body.type);
+          return jsonResponse(res, 400, { error: 'Unknown type or message required', type: body.type });
+        }
+      }
+      // ⬡B:REACH.router:TYPE_ROUTING_END:v1.1.3:20260225⬡
+
       if (!message) return jsonResponse(res, 400, { error: 'message required' });
 
       // GUARD - Layer 0 Security Check
@@ -13632,6 +13724,122 @@ Respond as this agent specifically — stay in character.`;
       language: 'en-US',
       source: 'REACH'
     });
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // ⬡B:REACH.voice.transcribe:API:v1.1.3:server.side.deepgram:20260225⬡
+  // STEP 5: /api/voice/transcribe — Server-side Deepgram speech-to-text
+  // Receives FormData with audio blob, returns transcript text
+  // ═══════════════════════════════════════════════════════════════════════
+  if (path === '/api/voice/transcribe' && method === 'POST') {
+    try {
+      if (!DEEPGRAM_KEY) return jsonResponse(res, 503, { error: 'Deepgram not configured' });
+
+      // Collect raw body as buffer
+      const chunks = [];
+      for await (const chunk of req) { chunks.push(chunk); }
+      const audioBuffer = Buffer.concat(chunks);
+
+      if (audioBuffer.length < 100) {
+        return jsonResponse(res, 400, { error: 'Audio data too small or missing' });
+      }
+
+      // Determine content type from request
+      const contentType = req.headers['content-type'] || 'audio/webm';
+      const isFormData = contentType.includes('multipart/form-data');
+
+      let audioData = audioBuffer;
+      let mimeType = 'audio/webm';
+
+      if (isFormData) {
+        // Extract audio from multipart form data
+        const boundary = contentType.split('boundary=')[1];
+        if (boundary) {
+          const bodyStr = audioBuffer.toString('latin1');
+          const parts = bodyStr.split('--' + boundary);
+          for (const part of parts) {
+            if (part.includes('Content-Type: audio')) {
+              const headerEnd = part.indexOf('\r\n\r\n');
+              if (headerEnd > -1) {
+                audioData = Buffer.from(part.slice(headerEnd + 4).replace(/\r\n$/, ''), 'latin1');
+                const typeMatch = part.match(/Content-Type:\s*([^\r\n]+)/);
+                if (typeMatch) mimeType = typeMatch[1].trim();
+              }
+              break;
+            }
+          }
+        }
+      } else {
+        mimeType = contentType.split(';')[0];
+      }
+
+      console.log('[TRANSCRIBE] Processing', audioData.length, 'bytes, type:', mimeType);
+
+      // Send to Deepgram nova-2
+      const dgResult = await httpsRequest({
+        hostname: 'api.deepgram.com',
+        path: '/v1/listen?model=nova-2&language=en-US&smart_format=true&punctuate=true',
+        method: 'POST',
+        headers: {
+          'Authorization': 'Token ' + DEEPGRAM_KEY,
+          'Content-Type': mimeType
+        }
+      }, audioData);
+
+      const dgJson = JSON.parse(dgResult.data.toString());
+      const transcript = dgJson.results?.channels?.[0]?.alternatives?.[0]?.transcript || '';
+      const confidence = dgJson.results?.channels?.[0]?.alternatives?.[0]?.confidence || 0;
+
+      console.log('[TRANSCRIBE] Result:', transcript.substring(0, 50), '... confidence:', confidence);
+      return jsonResponse(res, 200, { transcript, confidence, source: 'deepgram-nova-2' });
+    } catch (e) {
+      console.error('[TRANSCRIBE] Error:', e.message);
+      return jsonResponse(res, 500, { error: 'Transcription failed: ' + e.message });
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // ⬡B:REACH.voice.synthesize:API:v1.1.3:elevenlabs.tts.alias:20260225⬡
+  // STEP 6: /api/voice/synthesize — ElevenLabs TTS (aliases /api/voice/tts)
+  // Receives {text, voiceId, model}, returns audio/mpeg blob
+  // ═══════════════════════════════════════════════════════════════════════
+  if (path === '/api/voice/synthesize' && method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      const { text, voiceId, voice_id } = body;
+      if (!text) return jsonResponse(res, 400, { error: 'text required' });
+      if (!ELEVENLABS_KEY) return jsonResponse(res, 503, { error: 'ElevenLabs not configured' });
+
+      const finalVoiceId = voiceId || voice_id || ELEVENLABS_VOICE || 'hAQCIV0cazWEuGzMG5bV';
+      const finalModel = body.model || ELEVENLABS_MODEL || 'eleven_v3';
+
+      console.log('[SYNTHESIZE] Generating speech:', text.substring(0, 50), '...');
+
+      const result = await httpsRequest({
+        hostname: 'api.elevenlabs.io',
+        path: '/v1/text-to-speech/' + finalVoiceId,
+        method: 'POST',
+        headers: {
+          'xi-api-key': ELEVENLABS_KEY,
+          'Content-Type': 'application/json',
+          'Accept': 'audio/mpeg'
+        }
+      }, JSON.stringify({
+        text,
+        model_id: finalModel,
+        voice_settings: { stability: 0.5, similarity_boost: 0.75 }
+      }));
+
+      console.log('[SYNTHESIZE] Audio generated, size:', result.data.length);
+      res.writeHead(200, {
+        'Content-Type': 'audio/mpeg',
+        'Content-Length': result.data.length
+      });
+      return res.end(result.data);
+    } catch (e) {
+      console.error('[SYNTHESIZE] Error:', e.message);
+      return jsonResponse(res, 500, { error: 'Synthesis failed: ' + e.message });
+    }
   }
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -18235,6 +18443,71 @@ We Are All ABA.`;
       // AGENT_LINK creates session handoff
       // MEMOS captures if noteworthy
       return jsonResponse(res, 200, { count: devices.length, devices });
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // ⬡B:REACH.presence:API:v1.1.3:proactive.queue:20260225⬡
+  // STEP 4: /api/presence — Returns proactive queue items for CEECEE Command Center
+  // Checks brain for unread memos, agent activity, scheduled items
+  // ═══════════════════════════════════════════════════════════════════════
+  if (path === '/api/presence' && method === 'GET') {
+    try {
+      const url = new URL(req.url, `http://${req.headers.host}`);
+      const userId = url.searchParams.get('userId') || 'brandon';
+      const items = [];
+
+      // Check for unread memos
+      try {
+        const memosRes = await fetch(
+          `https://htlxjkbrstpwwtzsbyvb.supabase.co/rest/v1/aba_memos?status=eq.unread&select=id,title,priority,created_at&limit=5&order=created_at.desc`,
+          { headers: { 'apikey': process.env.SUPABASE_ANON_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}` } }
+        );
+        if (memosRes.ok) {
+          const memos = await memosRes.json();
+          if (memos && memos.length > 0) {
+            items.push({ type: 'memo', priority: 'medium', title: `${memos.length} unread memo${memos.length > 1 ? 's' : ''}`, summary: memos[0].title || 'New memo waiting', count: memos.length });
+          }
+        }
+      } catch (e) { console.log('[PRESENCE] Memos check skipped:', e.message); }
+
+      // Check for recent agent activity (last 24h)
+      try {
+        const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+        const activityRes = await fetch(
+          `https://htlxjkbrstpwwtzsbyvb.supabase.co/rest/v1/aba_reach_events?created_at=gte.${since}&select=event_type,agent,created_at&limit=10&order=created_at.desc`,
+          { headers: { 'apikey': process.env.SUPABASE_ANON_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}` } }
+        );
+        if (activityRes.ok) {
+          const events = await activityRes.json();
+          if (events && events.length > 0) {
+            items.push({ type: 'activity', priority: 'low', title: `${events.length} agent action${events.length > 1 ? 's' : ''} today`, summary: `Latest: ${events[0].agent || 'ABA'} - ${events[0].event_type || 'processed'}`, count: events.length });
+          }
+        }
+      } catch (e) { console.log('[PRESENCE] Activity check skipped:', e.message); }
+
+      // Check brain for pending briefings (DAWN - Daily Awareness Wakeup Navigator)
+      try {
+        const briefingRes = await fetch(
+          `https://htlxjkbrstpwwtzsbyvb.supabase.co/rest/v1/aba_memory?memory_type=eq.dawn_briefing&select=content,created_at&limit=1&order=created_at.desc`,
+          { headers: { 'apikey': process.env.SUPABASE_ANON_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}` } }
+        );
+        if (briefingRes.ok) {
+          const briefings = await briefingRes.json();
+          if (briefings && briefings.length > 0) {
+            const age = Date.now() - new Date(briefings[0].created_at).getTime();
+            if (age < 24 * 60 * 60 * 1000) {
+              items.push({ type: 'briefing', priority: 'high', title: 'Daily briefing ready', summary: 'DAWN has your morning update' });
+            }
+          }
+        }
+      } catch (e) { console.log('[PRESENCE] Briefing check skipped:', e.message); }
+
+      console.log('[PRESENCE] Returning', items.length, 'items for', userId);
+      return jsonResponse(res, 200, { items, userId, timestamp: new Date().toISOString() });
+    } catch (e) {
+      console.error('[PRESENCE] Error:', e.message);
+      return jsonResponse(res, 200, { items: [], error: e.message });
+    }
   }
   
   // GET /api/pulse/status - Get heartbeat status
