@@ -552,6 +552,50 @@ function memoryRetrieve(tier, key) {
   return entry ? entry.value : null;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// ⬡B:REACH:ABACIA_ROUTE:FUNC:brain-call:20260225⬡
+// THINK TANK DECISION: REACH calls ABACIA for ALL routing
+// REACH = Dumb hand. ABACIA = Smart brain.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const ABACIA_URL = 'https://abacia-services.onrender.com';
+
+/**
+ * Call ABACIA's AIR for routing decision
+ * This is THE function that connects the hand to the brain
+ */
+async function ABACIA_route(prompt, context = {}) {
+  console.log('[REACH→ABACIA] Calling brain for routing...');
+  
+  try {
+    const response = await httpsRequest({
+      hostname: 'abacia-services.onrender.com',
+      path: '/api/air/route',
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    }, JSON.stringify({
+      prompt: prompt,
+      context: context,
+      channel: context.channel || 'myaba',
+      userId: context.userId || context.callerName || 'brandon'
+    }));
+    
+    if (response.status !== 200) {
+      console.log('[REACH→ABACIA] Brain returned error:', response.status);
+      return null;
+    }
+    
+    const data = JSON.parse(response.data.toString());
+    console.log('[REACH→ABACIA] Brain responded:', (data.routing?.agents || []).join(',') || 'no agents');
+    console.log('[REACH→ABACIA] Trace:', data.trace);
+    
+    return data;
+  } catch (e) {
+    console.log('[REACH→ABACIA] Failed to reach brain:', e.message);
+    return null;
+  }
+}
+
 // PHASE 2: INTELLIGENCE - REAL AGENTS
 const AGENTS = {};
 
@@ -10089,6 +10133,30 @@ async function AIR_process(userSaid, history, callerIdentity, demoState) {
   console.log('[AIR] "' + userSaid + '"');
   console.log('═══════════════════════════════════════════════════════════');
   
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ⬡B:REACH:ABACIA_FIRST:WIRE:brain-routing:20260225⬡
+  // THINK TANK DECISION: Call ABACIA brain FIRST for routing
+  // REACH = Dumb hand. ABACIA = Smart brain.
+  // ═══════════════════════════════════════════════════════════════════════════
+  const abaciaResult = await ABACIA_route(userSaid, {
+    channel: 'reach',
+    callerName: callerIdentity?.name,
+    demoState: demoState
+  });
+  
+  // If ABACIA returned a valid routing, use its system_prompt
+  let abaciaSystemPrompt = null;
+  let abaciaAgents = [];
+  if (abaciaResult && abaciaResult.success) {
+    abaciaSystemPrompt = abaciaResult.system_prompt;
+    abaciaAgents = abaciaResult.routing?.agents || [];
+    console.log('[AIR] ABACIA brain returned agents:', abaciaAgents.join(', '));
+    console.log('[AIR] ABACIA trace:', abaciaResult.trace);
+  } else {
+    console.log('[AIR] ABACIA brain unavailable, using local routing');
+  }
+  // ═══════════════════════════════════════════════════════════════════════════
+  
   // ⬡B:AIR:REACH.ORCHESTRATOR.SUMMON_LUKE:CODE:routing.agent.analysis:AIR→LUKE→AIR:T10:v1.5.0:20260213:s1l2k⬡
   const lukeAnalysis = await LUKE_process(userSaid);
   
@@ -10170,6 +10238,13 @@ async function AIR_process(userSaid, history, callerIdentity, demoState) {
   }
   
   const missionPackage = PACK_assemble(lukeAnalysis, coleResult, judeResult, history, callerIdentity, demoState);
+  
+  // ⬡B:REACH:ABACIA_PROMPT:WIRE:use-brain-prompt:20260225⬡
+  // THINK TANK: Use ABACIA's system prompt if brain returned one
+  if (abaciaSystemPrompt) {
+    console.log('[AIR] Using ABACIA brain system prompt (agents:', abaciaAgents.join(','), ')');
+    missionPackage.systemPrompt = abaciaSystemPrompt;
+  }
   
   // ⬡B:AIR:REACH.ORCHESTRATOR.MODEL_SELECT:CODE:routing.model.cascade:AIR→GEMINI|HAIKU|GROQ:T10:v1.5.0:20260213:m1s2l⬡
   console.log('[AIR] Selecting model for mission: ' + missionPackage.missionNumber);
