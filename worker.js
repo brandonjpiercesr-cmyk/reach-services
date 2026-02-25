@@ -9736,7 +9736,10 @@ async function AIR_DISPATCH(lukeAnalysis, judeResult, callerIdentity) {
     'mom', 'dad', 'husband', 'bethany', 'bailey', 'joshua', 'jeremiah', 'bella', 'bj',
     'raquel', 'eric', 'spouse', 'child', 'son', 'daughter', 'sibling'];
   
+  console.log('[AIR DISPATCH] FAMILY CHECK - query:', query);
+  console.log('[AIR DISPATCH] FAMILY CHECK - keywords:', familyKeywords.filter(kw => query.includes(kw)));
   const needsFamily = familyKeywords.some(kw => query.includes(kw));
+  console.log('[AIR DISPATCH] FAMILY CHECK - needsFamily:', needsFamily);
   
   if (needsFamily) {
     console.log('[AIR DISPATCH] → L3: FAMILY/BRAIN (Personal family query detected)');
