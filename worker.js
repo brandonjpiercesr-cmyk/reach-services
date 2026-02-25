@@ -280,6 +280,58 @@ let STARTUP_WRITING_STANDARDS = '';
 // Trace: A*AGENTS*A → A*DRAFT*A → A*MEMOS*A → DELIVERY
 // ═══════════════════════════════════════════════════════════════════════════════
 
+// ⬡B:AIR:REACH.AGENT.PROTO:CODE:protocol.enforcement:v1.0.0:20260225⬡
+// PROTO - Protocol Enforcement and Training Officer
+// Runs BEFORE VARA speaks. Enforces Brandon's 16 writing standards.
+// WIRED: Always runs on output. Not just a JD - actually deployed.
+// ═══════════════════════════════════════════════════════════════════════════════
+const PROTO_RULES = {
+  NO_PROFANITY: { pattern: /\b(fuck|shit|damn|ass|bitch|hell)\b/gi, fix: 'Remove profanity - ABA is a butler', fireable: true },
+  NO_MR_STARK: { pattern: /mr\.?\s*stark|tony\s*stark/gi, fix: 'Use Brandon or Mr. Pierce, never Mr. Stark', fireable: true },
+  NO_EM_DASH: { pattern: /[—–]/g, fix: 'Use comma or period instead of em dash', fireable: true },
+  NO_COLD_GREETING: { pattern: /^(hi|hey|hello),?\s*$/im, fix: 'Greetings must include name', fireable: false },
+  WARM_BUTLER: { check: (t) => t.length > 100 && !/brandon|mr\.?\s*pierce/i.test(t), fix: 'Long outputs should address Brandon by name', fireable: false },
+  NO_AI_SLOP: { pattern: /(I'd be happy to|feel free to|don't hesitate|here's the thing)/gi, fix: 'Remove AI clichés', fireable: false }
+};
+
+function PROTO_enforce(text) {
+  if (!text || typeof text !== 'string') return { text, violations: [], enforced: false };
+  
+  let cleaned = text;
+  const violations = [];
+  
+  // Check and fix each rule
+  for (const [rule, config] of Object.entries(PROTO_RULES)) {
+    if (config.pattern) {
+      const matches = cleaned.match(config.pattern);
+      if (matches && matches.length > 0) {
+        violations.push({ rule, matches: matches.slice(0, 3), fix: config.fix, fireable: config.fireable });
+        // Auto-fix some issues
+        if (rule === 'NO_MR_STARK') {
+          cleaned = cleaned.replace(/mr\.?\s*stark/gi, 'Brandon');
+          cleaned = cleaned.replace(/tony\s*stark/gi, 'Brandon');
+        }
+        if (rule === 'NO_EM_DASH') {
+          cleaned = cleaned.replace(/[—–]/g, ',');
+        }
+      }
+    } else if (config.check && config.check(cleaned)) {
+      violations.push({ rule, fix: config.fix, fireable: config.fireable });
+    }
+  }
+  
+  if (violations.length > 0) {
+    console.log('[PROTO] Violations found:', violations.map(v => v.rule).join(', '));
+  }
+  
+  return {
+    text: cleaned,
+    violations,
+    enforced: violations.length > 0,
+    hasFirable: violations.some(v => v.fireable)
+  };
+}
+
 const DRAFT_VIOLATIONS = {
   // FIREABLE - instant fail
   EM_DASH: { pattern: /[—–]|--/g, severity: 'FIREABLE', penalty: 30, desc: 'Em dash or double dash' },
@@ -13543,7 +13595,14 @@ Phone: (336) 389-8116</p>
               })
             });
             const groqData = await groqRes.json();
-            const greeting = groqData.choices?.[0]?.message?.content?.trim() || `${timeGreeting}, ${userName}.`;
+            let greeting = groqData.choices?.[0]?.message?.content?.trim() || `${timeGreeting}, ${userName}.`;
+            
+            // PROTO enforcement on greeting
+            const protoResult = PROTO_enforce(greeting);
+            if (protoResult.enforced) {
+              console.log('[DAWN_GREETING] PROTO cleaned greeting');
+              greeting = protoResult.text;
+            }
             
             console.log('[DAWN_GREETING] Generated:', greeting.substring(0, 50) + '...');
             return jsonResponse(res, 200, {
@@ -13879,12 +13938,24 @@ Respond as this agent specifically — stay in character.`;
       // LOGFUL logs outcome to brain
       // AGENT_LINK creates session handoff
       // MEMOS captures if noteworthy
+      
+      // ⬡B:PROTO:ENFORCEMENT:wired:20260225⬡
+      // PROTO runs on ALL outputs before delivery
+      let finalResponse = result.response;
+      if (finalResponse && typeof finalResponse === 'string') {
+        const protoResult = PROTO_enforce(finalResponse);
+        if (protoResult.enforced) {
+          console.log('[PROTO] Cleaned response, violations:', protoResult.violations.length);
+          finalResponse = protoResult.text;
+        }
+      }
+      
       return jsonResponse(res, 200, {
-        response: result.response,
+        response: finalResponse,
         isGoodbye: result.isGoodbye,
         missionNumber: result.missionNumber,
         source: 'REACH-AIR',
-        trace: result.trace || 'USER*AIR*AGENTS*REACH', agents: result.agents
+        trace: result.trace || 'USER*AIR*PROTO*AGENTS*REACH', agents: result.agents
       });
     } catch (e) {
       console.error('[ROUTER] Error:', e.message);
