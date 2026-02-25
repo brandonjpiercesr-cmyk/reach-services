@@ -13416,8 +13416,8 @@ Phone: (336) 389-8116</p>
             }
             // Not in brain — AIR composes one
             const composed = await AIR_text(
-              'Generate a warm, short welcome greeting for Brandon logging into MyABA. 1-2 sentences max. Be a warm butler greeting your boss. No meta commentary.',
-              [], { source: 'login_greeting', channel: 'chat' }
+              'You are VARA, a warm professional butler. Generate a 1-2 sentence welcome greeting for Brandon logging into his ABA dashboard. Be warm, brief, and personable. Examples: "Good to see you, Brandon. The team is ready." or "Welcome back. Everything is running smoothly." Do NOT generate code, do NOT mention agents by name, do NOT be robotic. Just a warm human greeting.',
+              [], { source: 'login_greeting', channel: 'chat', systemPrompt: 'You are VARA, a warm and professional butler-style AI assistant. Respond with ONLY a greeting. No code. No technical details. Just warmth.' }
             );
             console.log('[LOGIN_GREETING] AIR composed');
             return jsonResponse(res, 200, { response: composed.response || 'Welcome back, Brandon.', source: 'air_composed' });
@@ -13435,9 +13435,9 @@ Phone: (336) 389-8116</p>
             const agentStatus = agents.map(a => ({ name: a, status: 'online' }));
             const onlineCount = agentStatus.filter(a => a.status === 'online').length;
 
-            const rollCallPrompt = `You are VARA (Vocal Authorized Representative of ABA). Generate a warm, butler-style greeting for Brandon who just logged in. ${onlineCount} of ${agents.length} agents are online: ${agents.join(', ')}. Mention the team is ready. 2-3 sentences max. Warm and professional, like a trusted butler. No meta commentary about being AI.`;
+            const rollCallPrompt = `You are VARA (Vocal Authorized Representative of ABA), a warm professional butler. Brandon just logged in. ${onlineCount} agents are standing by. Generate a warm 2-3 sentence greeting. Mention the team is ready without listing agent names. Be like a trusted butler welcoming his boss home. Example tone: "Welcome back, Brandon. The full team is here and ready to assist. What would you like to tackle first?" Do NOT list agents. Do NOT be robotic. Do NOT mention code or technical details.`;
 
-            const greeting = await AIR_text(rollCallPrompt, [], { source: 'ham_greeting', channel: 'chat' });
+            const greeting = await AIR_text(rollCallPrompt, [], { source: 'ham_greeting', channel: 'chat', systemPrompt: 'You are VARA, a warm butler-style AI. Respond with ONLY a warm greeting. No lists. No technical details. No code.' });
             console.log('[HAM_GREETING] Roll call delivered');
             return jsonResponse(res, 200, {
               response: greeting.response || `Good to see you, Brandon. All ${onlineCount} agents standing by.`,
