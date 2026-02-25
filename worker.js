@@ -20455,3 +20455,38 @@ OUTPUT JSON:
     return { success: false, approved: true, error: e.message };
   }
 }
+
+
+// Tracking and Reconnaissance for Automated Context Evaluation (TRACE)
+// ⬡B:AGENT.TRACE:CODE:proactive:v1.0.0:20260225⬡
+AGENTS.TRACE = {
+  name: 'TRACE',
+  fullName: 'Tracking and Reconnaissance for Automated Context Evaluation',
+  department: 'PROACTIVE',
+  type: 'CONTEXT_WRAPPER',
+  runtime: 'on-demand',
+  active: true,
+  runCount: 0,
+  
+  getContext(message, context) {
+    this.runCount++;
+    return {
+      agent: 'TRACE',
+      fullName: 'Tracking and Reconnaissance for Automated Context Evaluation',
+      department: 'PROACTIVE',
+      contextAddition: 'Agent TRACE (Tracking and Reconnaissance for Automated Context Evaluation) is available for proactive tasks.',
+      capabilities: ['proactive'],
+      status: 'context_wrapper_v1'
+    };
+  },
+  
+  async execute(action, params) {
+    this.runCount++;
+    return {
+      agent: 'TRACE',
+      action: action || 'getContext',
+      result: this.getContext(params?.message, params?.context),
+      message: 'TRACE (Tracking and Reconnaissance for Automated Context Evaluation) ready'
+    };
+  }
+};
