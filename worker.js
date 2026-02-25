@@ -18475,9 +18475,9 @@ We Are All ABA.`;
         cleaned = AGENTS.SCRUB.clean(transcript);
       }
       
-      // Route through AIR
+      // Route through AIR - AIR_text takes (message, history, context)
       if (cleaned && AIR_text) {
-        const airRes = await AIR_text({ message: cleaned, context: { source: 'dial_callback', callId } });
+        const airRes = await AIR_text(cleaned, [], { source: 'dial_callback', callId });
         return jsonResponse(res, 200, { status: 'ok', response: airRes?.response?.substring(0, 500), callId });
       }
       
