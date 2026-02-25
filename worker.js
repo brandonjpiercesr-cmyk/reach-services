@@ -7606,7 +7606,7 @@ async function CACA_executeChain(chainDef) {
 // GitHub Push — ERICA's hands. She can now commit code to repos.
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const GITHUB_TOKEN = process.env.GITHUB_TOKEN || '';
+// GITHUB_TOKEN already declared at top of file
 const GITHUB_OWNER = 'brandonjpiercesr-cmyk';
 
 async function pushToGitHub(repo, filePath, content, commitMessage, branch = 'main') {
