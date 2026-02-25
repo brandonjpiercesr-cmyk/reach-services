@@ -1656,35 +1656,271 @@ AGENTS.EMOTION = {
 };
 
 // ERICA - Explanation Review and Insight Clarity Assurance
+// ═══════════════════════════════════════════════════════════════════════════════
+// PHASE 1 - WIRE THE LOOP - Complete Implementation
+// ⬡B:PHASE1:CODE:wire_the_loop:v1.0.0:20260225⬡
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ERICA - Explanation Review and Insight Clarity Assurance
+// (Using name from database - functionality: reads roadmap, triggers automation)
+// ═══════════════════════════════════════════════════════════════════════════════
 AGENTS.ERICA = {
   name: 'ERICA',
   fullName: 'Explanation Review and Insight Clarity Assurance',
-  department: 'QUALITY',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
+  department: 'AUTONOMY',
+  type: 'COMMANDABLE',
+  runtime: 'scheduled',
   active: true,
   runCount: 0,
   
-  getContext(message, context) {
-    this.runCount++;
+  async readRoadmap() {
+    try {
+      const response = await fetch(SUPABASE_URL + '/rest/v1/aba_memory?source=ilike.%25unicorn.roadmap%25&order=created_at.desc&limit=1&select=content,source', {
+        headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        return data[0] || null;
+      }
+    } catch (e) {
+      console.log('[ERICA] Roadmap read error:', e.message);
+    }
+    return null;
+  },
+  
+  parseRoadmapStatus(content) {
+    const lines = content.split('\n');
+    let totalItems = 0;
+    let completeItems = 0;
+    let nextItem = null;
+    let currentPhase = 0;
+    
+    for (const line of lines) {
+      const phaseMatch = line.match(/PHASE (\d+)/i);
+      if (phaseMatch) currentPhase = parseInt(phaseMatch[1]);
+      
+      const itemMatch = line.match(/^\d+\.\s+(.+)/);
+      if (itemMatch) {
+        totalItems++;
+        const isComplete = line.includes('✅');
+        if (isComplete) {
+          completeItems++;
+        } else if (!nextItem) {
+          nextItem = { phase: currentPhase, item: itemMatch[1].substring(0, 100) };
+        }
+      }
+    }
+    
     return {
-      agent: 'ERICA',
-      fullName: 'Explanation Review and Insight Clarity Assurance',
-      department: 'QUALITY',
-      contextAddition: 'Agent ERICA (Explanation Review and Insight Clarity Assurance) is available for quality tasks.',
-      capabilities: ['quality'],
-      status: 'context_wrapper_v1'
+      totalItems,
+      completeItems,
+      percentComplete: totalItems > 0 ? Math.round((completeItems / totalItems) * 100) : 0,
+      nextItem
     };
   },
   
   async execute(action, params) {
     this.runCount++;
+    console.log('[ERICA] Running action:', action);
+    
+    const roadmap = await this.readRoadmap();
+    if (!roadmap) {
+      return { agent: 'ERICA', error: true, message: 'No roadmap in brain' };
+    }
+    
+    const status = this.parseRoadmapStatus(roadmap.content);
+    
     return {
       agent: 'ERICA',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'ERICA ready - context wrapper active'
+      fullName: 'Explanation Review and Insight Clarity Assurance',
+      roadmapSource: roadmap.source,
+      percentComplete: status.percentComplete,
+      completeItems: status.completeItems,
+      totalItems: status.totalItems,
+      nextItem: status.nextItem,
+      message: `${status.percentComplete}% complete (${status.completeItems}/${status.totalItems}). Next: ${status.nextItem?.item || 'DONE'}`
     };
+  }
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CACA - Coordinated Agent Chain Architecture
+// Chains: GRIT → MACE → BRAIN_WRITE → IMAN
+// ═══════════════════════════════════════════════════════════════════════════════
+AGENTS.CACA = {
+  name: 'CACA',
+  fullName: 'Coordinated Agent Chain Architecture',
+  department: 'AUTONOMY',
+  type: 'COMMANDABLE',
+  runtime: 'on-demand',
+  active: true,
+  runCount: 0,
+  defaultChain: ['GRIT', 'MACE', 'BRAIN_WRITE', 'IMAN'],
+  
+  async runChain(task, chain) {
+    const results = [];
+    let lastOutput = task;
+    console.log(`[CACA] Chain: ${chain.join(' → ')}`);
+    
+    for (const agentName of chain) {
+      console.log(`[CACA] → ${agentName}`);
+      
+      if (agentName === 'BRAIN_WRITE') {
+        try {
+          await fetch(SUPABASE_URL + '/rest/v1/aba_memory', {
+            method: 'POST',
+            headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+            body: JSON.stringify({ content: JSON.stringify({ task, results }), memory_type: 'caca_result', source: 'caca_' + Date.now(), tags: ['caca'] })
+          });
+          results.push({ agent: 'BRAIN_WRITE', status: 'ok' });
+        } catch (e) { results.push({ agent: 'BRAIN_WRITE', status: 'error', error: e.message }); }
+        continue;
+      }
+      
+      if (agentName === 'IMAN' && typeof IMAN_escalate === 'function') {
+        try {
+          await IMAN_escalate({ category: 'caca', subject: 'CACA Complete', body: `Task: ${task}\n\n${JSON.stringify(results, null, 2)}` });
+          results.push({ agent: 'IMAN', status: 'emailed' });
+        } catch (e) { results.push({ agent: 'IMAN', status: 'error', error: e.message }); }
+        continue;
+      }
+      
+      if (AGENTS[agentName]?.execute) {
+        try {
+          const r = await AGENTS[agentName].execute('process', { input: lastOutput });
+          results.push({ agent: agentName, status: 'ok', output: JSON.stringify(r).substring(0, 200) });
+          lastOutput = r;
+        } catch (e) { results.push({ agent: agentName, status: 'error', error: e.message }); }
+      } else {
+        results.push({ agent: agentName, status: 'not_found' });
+      }
+    }
+    
+    return { agent: 'CACA', fullName: 'Coordinated Agent Chain Architecture', task, chain, results, status: 'complete' };
+  },
+  
+  async execute(action, params) {
+    this.runCount++;
+    if (action === 'run' && (params?.task || params?.input)) {
+      return await this.runChain(params.task || params.input, params.chain || this.defaultChain);
+    }
+    return { agent: 'CACA', fullName: 'Coordinated Agent Chain Architecture', actions: ['run'], defaultChain: this.defaultChain };
+  }
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PEEK - Personal Experience and Engagement Keeper
+// Stores per-user intake preferences: TELL vs RECOMMEND vs BOTH
+// ═══════════════════════════════════════════════════════════════════════════════
+AGENTS.PEEK = {
+  name: 'PEEK',
+  fullName: 'Personal Experience and Engagement Keeper',
+  department: 'CONTEXT',
+  type: 'COMMANDABLE',
+  runtime: 'on-demand',
+  active: true,
+  runCount: 0,
+  
+  async getPreference(userId) {
+    try {
+      const r = await fetch(SUPABASE_URL + '/rest/v1/aba_memory?source=eq.peek_' + encodeURIComponent(userId) + '&select=content&limit=1', {
+        headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
+      });
+      if (r.ok) { const d = await r.json(); if (d[0]) return JSON.parse(d[0].content); }
+    } catch (e) { console.log('[PEEK] Error:', e.message); }
+    return { mode: 'BOTH' };
+  },
+  
+  async setPreference(userId, mode) {
+    const validModes = ['TELL', 'RECOMMEND', 'BOTH'];
+    if (!validModes.includes(mode.toUpperCase())) return { error: true, message: 'Mode must be TELL, RECOMMEND, or BOTH' };
+    try {
+      await fetch(SUPABASE_URL + '/rest/v1/aba_memory?source=eq.peek_' + encodeURIComponent(userId), { method: 'DELETE', headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY } });
+      await fetch(SUPABASE_URL + '/rest/v1/aba_memory', { method: 'POST', headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+        body: JSON.stringify({ content: JSON.stringify({ mode: mode.toUpperCase() }), memory_type: 'user_preference', source: 'peek_' + userId, tags: ['peek', userId] }) });
+      return { success: true, userId, mode: mode.toUpperCase() };
+    } catch (e) { return { error: true, message: e.message }; }
+  },
+  
+  async execute(action, params) {
+    this.runCount++;
+    const userId = params?.userId || 'default';
+    if (action === 'get') return { agent: 'PEEK', fullName: 'Personal Experience and Engagement Keeper', userId, preference: await this.getPreference(userId) };
+    if (action === 'set' && params?.mode) return { agent: 'PEEK', fullName: 'Personal Experience and Engagement Keeper', ...(await this.setPreference(userId, params.mode)) };
+    return { agent: 'PEEK', fullName: 'Personal Experience and Engagement Keeper', actions: ['get', 'set'], modes: ['TELL', 'RECOMMEND', 'BOTH'] };
+  }
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PROOF - Protocol for Reliable Output and Objective Facts
+// BJ trust protocol - sends proof when challenged
+// ═══════════════════════════════════════════════════════════════════════════════
+AGENTS.PROOF = {
+  name: 'PROOF',
+  fullName: 'Protocol for Reliable Output and Objective Facts',
+  department: 'TRUST',
+  type: 'COMMANDABLE',
+  runtime: 'on-demand',
+  active: true,
+  runCount: 0,
+  
+  async gatherProof(claim) {
+    const evidence = [];
+    try {
+      const r = await fetch(SUPABASE_URL + '/rest/v1/aba_memory?content=ilike.%25' + encodeURIComponent(claim.substring(0, 30)) + '%25&limit=5&select=content,source', {
+        headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
+      });
+      if (r.ok) { const d = await r.json(); d.forEach(x => evidence.push({ source: x.source, snippet: x.content.substring(0, 150) })); }
+    } catch (e) { console.log('[PROOF] Error:', e.message); }
+    return { claim, evidence, hasEvidence: evidence.length > 0, message: evidence.length > 0 ? `Found ${evidence.length} sources` : 'No stored evidence - recommend web search' };
+  },
+  
+  async execute(action, params) {
+    this.runCount++;
+    if ((action === 'verify' || action === 'gather') && (params?.claim || params?.input)) {
+      return { agent: 'PROOF', fullName: 'Protocol for Reliable Output and Objective Facts', ...(await this.gatherProof(params.claim || params.input)) };
+    }
+    return { agent: 'PROOF', fullName: 'Protocol for Reliable Output and Objective Facts', actions: ['verify', 'gather'], description: 'Gather proof when challenged' };
+  }
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SCRUB - Speech Correction and Repair for Unintelligible Babble
+// Word cleanup pipeline for OMI/Otter transcripts
+// ═══════════════════════════════════════════════════════════════════════════════
+AGENTS.SCRUB = {
+  name: 'SCRUB',
+  fullName: 'Speech Correction and Repair for Unintelligible Babble',
+  department: 'PROCESSING',
+  type: 'COMMANDABLE',
+  runtime: 'on-demand',
+  active: true,
+  runCount: 0,
+  corrections: {
+    'aba': 'ABA', 'abba': 'ABA', 'a b a': 'ABA', 'air': 'AIR', 'mace': 'MACE', 'vara': 'VARA', 'vero': 'VARA', 'vera': 'VARA',
+    'dion': 'DION', 'cole': 'COLE', 'coal': 'COLE', 'grit': 'GRIT', 'grid': 'GRIT', 'luke': 'LUKE', 'look': 'LUKE',
+    'pack': 'PACK', 'pam': 'PAM', 'ham': 'HAM', 'omi': 'OMI', 'oh me': 'OMI', 'o m i': 'OMI',
+    'brandons': "Brandon's", 'bj': 'BJ', 'raquel': 'Raquel', 'rackle': 'Raquel', 'rachael': 'Raquel',
+    'super base': 'Supabase', 'soup abase': 'Supabase', 'for sell': 'Vercel', 'verse l': 'Vercel', 'new loss': 'Nylas', 'nylons': 'Nylas'
+  },
+  
+  clean(text) {
+    let cleaned = text;
+    for (const [wrong, right] of Object.entries(this.corrections)) {
+      cleaned = cleaned.replace(new RegExp('\\b' + wrong + '\\b', 'gi'), right);
+    }
+    return cleaned;
+  },
+  
+  async execute(action, params) {
+    this.runCount++;
+    if ((action === 'clean' || action === 'process') && (params?.text || params?.input)) {
+      const text = params.text || params.input;
+      const cleaned = this.clean(text);
+      return { agent: 'SCRUB', fullName: 'Speech Correction and Repair for Unintelligible Babble', original: text, cleaned, changed: cleaned !== text };
+    }
+    return { agent: 'SCRUB', fullName: 'Speech Correction and Repair for Unintelligible Babble', actions: ['clean', 'process'], correctionCount: Object.keys(this.corrections).length };
   }
 };
 
