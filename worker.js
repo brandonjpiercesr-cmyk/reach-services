@@ -3334,37 +3334,6 @@ AGENTS.SCRIBE = {
 };
 
 // SCRUB - Speech and Context Recovery Using Backups
-AGENTS.SCRUB = {
-  name: 'SCRUB',
-  fullName: 'Speech and Context Recovery Using Backups',
-  department: 'VOICE',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'SCRUB',
-      fullName: 'Speech and Context Recovery Using Backups',
-      department: 'VOICE',
-      contextAddition: 'Agent SCRUB (Speech and Context Recovery Using Backups) is available for voice tasks.',
-      capabilities: ['voice'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'SCRUB',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'SCRUB ready - context wrapper active'
-    };
-  }
-};
 
 // SHIELD - Security and Hostile Input Evaluation and Limiting Defense
 AGENTS.SHIELD = {
