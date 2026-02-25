@@ -6623,19 +6623,15 @@ async function COLE_scour(analysis, options = {}) {
 // ⬡B:AIR:REACH.AGENT.JUDE:CODE:intelligence.agent.discovery:AIR→JUDE→BRAIN→JUDE→AIR:T8:v1.5.0:20260213:j1u2d⬡
 // ⬡B:ABCD:ABAOS:AGENT.JUDE⬡
 async function JUDE_findAgents(analysis) {
-  console.log('[JUDE] Finding relevant agents...');
-  
-  if (!analysis.needsAgents) {
-    console.log('[JUDE] Agent search not needed for this query');
-    return { agents: [], capabilities: '' };
-  }
+  console.log('[JUDE] Finding relevant agents from aba_agent_jds...');
   
   let agents = [];
   
   try {
+    // Query the REAL agent table - aba_agent_jds
     const result = await httpsRequest({
       hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-      path: '/rest/v1/aba_memory?memory_type=eq.aba_agents&order=importance.desc&limit=10',
+      path: '/rest/v1/aba_agent_jds?select=acronym,full_name,department,responsibilities,personality,system_prompt&status=eq.active&limit=20',
       method: 'GET',
       headers: {
         'apikey': SUPABASE_ANON,
@@ -6644,23 +6640,54 @@ async function JUDE_findAgents(analysis) {
     });
     
     if (result.status === 200) {
-      const data = JSON.parse(result.data.toString());
-      const queryLower = analysis.raw.toLowerCase();
+      const allAgents = JSON.parse(result.data.toString());
+      const queryLower = (analysis.raw || '').toLowerCase();
+      const intent = analysis.intent || 'general';
       
-      for (const agent of data) {
-        const content = (agent.content || '').toLowerCase();
+      // Map intents to departments
+      const intentDeptMap = {
+        'email': ['OUTREACH', 'ADMIN'],
+        'call': ['VOICE', 'OUTREACH'],
+        'sms': ['OUTREACH'],
+        'schedule': ['ADMIN', 'PROACTIVE'],
+        'search': ['INTELLIGENCE', 'RESEARCH'],
+        'memory': ['INTELLIGENCE', 'VAULT'],
+        'code': ['CODING', 'INFRASTRUCTURE'],
+        'voice': ['VOICE'],
+        'greeting': ['CORE'],
+        'general': ['CORE', 'INTELLIGENCE']
+      };
+      
+      const relevantDepts = intentDeptMap[intent] || ['CORE'];
+      
+      // Find agents by department match
+      for (const agent of allAgents) {
+        if (relevantDepts.includes(agent.department)) {
+          agents.push({
+            name: agent.acronym,
+            fullName: agent.full_name,
+            dept: agent.department,
+            desc: agent.responsibilities?.substring(0, 150) || '',
+            personality: agent.personality || '',
+            systemPrompt: agent.system_prompt || ''
+          });
+        }
         
-        if (analysis.intent === 'command' && content.includes('execut')) {
-          agents.push({ name: agent.content?.match(/(\w+):/)?.[1] || 'Unknown', desc: agent.content?.substring(0, 100) });
-        }
-        if (queryLower.includes('voice') && content.includes('voice')) {
-          agents.push({ name: 'VARA', desc: 'Vocal Authorized Representative of ABA' });
-        }
-        if (queryLower.includes('email') && content.includes('email')) {
-          agents.push({ name: 'IMAN', desc: 'Intelligent Mail Agent' });
-        }
-        if (queryLower.includes('job') && content.includes('job')) {
-          agents.push({ name: 'HUNTER', desc: 'Hunting Useful New Tracks and Employment Resources' });
+        // Also match by keyword in query
+        const nameLower = (agent.full_name || '').toLowerCase();
+        const respLower = (agent.responsibilities || '').toLowerCase();
+        if (queryLower.includes(agent.acronym.toLowerCase()) || 
+            queryLower.split(' ').some(w => nameLower.includes(w) || respLower.includes(w))) {
+          if (!agents.find(a => a.name === agent.acronym)) {
+            agents.push({
+              name: agent.acronym,
+              fullName: agent.full_name,
+              dept: agent.department,
+              desc: agent.responsibilities?.substring(0, 150) || '',
+              personality: agent.personality || '',
+              systemPrompt: agent.system_prompt || ''
+            });
+          }
         }
       }
     }
@@ -6668,13 +6695,19 @@ async function JUDE_findAgents(analysis) {
     console.log('[JUDE] Agent search error: ' + e.message);
   }
   
+  // Dedupe and limit
   agents = agents.filter((a, i, arr) => arr.findIndex(x => x.name === a.name) === i).slice(0, 5);
   
-  console.log('[JUDE] Found ' + agents.length + ' relevant agents');
+  console.log('[JUDE] Found ' + agents.length + ' relevant agents:', agents.map(a => a.name).join(', '));
   
-  const capabilities = agents.map(a => `${a.name}: ${a.desc}`).join('; ');
+  // Build capabilities string with actual agent info
+  const capabilities = agents.map(a => `${a.name} (${a.fullName}): ${a.desc}`).join('\n');
   
-  return { agents, capabilities };
+  // Get the primary agent's system prompt if available
+  const primaryAgent = agents[0];
+  const agentSystemPrompt = primaryAgent?.systemPrompt || '';
+  
+  return { agents, capabilities, agentSystemPrompt };
 }
 
 /**
@@ -6764,8 +6797,15 @@ Be conversational, natural. You are not an assistant reading a script. You know 
     prompt += '\n\nCRITICAL: Use the information from RELEVANT CONTEXT above to answer. Use this HAMs personal details from their brain context, not hardcoded info. Each HAM is unique.';
   }
   
+  // ⬡B:JUDE:FIX:inject_agent_prompt:20260225⬡
+  // Inject the primary agent's specialized system prompt from aba_agent_jds
+  if (judeResult.agentSystemPrompt) {
+    prompt += '\n\nAGENT SPECIALIZATION:\n' + judeResult.agentSystemPrompt;
+    console.log('[PACK] Injected agent system prompt for primary agent');
+  }
+  
   if (judeResult.capabilities) {
-    prompt += '\n\nAVAILABLE CAPABILITIES:\n' + judeResult.capabilities;
+    prompt += '\n\nAVAILABLE AGENTS:\n' + judeResult.capabilities;
   }
   
   if (analysis.intent === 'greeting') {
