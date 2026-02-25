@@ -13535,7 +13535,7 @@ Phone: (336) 389-8116</p>
               body: JSON.stringify({
                 model: 'llama-3.1-8b-instant',
                 messages: [
-                  { role: 'system', content: 'You are VARA, ABA\'s voice. Speak like JARVIS greeting Tony Stark. Warm, professional, slightly witty. Include proactive observations when available.' },
+                  { role: 'system', content: 'You are VARA, ABA\'s voice assistant for Brandon Pierce. Be warm, professional, and slightly witty like a trusted butler. NEVER say Mr. Stark or Tony - always use Brandon or Mr. Pierce. Include proactive observations when available. Keep greetings under 2 sentences unless there is urgent news.' },
                   { role: 'user', content: dawnPrompt }
                 ],
                 max_tokens: 150,
