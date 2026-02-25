@@ -18361,6 +18361,46 @@ We Are All ABA.`;
   // ⬡B:AIR:REACH.THINK_TANK.ROUTE:CODE:routing.api.think_tank:USER→AIR→THINK_TANK:T10:v1.0.0:20260219:t1r1t⬡
   // POST /api/air/think-tank - Cook Session Protocol
   // ═══════════════════════════════════════════════════════════════════════════════
+  // /api/air/status - AIR Status endpoint (mirrors ABACIA)
+  if (path === '/api/air/status' && method === 'GET') {
+    const agentCount = Object.keys(AGENTS).length;
+    return jsonResponse(res, 200, {
+      status: 'operational',
+      agents: agentCount,
+      pulse: { running: true, interval: '5min' },
+      version: 'REACH-PHASE1',
+      uptime: process.uptime ? process.uptime() : 0,
+      message: 'We are all ABA'
+    });
+  }
+
+  // /api/voice/dial-callback - ElevenLabs continuous loop callback
+  if (path === '/api/voice/dial-callback' && method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      console.log('[DIAL-CALLBACK] Received:', JSON.stringify(body).substring(0, 200));
+      
+      const transcript = body.transcript || body.text || '';
+      const callId = body.call_id || body.conversation_id || Date.now().toString();
+      
+      // Clean with SCRUB if available
+      let cleaned = transcript;
+      if (AGENTS.SCRUB && AGENTS.SCRUB.clean) {
+        cleaned = AGENTS.SCRUB.clean(transcript);
+      }
+      
+      // Route through AIR
+      if (cleaned && AIR_text) {
+        const airRes = await AIR_text({ message: cleaned, context: { source: 'dial_callback', callId } });
+        return jsonResponse(res, 200, { status: 'ok', response: airRes?.response?.substring(0, 500), callId });
+      }
+      
+      return jsonResponse(res, 200, { status: 'ok', message: 'No transcript to process' });
+    } catch (e) {
+      return jsonResponse(res, 200, { status: 'error', error: e.message });
+    }
+  }
+
   if (path === '/api/air/think-tank' && method === 'POST') {
     const body = await parseBody(req);
     console.log('[AIR ROUTE] Think Tank session requested');
@@ -18450,21 +18490,6 @@ We Are All ABA.`;
     const result = await pushToGitHub(repo, filePath, content, message || 'ABA auto-push');
     return jsonResponse(res, result.success ? 200 : 500, result);
 
-  // /api/air/status - Phase 1 fix
-  if (path === '/api/air/status' && method === 'GET') {
-    let rp = '?', ni = 'unknown';
-    try { if (AGENTS.ERICA?.execute) { const e = await AGENTS.ERICA.execute('status',{}); rp = e.percentComplete; ni = e.nextItem?.item?.substring(0,60); }} catch(e){}
-    return jsonResponse(res, 200, { status: 'operational', agents: Object.keys(AGENTS).length, roadmap: { percent: rp, next: ni }, pulse: true, uptime: process.uptime?.() || 0 });
-  }
-
-  }
-
-  // ⬡B:AIR:REACH.API.NOTFOUND:CODE:infrastructure.error.404:USER→REACH→ERROR:T10:v1.5.0:20260213:n1f2d⬡ CATCH-ALL
-  // ═══════════════════════════════════════════════════════════════════════
-  jsonResponse(res, 404, { 
-    error: 'Route not found: ' + method + ' ' + path,
-    available: ['/api/escalate', '/api/escalate/twiml', '/api/escalate/confirm', '/api/call/dial', '/api/call/twiml', '/api/call/status', '/api/call/record', '/api/air/trigger/email', '/api/air/trigger/omi', '/api/air/trigger/calendar', '/api/air/trigger/job', '/api/air/trigger/system', '/api/air/think-tank', '/api/air/caca', '/api/air/erica', '/api/air/grit', '/api/github/push', '/api/sage/search', '/api/sage/index', '/api/iman/draft', '/api/iman/send', '/api/iman/drafts', '/api/devices/register', '/api/devices', '/api/pulse/status', '/api/pulse/trigger', '/api/router', '/api/models/claude', '/api/voice/deepgram-token', '/api/voice/tts', '/api/voice/tts-stream', '/api/omi/manifest', '/api/omi/webhook', '/api/sms/send', '/api/brain/search', '/api/brain/store', '/api/brain/code-patch', '/api/brain/code-patches', '/api/brain/store-patch', '/api/brain/apply-patch', '/ws:command-center'],
-    hint: 'We are all ABA'
   });
 });
 
