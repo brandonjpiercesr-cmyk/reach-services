@@ -8326,6 +8326,10 @@ async function generateProgressReport(pulseId) {
     const nowEST = new Date(now - 5 * 60 * 60 * 1000);
     const reportTime = nowEST.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
     
+    // Get roadmap % from ERICA
+    let roadmapPercent = '?', nextRoadmapItem = 'unknown';
+    try { if (AGENTS.ERICA?.execute) { const e = await AGENTS.ERICA.execute('status',{}); roadmapPercent = e.percentComplete||'?'; nextRoadmapItem = (e.nextItem?.item||'').substring(0,60)||'unknown'; }} catch(e){}
+
     // Build report
     const report = {
       subject: `ABA Progress Report — ${reportTime} EST`,
@@ -15052,6 +15056,21 @@ if (path === '/api/sms/send' && method === 'POST') {
   // Configure in ElevenLabs agent settings: Webhook URL
   // Captures: recording URL, transcripts, conversation data
   // ═══════════════════════════════════════════════════════════════════════
+
+  // /api/dial/callback - Continuous loop for DIAL calls (Phase 1)
+  if (path === '/api/dial/callback' && method === 'POST') {
+    const body = await parseBody(req);
+    const transcript = body.transcript || body.text || '';
+    const callId = body.call_id || body.conversation_id || Date.now();
+    console.log('[DIAL CALLBACK] Received:', callId);
+    if (transcript && typeof AIR_text === 'function') {
+      const cleaned = AGENTS.SCRUB?.clean ? AGENTS.SCRUB.clean(transcript) : transcript;
+      const airRes = await AIR_text({ message: cleaned, context: { source: 'dial_callback', callId, isVoice: true }});
+      return jsonResponse(res, 200, { status: 'ok', response: airRes?.response?.substring(0,500), callId });
+    }
+    return jsonResponse(res, 200, { status: 'no_transcript', callId });
+  }
+
   if (path === '/api/elevenlabs/webhook' && method === 'POST') {
     try {
       const body = await parseBody(req);
@@ -18430,6 +18449,14 @@ We Are All ABA.`;
     }
     const result = await pushToGitHub(repo, filePath, content, message || 'ABA auto-push');
     return jsonResponse(res, result.success ? 200 : 500, result);
+
+  // /api/air/status - Phase 1 fix
+  if (path === '/api/air/status' && method === 'GET') {
+    let rp = '?', ni = 'unknown';
+    try { if (AGENTS.ERICA?.execute) { const e = await AGENTS.ERICA.execute('status',{}); rp = e.percentComplete; ni = e.nextItem?.item?.substring(0,60); }} catch(e){}
+    return jsonResponse(res, 200, { status: 'operational', agents: Object.keys(AGENTS).length, roadmap: { percent: rp, next: ni }, pulse: true, uptime: process.uptime?.() || 0 });
+  }
+
   }
 
   // ⬡B:AIR:REACH.API.NOTFOUND:CODE:infrastructure.error.404:USER→REACH→ERROR:T10:v1.5.0:20260213:n1f2d⬡ CATCH-ALL
