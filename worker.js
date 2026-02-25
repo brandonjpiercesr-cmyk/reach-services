@@ -3843,9 +3843,10 @@ const MODEL_TIERS = {
   sonnet: { model: 'claude-sonnet-4-20250514', maxTokens: 2000, costPer1k: 0.003 },
   opus: { model: 'claude-opus-4-20250514', maxTokens: 4000, costPer1k: 0.015 },
   select(analysis) {
-    if (analysis.sentiment === 'urgent' || analysis.wordCount > 50 || analysis.isMultiTask) return this.opus;
+    // COST FIX: Default to Haiku for autonomous. Sonnet/Opus only if cost cap allows ⬡B:COST_FIX:20260225⬡
+    if (analysis.sentiment === 'urgent' || analysis.wordCount > 50 || analysis.isMultiTask) return this.haiku;
     if (analysis.intents.includes('greeting') && analysis.wordCount < 10) return this.haiku;
-    return this.sonnet;
+    return this.haiku;
   }
 };
 
@@ -7146,7 +7147,7 @@ async function callModel(prompt) {
           'Content-Type': 'application/json'
         }
       }, JSON.stringify({
-        model: 'claude-sonnet-4-5-20250929',
+        model: 'claude-3-haiku-20240307',
         max_tokens: 200,
         messages: [{ role: 'user', content: prompt }]
       }));
@@ -7304,7 +7305,7 @@ async function TRIGGER_systemAlert(alert) {
 
 // ⬡B:AIR:REACH.THINK_TANK.DEEP_MODEL:FUNC:model.deep.reasoning:AIR→MODEL:T10:v1.0.0:20260219:d1m1l⬡
 async function callModelDeep(prompt, maxTokens = 2000) {
-  // Use Claude Sonnet for deep reasoning (Think Tank needs quality over speed)
+  // COST FIX: Haiku for autonomous, Sonnet only for user-facing ⬡B:COST_FIX:20260225⬡
   if (ANTHROPIC_KEY) {
     try {
       const result = await httpsRequest({
@@ -7317,7 +7318,7 @@ async function callModelDeep(prompt, maxTokens = 2000) {
           'Content-Type': 'application/json'
         }
       }, JSON.stringify({
-        model: 'claude-sonnet-4-5-20250929',
+        model: 'claude-3-haiku-20240307',
         max_tokens: maxTokens,
         messages: [{ role: 'user', content: prompt }]
       }));
@@ -12536,7 +12537,7 @@ async function AIR_text(userMessage, history, context = {}) {
       } catch (e) { console.log('[AIR] Gemini error: ' + e.message); }
     }
 
-    // BACKUP: Claude Haiku
+    // BACKUP: Claude Haiku (COST FIX: was Sonnet 4.5 ⬡B:COST_FIX:20260225⬡)
     if (ANTHROPIC_KEY && !response) {
       try {
         const messages = (history || []).map(h => ({ role: h.role, content: h.content }));
@@ -12551,7 +12552,7 @@ async function AIR_text(userMessage, history, context = {}) {
             'Content-Type': 'application/json'
           }
         }, JSON.stringify({
-          model: 'claude-sonnet-4-5-20250929',
+          model: 'claude-3-haiku-20240307',
           max_tokens: 2048,
           system: missionPackage.systemPrompt,
           messages
