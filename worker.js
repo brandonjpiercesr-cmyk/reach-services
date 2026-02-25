@@ -8334,7 +8334,7 @@ async function generateProgressReport(pulseId) {
     const report = {
       subject: `ABA Progress Report — ${reportTime} EST`,
       body: `Progress Report — ${reportTime} EST\n\n` +
-        `ACTIVITY SINCE LAST CHECK-IN:\n` +
+        `UNICORN ROADMAP: ${roadmapPercent}% complete\nNext: ${nextRoadmapItem}\n\nACTIVITY SINCE LAST CHECK-IN:\n` +
         `• OMI Transcripts Captured: ${omiTranscripts}\n` +
         `• Think Tank Sessions: ${thinkTanks}\n` +
         `• Emails Processed: ${emails}\n` +
