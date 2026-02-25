@@ -18489,9 +18489,8 @@ We Are All ABA.`;
     }
     const result = await pushToGitHub(repo, filePath, content, message || 'ABA auto-push');
     return jsonResponse(res, result.success ? 200 : 500, result);
+  }
 
-  });
-});
 
 // ═══════════════════════════════════════════════════════════════════════════
 /**
