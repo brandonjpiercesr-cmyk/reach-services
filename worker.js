@@ -13505,13 +13505,206 @@ Phone: (336) 389-8116</p>
           }
         }
 
+        // ── DAWN GREETING (JARVIS-style) ────────────────────────
+        // v2.0.0: Rich contextual greeting with proactive info
+        if (body.type === 'dawn_greeting') {
+          try {
+            const userName = body.context?.userName || 'there';
+            const hour = new Date().getHours();
+            const timeGreeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+            
+            // Query brain for proactive items
+            let proactiveInfo = '';
+            try {
+              const presenceRes = await fetch(
+                `https://htlxjkbrstpwwtzsbyvb.supabase.co/rest/v1/aba_memory?memory_type=in.(proactive,scheduled_call,urgent)&order=created_at.desc&limit=3&select=content,memory_type`,
+                { headers: { 'apikey': process.env.SUPABASE_ANON_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}` } }
+              );
+              const presenceData = await presenceRes.json();
+              if (presenceData && presenceData.length > 0) {
+                proactiveInfo = presenceData.map(p => p.content).join('. ');
+              }
+            } catch {}
+            
+            // Use VARA to compose JARVIS-style greeting
+            const dawnPrompt = `Generate a JARVIS-style greeting for ${userName}. Time: ${timeGreeting}. ${proactiveInfo ? 'Proactive context: ' + proactiveInfo : 'No urgent items.'} Be warm like a trusted butler. Include 1-2 proactive observations if relevant. Keep under 3 sentences.`;
+            
+            const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.GROQ_API_KEY}` },
+              body: JSON.stringify({
+                model: 'llama-3.1-8b-instant',
+                messages: [
+                  { role: 'system', content: 'You are VARA, ABA\'s voice. Speak like JARVIS greeting Tony Stark. Warm, professional, slightly witty. Include proactive observations when available.' },
+                  { role: 'user', content: dawnPrompt }
+                ],
+                max_tokens: 150,
+                temperature: 0.7
+              })
+            });
+            const groqData = await groqRes.json();
+            const greeting = groqData.choices?.[0]?.message?.content?.trim() || `${timeGreeting}, ${userName}.`;
+            
+            console.log('[DAWN_GREETING] Generated:', greeting.substring(0, 50) + '...');
+            return jsonResponse(res, 200, {
+              response: {
+                greeting: greeting,
+                context: proactiveInfo ? 'I have a few things to share with you.' : "I'm ready when you are.",
+                proactive: proactiveInfo || null
+              },
+              source: 'dawn'
+            });
+          } catch (err) {
+            console.error('[DAWN_GREETING] Error:', err.message);
+            const hour = new Date().getHours();
+            return jsonResponse(res, 200, {
+              response: {
+                greeting: `${hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'}, ${body.context?.userName || 'there'}`,
+                context: "I'm ready when you are.",
+                proactive: null
+              },
+              source: 'fallback'
+            });
+          }
+        }
+
+        // ── SAVE CONVERSATION (AIR → Supabase) ──────────────────
+        // v2.0.0: Store conversations in Supabase, not Firebase
+        if (body.type === 'save_conversation') {
+          try {
+            const { conversationId, title, messages, createdAt, archived } = body.context || {};
+            const userId = body.userId || 'anonymous';
+            
+            if (!conversationId) {
+              return jsonResponse(res, 400, { error: 'conversationId required' });
+            }
+            
+            // Upsert to Supabase aba_conversations table
+            const saveRes = await fetch(
+              `https://htlxjkbrstpwwtzsbyvb.supabase.co/rest/v1/aba_conversations?on_conflict=id`,
+              {
+                method: 'POST',
+                headers: {
+                  'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY,
+                  'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+                  'Content-Type': 'application/json',
+                  'Prefer': 'resolution=merge-duplicates'
+                },
+                body: JSON.stringify({
+                  id: conversationId,
+                  user_id: userId,
+                  title: title || 'New Chat',
+                  messages: messages || [],
+                  created_at: createdAt || new Date().toISOString(),
+                  updated_at: new Date().toISOString(),
+                  archived: archived || false
+                })
+              }
+            );
+            
+            console.log('[SAVE_CONVERSATION] Saved:', conversationId);
+            return jsonResponse(res, 200, { success: true, conversationId, source: 'supabase' });
+          } catch (err) {
+            console.error('[SAVE_CONVERSATION] Error:', err.message);
+            return jsonResponse(res, 500, { error: err.message });
+          }
+        }
+
+        // ── LOAD CONVERSATIONS ──────────────────────────────────
+        // v2.0.0: Load conversations from Supabase
+        if (body.type === 'load_conversations') {
+          try {
+            const userId = body.userId || 'anonymous';
+            
+            const loadRes = await fetch(
+              `https://htlxjkbrstpwwtzsbyvb.supabase.co/rest/v1/aba_conversations?user_id=eq.${userId}&archived=eq.false&order=updated_at.desc&limit=30`,
+              {
+                headers: {
+                  'apikey': process.env.SUPABASE_ANON_KEY,
+                  'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}`
+                }
+              }
+            );
+            const conversations = await loadRes.json();
+            
+            console.log('[LOAD_CONVERSATIONS] Found:', conversations?.length || 0);
+            return jsonResponse(res, 200, { 
+              conversations: conversations || [],
+              source: 'supabase'
+            });
+          } catch (err) {
+            console.error('[LOAD_CONVERSATIONS] Error:', err.message);
+            return jsonResponse(res, 200, { conversations: [], source: 'fallback' });
+          }
+        }
+
+        // ── DELETE CONVERSATION ─────────────────────────────────
+        if (body.type === 'delete_conversation') {
+          try {
+            const { conversationId } = body.context || {};
+            const userId = body.userId || 'anonymous';
+            
+            if (!conversationId) {
+              return jsonResponse(res, 400, { error: 'conversationId required' });
+            }
+            
+            await fetch(
+              `https://htlxjkbrstpwwtzsbyvb.supabase.co/rest/v1/aba_conversations?id=eq.${conversationId}&user_id=eq.${userId}`,
+              {
+                method: 'DELETE',
+                headers: {
+                  'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY,
+                  'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`
+                }
+              }
+            );
+            
+            console.log('[DELETE_CONVERSATION] Deleted:', conversationId);
+            return jsonResponse(res, 200, { success: true, conversationId });
+          } catch (err) {
+            console.error('[DELETE_CONVERSATION] Error:', err.message);
+            return jsonResponse(res, 500, { error: err.message });
+          }
+        }
+
+        // ── ARCHIVE CONVERSATION ────────────────────────────────
+        if (body.type === 'archive_conversation') {
+          try {
+            const { conversationId } = body.context || {};
+            const userId = body.userId || 'anonymous';
+            
+            if (!conversationId) {
+              return jsonResponse(res, 400, { error: 'conversationId required' });
+            }
+            
+            await fetch(
+              `https://htlxjkbrstpwwtzsbyvb.supabase.co/rest/v1/aba_conversations?id=eq.${conversationId}&user_id=eq.${userId}`,
+              {
+                method: 'PATCH',
+                headers: {
+                  'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY,
+                  'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ archived: true, updated_at: new Date().toISOString() })
+              }
+            );
+            
+            console.log('[ARCHIVE_CONVERSATION] Archived:', conversationId);
+            return jsonResponse(res, 200, { success: true, conversationId });
+          } catch (err) {
+            console.error('[ARCHIVE_CONVERSATION] Error:', err.message);
+            return jsonResponse(res, 500, { error: err.message });
+          }
+        }
+
         // Unknown type with no message — reject
         if (!message) {
           console.log('[ROUTER] Unknown type with no message:', body.type);
           return jsonResponse(res, 400, { error: 'Unknown type or message required', type: body.type });
         }
       }
-      // ⬡B:REACH.router:TYPE_ROUTING_END:v1.1.3:20260225⬡
+      // ⬡B:REACH.router:TYPE_ROUTING_END:v2.0.0:20260225⬡
 
       if (!message) return jsonResponse(res, 400, { error: 'message required' });
 
