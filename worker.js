@@ -20490,3 +20490,38 @@ AGENTS.TRACE = {
     };
   }
 };
+
+
+// Protocol for Hostile Input Scanning and Handling (PHISH)
+// ⬡B:AGENT.PHISH:CODE:security:v1.0.0:20260225⬡
+AGENTS.PHISH = {
+  name: 'PHISH',
+  fullName: 'Protocol for Hostile Input Scanning and Handling',
+  department: 'SECURITY',
+  type: 'CONTEXT_WRAPPER',
+  runtime: 'on-demand',
+  active: true,
+  runCount: 0,
+  
+  getContext(message, context) {
+    this.runCount++;
+    return {
+      agent: 'PHISH',
+      fullName: 'Protocol for Hostile Input Scanning and Handling',
+      department: 'SECURITY',
+      contextAddition: 'Agent PHISH (Protocol for Hostile Input Scanning and Handling) is available for security tasks.',
+      capabilities: ['security'],
+      status: 'context_wrapper_v1'
+    };
+  },
+  
+  async execute(action, params) {
+    this.runCount++;
+    return {
+      agent: 'PHISH',
+      action: action || 'getContext',
+      result: this.getContext(params?.message, params?.context),
+      message: 'PHISH (Protocol for Hostile Input Scanning and Handling) ready'
+    };
+  }
+};
