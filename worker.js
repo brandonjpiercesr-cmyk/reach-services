@@ -280,25 +280,28 @@ let STARTUP_WRITING_STANDARDS = '';
 // Trace: A*AGENTS*A → A*DRAFT*A → A*MEMOS*A → DELIVERY
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// ⬡B:AIR:REACH.AGENT.PROTO:CODE:protocol.enforcement:v1.0.0:20260225⬡
+// ⬡B:AIR:REACH.AGENT.PROTO:CODE:protocol.enforcement:v1.1.0:20260225⬡
 // PROTO - Protocol Enforcement and Training Officer
-// Runs BEFORE VARA speaks. Enforces Brandon's 16 writing standards.
-// WIRED: Always runs on output. Not just a JD - actually deployed.
+// Runs BEFORE VARA speaks. Enforces writing standards.
+// NOW USES HAM for names - NO HARDCODED NAMES
 // ═══════════════════════════════════════════════════════════════════════════════
 const PROTO_RULES = {
   NO_PROFANITY: { pattern: /\b(fuck|shit|damn|ass|bitch|hell)\b/gi, fix: 'Remove profanity - ABA is a butler', fireable: true },
-  NO_MR_STARK: { pattern: /mr\.?\s*stark|tony\s*stark/gi, fix: 'Use Brandon or Mr. Pierce, never Mr. Stark', fireable: true },
+  NO_MR_STARK: { pattern: /mr\.?\s*stark|tony\s*stark/gi, fix: 'Use HAM name from brain, never fictional names', fireable: true },
   NO_EM_DASH: { pattern: /[—–]/g, fix: 'Use comma or period instead of em dash', fireable: true },
   NO_COLD_GREETING: { pattern: /^(hi|hey|hello),?\s*$/im, fix: 'Greetings must include name', fireable: false },
-  WARM_BUTLER: { check: (t) => t.length > 100 && !/brandon|mr\.?\s*pierce/i.test(t), fix: 'Long outputs should address Brandon by name', fireable: false },
   NO_AI_SLOP: { pattern: /(I'd be happy to|feel free to|don't hesitate|here's the thing)/gi, fix: 'Remove AI clichés', fireable: false }
 };
 
-function PROTO_enforce(text) {
+// PROTO now takes callerIdentity to get real HAM name
+async function PROTO_enforce(text, callerIdentity = null) {
   if (!text || typeof text !== 'string') return { text, violations: [], enforced: false };
   
   let cleaned = text;
   const violations = [];
+  
+  // Get real HAM name from brain (not hardcoded)
+  const hamName = await getCurrentHAMName(callerIdentity);
   
   // Check and fix each rule
   for (const [rule, config] of Object.entries(PROTO_RULES)) {
@@ -306,29 +309,28 @@ function PROTO_enforce(text) {
       const matches = cleaned.match(config.pattern);
       if (matches && matches.length > 0) {
         violations.push({ rule, matches: matches.slice(0, 3), fix: config.fix, fireable: config.fireable });
-        // Auto-fix some issues
+        // Auto-fix using HAM name (not hardcoded)
         if (rule === 'NO_MR_STARK') {
-          cleaned = cleaned.replace(/mr\.?\s*stark/gi, 'Brandon');
-          cleaned = cleaned.replace(/tony\s*stark/gi, 'Brandon');
+          cleaned = cleaned.replace(/mr\.?\s*stark/gi, hamName);
+          cleaned = cleaned.replace(/tony\s*stark/gi, hamName);
         }
         if (rule === 'NO_EM_DASH') {
           cleaned = cleaned.replace(/[—–]/g, ',');
         }
       }
-    } else if (config.check && config.check(cleaned)) {
-      violations.push({ rule, fix: config.fix, fireable: config.fireable });
     }
   }
   
   if (violations.length > 0) {
-    console.log('[PROTO] Violations found:', violations.map(v => v.rule).join(', '));
+    console.log('[PROTO] Violations found:', violations.map(v => v.rule).join(', '), '| HAM:', hamName);
   }
   
   return {
     text: cleaned,
     violations,
     enforced: violations.length > 0,
-    hasFirable: violations.some(v => v.fireable)
+    hasFirable: violations.some(v => v.fireable),
+    hamName
   };
 }
 
@@ -653,23 +655,26 @@ AGENTS.COLE = {
   }
 };
 
-// HAM - REAL identity
+// HAM - REAL identity - NOW LOADS FROM BRAIN
 AGENTS.HAM = {
   name: 'HAM', fullName: 'Human ABA Master',
-  knownContacts: {
-    'brandon': { name: 'Brandon Pierce Sr.', trust: 'T10', role: 'HAM', phone: '+14049182628', email: 'brandonjpiercesr@gmail.com' },
-    'bj': { name: 'BJ Pierce', trust: 'T8', role: 'Brother' },
-    'eric': { name: 'Eric Lane', trust: 'T8', role: 'Co-founder', company: 'GMG' },
-    'cj': { name: 'CJ Moore', trust: 'T7', role: 'Collaborator' },
-    'raquel': { name: 'Raquel Britton', trust: 'T6', role: 'Creative Director' }
+  // knownContacts is now dynamic - loaded via loadHAMContacts()
+  async getContacts() {
+    return await loadHAMContacts();
   },
   async identify(identifier) {
     if (!identifier) return { identity: null, trust: 'T0', found: false };
     const lower = identifier.toLowerCase();
-    for (const [key, contact] of Object.entries(this.knownContacts)) {
-      if (lower.includes(key)) return { identity: contact, trust: contact.trust, found: true };
+    const contacts = await loadHAMContacts();
+    
+    // Check dynamic contacts from brain
+    for (const [key, contact] of Object.entries(contacts)) {
+      if (lower.includes(key) || lower.includes((contact.name || '').toLowerCase())) {
+        return { identity: contact, trust: contact.trust, found: true };
+      }
     }
-    // Try brain lookup
+    
+    // Try brain lookup for unknown contacts
     try {
       const r = await fetch(SUPABASE_URL + '/rest/v1/aba_memory?memory_type=eq.contact&content=ilike.*' + encodeURIComponent(identifier) + '*&limit=1', { headers: { 'apikey': SUPABASE_KEY || SUPABASE_ANON, 'Authorization': 'Bearer ' + (SUPABASE_KEY || SUPABASE_ANON) } });
       if (r.ok) { const data = await r.json(); if (data[0]) return { identity: { name: identifier, raw: data[0].content }, trust: 'T5', found: true }; }
@@ -4095,57 +4100,114 @@ function isReasonableHourToCall(personName) {
 // MASTER CONTACTS LIST - Used by voice-tool, group calls, scheduled calls
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const MASTER_CONTACTS = {
-  brandon: { 
-    phone: '+13363898116', 
-    name: 'Brandon', 
-    fullName: 'Brandon Pierce',
-    timezone: 'America/New_York',
-    trust: 'T10',
-    role: 'HAM'
-  },
-  eric: { 
-    phone: '+13236007676', 
-    name: 'Dr. Eric Lane',
-    fullName: 'Dr. Eric Lane Sr.',
-    timezone: 'America/Los_Angeles',
-    trust: 'T9',
-    role: 'Senior Advisor'
-  },
-  bj: { 
-    phone: '+19803958662', 
-    name: 'BJ',
-    fullName: 'BJ Pierce',
-    timezone: 'America/New_York',
-    trust: 'T8',
-    role: 'Brother'
-  },
-  cj: { 
-    phone: '+19199170686', 
-    name: 'CJ',
-    fullName: 'CJ Pierce',
-    timezone: 'America/New_York',
-    trust: 'T7',
-    role: 'Brother'
-  }
-};
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:HAM:CONTACTS:DYNAMIC:brain_loaded:20260225⬡
+// HAM CONTACTS - LOADED FROM BRAIN, NOT HARDCODED
+// Source: aba_memory WHERE memory_type = 'ham_identity'
+// ═══════════════════════════════════════════════════════════════════════════════
+let HAM_CONTACTS_CACHE = {};
+let HAM_CONTACTS_LOADED_AT = null;
 
-// Lookup contact by name (fuzzy matching)
-function lookupContact(nameInput) {
+async function loadHAMContacts() {
+  // Cache for 5 minutes
+  if (HAM_CONTACTS_CACHE && Object.keys(HAM_CONTACTS_CACHE).length > 0 && 
+      HAM_CONTACTS_LOADED_AT && (Date.now() - HAM_CONTACTS_LOADED_AT) < 300000) {
+    return HAM_CONTACTS_CACHE;
+  }
+  
+  try {
+    const url = SUPABASE_URL + '/rest/v1/aba_memory?memory_type=eq.ham_identity&select=content,source';
+    const response = await fetch(url, {
+      headers: {
+        'apikey': SUPABASE_ANON,
+        'Authorization': 'Bearer ' + SUPABASE_ANON
+      }
+    });
+    
+    if (response.ok) {
+      const data = await response.json();
+      HAM_CONTACTS_CACHE = {};
+      
+      for (const ham of data) {
+        try {
+          const parsed = typeof ham.content === 'string' ? JSON.parse(ham.content) : ham.content;
+          const key = (parsed.name || parsed.fullName || '').toLowerCase().split(' ')[0];
+          if (key) {
+            HAM_CONTACTS_CACHE[key] = {
+              phone: parsed.phone,
+              name: parsed.name || parsed.fullName,
+              fullName: parsed.fullName || parsed.name,
+              timezone: parsed.timezone || 'America/New_York',
+              trust: parsed.trust || 'T5',
+              role: parsed.role || 'HAM',
+              email: parsed.email,
+              preferences: parsed.preferences
+            };
+          }
+        } catch (e) {
+          console.log('[HAM] Parse error for:', ham.source);
+        }
+      }
+      
+      HAM_CONTACTS_LOADED_AT = Date.now();
+      console.log('[HAM] Loaded', Object.keys(HAM_CONTACTS_CACHE).length, 'contacts from brain');
+    }
+  } catch (e) {
+    console.log('[HAM] Error loading contacts:', e.message);
+  }
+  
+  // Fallback minimal data if brain empty - REMOVE THIS ONCE BRAIN IS POPULATED
+  if (Object.keys(HAM_CONTACTS_CACHE).length === 0) {
+    console.log('[HAM] WARNING: No HAM contacts in brain, using minimal fallback');
+    HAM_CONTACTS_CACHE = {
+      brandon: { name: 'Brandon', fullName: 'Brandon Pierce', trust: 'T10', role: 'HAM' }
+    };
+  }
+  
+  return HAM_CONTACTS_CACHE;
+}
+
+// Get current HAM name (for PROTO to use instead of hardcoded)
+async function getCurrentHAMName(callerIdentity) {
+  if (callerIdentity && callerIdentity.name) {
+    return callerIdentity.name;
+  }
+  const contacts = await loadHAMContacts();
+  // Default to first T10 HAM if no caller identity
+  for (const [key, contact] of Object.entries(contacts)) {
+    if (contact.trust === 'T10') return contact.name;
+  }
+  return 'there'; // Generic fallback
+}
+
+// Lookup contact by name (fuzzy matching) - DYNAMIC from brain
+async function lookupContact(nameInput) {
   if (!nameInput) return null;
   const name = nameInput.toLowerCase().trim();
+  const contacts = await loadHAMContacts();
   
   // Direct match
-  if (MASTER_CONTACTS[name]) return MASTER_CONTACTS[name];
+  if (contacts[name]) return contacts[name];
   
   // Fuzzy matches
-  if (name.includes('eric') || name.includes('dr')) return MASTER_CONTACTS.eric;
-  if (name.includes('bj') || name.includes('b.j')) return MASTER_CONTACTS.bj;
-  if (name.includes('cj') || name.includes('c.j')) return MASTER_CONTACTS.cj;
-  if (name.includes('brandon') || name.includes('boss')) return MASTER_CONTACTS.brandon;
+  for (const [key, contact] of Object.entries(contacts)) {
+    const fullNameLower = (contact.fullName || '').toLowerCase();
+    const nameLower = (contact.name || '').toLowerCase();
+    if (fullNameLower.includes(name) || nameLower.includes(name) || name.includes(key)) {
+      return contact;
+    }
+  }
   
   return null;
 }
+
+// Legacy compatibility - MASTER_CONTACTS now loads dynamically
+const MASTER_CONTACTS = new Proxy({}, {
+  get: function(target, prop) {
+    // This is synchronous so we return from cache
+    return HAM_CONTACTS_CACHE[prop] || null;
+  }
+});
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // ⬡B:TOUCH:PHASE3:SPURT3.1:group.calls:20260216⬡
@@ -13597,10 +13659,10 @@ Phone: (336) 389-8116</p>
             const groqData = await groqRes.json();
             let greeting = groqData.choices?.[0]?.message?.content?.trim() || `${timeGreeting}, ${userName}.`;
             
-            // PROTO enforcement on greeting
-            const protoResult = PROTO_enforce(greeting);
+            // PROTO enforcement on greeting - uses HAM name from brain
+            const protoResult = await PROTO_enforce(greeting, { name: userName || body.context?.userName });
             if (protoResult.enforced) {
-              console.log('[DAWN_GREETING] PROTO cleaned greeting');
+              console.log('[DAWN_GREETING] PROTO cleaned greeting, HAM:', protoResult.hamName);
               greeting = protoResult.text;
             }
             
@@ -13940,12 +14002,14 @@ Respond as this agent specifically — stay in character.`;
       // MEMOS captures if noteworthy
       
       // ⬡B:PROTO:ENFORCEMENT:wired:20260225⬡
-      // PROTO runs on ALL outputs before delivery
+      // PROTO runs on ALL outputs before delivery - uses HAM from brain
       let finalResponse = result.response;
       if (finalResponse && typeof finalResponse === 'string') {
-        const protoResult = PROTO_enforce(finalResponse);
+        // Get caller identity from body or result
+        const callerIdentity = body.callerIdentity || result.callerIdentity || { name: body.userId };
+        const protoResult = await PROTO_enforce(finalResponse, callerIdentity);
         if (protoResult.enforced) {
-          console.log('[PROTO] Cleaned response, violations:', protoResult.violations.length);
+          console.log('[PROTO] Cleaned response, violations:', protoResult.violations.length, '| HAM:', protoResult.hamName);
           finalResponse = protoResult.text;
         }
       }
