@@ -8327,10 +8327,14 @@ async function generateProgressReport(pulseId) {
     const reportTime = nowEST.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
     
     // Build report
+    // Get roadmap % from ERICA
+    let roadmapPercent = "?", nextRoadmapItem = "unknown";
+    try { if (AGENTS.ERICA?.execute) { const e = await AGENTS.ERICA.execute("status",{}); roadmapPercent = e.percentComplete||"?"; nextRoadmapItem = (e.nextItem?.item||"").substring(0,60)||"unknown"; }} catch(e){}
+
     const report = {
       subject: `ABA Progress Report — ${reportTime} EST`,
       body: `Progress Report — ${reportTime} EST\n\n` +
-        `ACTIVITY SINCE LAST CHECK-IN:\n` +
+        `UNICORN ROADMAP: ${roadmapPercent}% | Next: ${nextRoadmapItem}\n\nACTIVITY SINCE LAST CHECK-IN:\n` +
         `• OMI Transcripts Captured: ${omiTranscripts}\n` +
         `• Think Tank Sessions: ${thinkTanks}\n` +
         `• Emails Processed: ${emails}\n` +
@@ -15052,6 +15056,21 @@ if (path === '/api/sms/send' && method === 'POST') {
   // Configure in ElevenLabs agent settings: Webhook URL
   // Captures: recording URL, transcripts, conversation data
   // ═══════════════════════════════════════════════════════════════════════
+
+  // /api/dial/callback - Continuous loop for DIAL (Phase 1)
+  if (path === "/api/dial/callback" && method === "POST") {
+    const body = await parseBody(req);
+    const transcript = body.transcript || body.text || "";
+    const callId = body.call_id || body.conversation_id || Date.now();
+    console.log("[DIAL CALLBACK] Received:", callId);
+    if (transcript && typeof AIR_text === "function") {
+      const cleaned = AGENTS.SCRUB?.clean ? AGENTS.SCRUB.clean(transcript) : transcript;
+      const airRes = await AIR_text({ message: cleaned, context: { source: "dial_callback", callId, isVoice: true }});
+      return jsonResponse(res, 200, { status: "ok", response: airRes?.response?.substring(0,500), callId });
+    }
+    return jsonResponse(res, 200, { status: "no_transcript", callId });
+  }
+
   if (path === '/api/elevenlabs/webhook' && method === 'POST') {
     try {
       const body = await parseBody(req);
@@ -18218,18 +18237,6 @@ We Are All ABA.`;
   }
   
   // GET /api/pulse/status - Get heartbeat status
-  // /api/air/status - AIR Status for external monitoring
-  if (path === '/api/air/status' && method === 'GET') {
-    const agentCount = Object.keys(AGENTS).length;
-    return jsonResponse(res, 200, {
-      status: 'operational',
-      agents: agentCount,
-      pulse: { running: true, interval: '5min' },
-      version: 'REACH-PHASE1-WIRE-THE-LOOP',
-      message: 'We are all ABA'
-    });
-  }
-
   if (path === '/api/pulse/status' && method === 'GET') {
     const oneHourAgo = Date.now() - 60 * 60 * 1000;
     const recentCalls = CALL_HISTORY.filter(t => t > oneHourAgo);
@@ -18431,6 +18438,14 @@ We Are All ABA.`;
     const result = await GRIT_testEndpoints();
     return jsonResponse(res, 200, result);
   }
+
+  // /api/air/status - AIR Status (Phase 1)
+  if (path === "/api/air/status" && method === "GET") {
+    let rp = "?", ni = "unknown";
+    try { if (AGENTS.ERICA?.execute) { const e = await AGENTS.ERICA.execute("status",{}); rp = e.percentComplete; ni = e.nextItem?.item?.substring(0,60); }} catch(e){}
+    return jsonResponse(res, 200, { status: "operational", agents: Object.keys(AGENTS).length, roadmap: { percent: rp, next: ni }, pulse: true });
+  }
+
   
   // POST /api/github/push — Push a file to GitHub (for CACA chains)
   // ═══════════════════════════════════════════════════════════════════════════════
@@ -20742,4 +20757,3 @@ AGENTS.PHISH = {
     };
   }
 };
-
