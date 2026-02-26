@@ -12415,6 +12415,20 @@ Generate ONLY the greeting, nothing else:`;
 async function HAM_identify(context) {
   const { caller_number, device_id, ham_id, source } = context;
   
+  // ⬡B:HAM:FIX:use_passed_identity:20260226⬡
+  // If full identity passed from MyABA, use it directly
+  const { ham_name, ham_email, trust_level } = context;
+  if (ham_name && trust_level) {
+    console.log('[HAM] Using passed identity:', ham_name, '| Trust:', trust_level);
+    return { 
+      id: ham_id || `ham_${ham_name.toLowerCase().replace(/\s+/g, '_')}_${trust_level.toLowerCase()}`,
+      trust: trust_level,
+      name: ham_name,
+      email: ham_email,
+      source: 'passed_identity'
+    };
+  }
+  
   // If explicit ham_id, use it
   if (ham_id) {
     const trustLevel = ham_id.includes('t10') ? 'T10' : ham_id.includes('t8') ? 'T8' : 'T5';
@@ -14227,7 +14241,21 @@ Respond as this agent specifically — stay in character.`;
       
       // Default: route through AIR_text (LUKE/COLE/JUDE/PACK)
       console.log('[ROUTER] Routing message through AIR: "' + message.substring(0, 80) + '"');
-      let result = await AIR_text(message, history || [], { source: body.source || "api", channel: body.channel || "chat", caller_number: body.caller_number, ham_id: body.ham_id });
+      
+      // ⬡B:REACH:HAM_IDENTITY:FIX:pass_full_identity:20260226⬡
+      // Pass full HAM identity from MyABA for proper authentication
+      const hamContext = {
+        source: body.source || "api",
+        channel: body.channel || "chat",
+        caller_number: body.caller_number,
+        ham_id: body.ham_id || body.userId,
+        ham_name: body.ham_name || body.context?.userName || 'Brandon',
+        ham_email: body.ham_email || body.context?.userEmail,
+        trust_level: body.trust_level || (body.source === 'myaba' ? 'T10' : 'T5')  // MyABA = authenticated = T10
+      };
+      console.log('[ROUTER] HAM identity:', hamContext.ham_name, '| Trust:', hamContext.trust_level);
+      
+      let result = await AIR_text(message, history || [], hamContext);
       
       // ⬡B:AIR:VALIDATOR:CHECK:response.quality:v1.0.0:20260222⬡
       // Validate response before sending - reject garbage
