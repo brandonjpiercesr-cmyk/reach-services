@@ -4973,29 +4973,29 @@ async function ABACIA_IMAN_getInbox(options = {}) {
   console.log('[ABACIA BRIDGE] Getting inbox via IMAN...');
   
   try {
-    // ⬡B:IMAN:FIX:use_fetch:20260226⬡
-    // Use native fetch (more reliable than httpsRequest)
+    // ⬡B:IMAN:FIX:use_httpsRequest:20260226⬡
+    // Use httpsRequest for reliability
     const days = options.daysAgo || 7;
     const limit = options.limit || 10;
     const unread = options.unreadOnly ? '&unread=true' : '';
     
-    const url = `https://abacia-services.onrender.com/api/email/inbox?days=${days}&limit=${limit}${unread}`;
-    console.log('[ABACIA BRIDGE] Fetching:', url);
-    
-    const response = await fetch(url, {
+    const result = await httpsRequest({
+      hostname: 'abacia-services.onrender.com',
+      path: `/api/email/inbox?days=${days}&limit=${limit}${unread}`,
       method: 'GET',
       headers: { 'Accept': 'application/json' }
     });
     
-    if (response.ok) {
-      const data = await response.json();
+    console.log('[ABACIA BRIDGE] Response status:', result.status);
+    
+    if (result.status === 200) {
+      const data = JSON.parse(result.data.toString());
+      console.log('[ABACIA BRIDGE] Parsed - success:', data.success, 'count:', data.messages?.length);
       if (data.success && data.messages) {
-        console.log('[ABACIA BRIDGE] Found', data.messages.length, 'emails');
         return data;
       }
     }
     
-    console.log('[ABACIA BRIDGE] Response not ok:', response.status);
     return { success: false, messages: [] };
     
   } catch (e) {
