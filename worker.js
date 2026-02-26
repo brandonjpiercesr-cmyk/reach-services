@@ -13530,6 +13530,34 @@ const httpServer = http.createServer(async (req, res) => {
     }
   }
 
+  // ⬡B:TEST:DISPATCH:20260226⬡
+  // Test dispatch directly
+  if (path === '/api/test/dispatch' && method === 'GET') {
+    try {
+      const testQuery = url.searchParams.get('q') || 'check my email';
+      console.log('[TEST] Testing dispatch with query:', testQuery);
+      
+      const lukeAnalysis = { raw: testQuery, intent: 'query', entities: [], needsBrain: false };
+      const judeResult = { agents: ['IMAN'] };
+      const callerIdentity = { name: 'Brandon', trust: 'T10', email: 'brandonjpiercesr@gmail.com' };
+      
+      const result = await AIR_DISPATCH(lukeAnalysis, judeResult, callerIdentity);
+      
+      return jsonResponse(res, 200, { 
+        test: 'DISPATCH',
+        query: testQuery,
+        result: {
+          handled: result?.handled,
+          agent: result?.agent,
+          type: result?.type,
+          data: result?.data?.substring?.(0, 200) || result?.data
+        }
+      });
+    } catch (e) {
+      return jsonResponse(res, 500, { error: e.message, stack: e.stack });
+    }
+  }
+
   // ═══════════════════════════════════════════════════════════════════════
   // ⬡B:TOUCH:API.SPEECH.INTELLIGENCE:endpoint:20260216⬡
   // SPEECH INTELLIGENCE API - Analyze audio with full Deepgram features
