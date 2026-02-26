@@ -9684,8 +9684,6 @@ async function getActiveDevices(userId) {
 async function AIR_DISPATCH(lukeAnalysis, judeResult, callerIdentity) {
   console.log('[AIR DISPATCH] Checking if agents can handle this...');
   
-  console.log("[DEBUG AIR_DISPATCH] query:", query);
-  console.log("[DEBUG AIR_DISPATCH] callerIdentity:", JSON.stringify(callerIdentity));
   const query = (lukeAnalysis?.raw || '').toLowerCase();
   const intent = lukeAnalysis.intent;
   
