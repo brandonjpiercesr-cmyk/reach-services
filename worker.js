@@ -6044,7 +6044,18 @@ async function PLAY_getScores(query) {
               } else if (status === 'In Progress') {
                 return 'The game is live right now! ' + homeName + ' ' + homeScore + ', ' + awayName + ' ' + awayScore + '. Want me to keep you posted?';
               } else {
-                return 'The ' + homeName + ' are scheduled to play the ' + awayName + ' ' + status.toLowerCase() + '. I can remind you when it starts if you like.';
+                // ⬡B:PLAY:FIX:include_datetime:20260226⬡
+                // Include date and time for scheduled games
+                const gameDate = new Date(event.date);
+                const timeStr = gameDate.toLocaleString('en-US', { 
+                  weekday: 'short', 
+                  month: 'short', 
+                  day: 'numeric',
+                  hour: 'numeric', 
+                  minute: '2-digit',
+                  timeZone: 'America/New_York'
+                });
+                return `${awayName} @ ${homeName} is scheduled for ${timeStr} ET. Want me to remind you when it starts?`;
               }
             }
           }
