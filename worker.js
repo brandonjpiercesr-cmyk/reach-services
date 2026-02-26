@@ -4973,30 +4973,44 @@ async function ABACIA_IMAN_getInbox(options = {}) {
   console.log('[ABACIA BRIDGE] Getting inbox via IMAN...');
   
   try {
-    // ⬡B:IMAN:FIX:use_fetch:20260226⬡
-    // Use fetch for reliability
+    // ⬡B:IMAN:FIX:use_httpsRequest_v2:20260226⬡
+    // Use httpsRequest with proper error handling
     const days = options.daysAgo || 7;
     const limit = options.limit || 10;
     const unread = options.unreadOnly ? '&unread=true' : '';
     
-    const url = `https://abacia-services.onrender.com/api/email/inbox?days=${days}&limit=${limit}${unread}`;
-    console.log('[ABACIA BRIDGE] Fetching:', url);
+    const path = `/api/email/inbox?days=${days}&limit=${limit}${unread}`;
+    console.log('[ABACIA BRIDGE] Requesting:', path);
     
-    const response = await fetch(url);
-    console.log('[ABACIA BRIDGE] Response status:', response.status);
+    const result = await httpsRequest({
+      hostname: 'abacia-services.onrender.com',
+      port: 443,
+      path: path,
+      method: 'GET',
+      headers: { 
+        'Accept': 'application/json',
+        'User-Agent': 'ABA-REACH/1.0'
+      }
+    });
     
-    if (response.ok) {
-      const data = await response.json();
-      console.log('[ABACIA BRIDGE] Parsed - success:', data.success, 'count:', data.messages?.length);
-      if (data.success && data.messages) {
-        return data;
+    console.log('[ABACIA BRIDGE] Response status:', result.status);
+    
+    if (result.status === 200 && result.data) {
+      try {
+        const data = JSON.parse(result.data.toString());
+        console.log('[ABACIA BRIDGE] Parsed - success:', data.success, 'count:', data.messages?.length);
+        if (data.success && data.messages) {
+          return data;
+        }
+      } catch (parseErr) {
+        console.log('[ABACIA BRIDGE] Parse error:', parseErr.message);
       }
     }
     
     return { success: false, messages: [] };
     
   } catch (e) {
-    console.log('[ABACIA BRIDGE] Email error:', e.message);
+    console.log('[ABACIA BRIDGE] Email error:', e.message, e.stack);
     return { success: false, messages: [] };
   }
 }
