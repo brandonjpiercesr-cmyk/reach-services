@@ -12464,6 +12464,19 @@ Generate ONLY the greeting, nothing else:`;
 async function HAM_identify(context) {
   const { caller_number, device_id, ham_id, source } = context;
   
+  // ⬡B:HAM:FIX:force_t10_myaba:20260226⬡
+  // CRITICAL: MyABA = authenticated = ALWAYS T10
+  if (source === 'myaba') {
+    console.log('[HAM] MyABA source detected - forcing T10');
+    return { 
+      id: context.ham_id || 'brandon_t10',
+      trust: 'T10',
+      name: context.ham_name || 'Brandon',
+      email: context.ham_email || 'brandon@globalmajoritygroup.com',
+      source: 'myaba_forced'
+    };
+  }
+  
   // ⬡B:HAM:FIX:use_passed_identity:20260226⬡
   // If full identity passed from MyABA, use it directly
   const { ham_name, ham_email, trust_level } = context;
