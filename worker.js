@@ -9748,7 +9748,7 @@ async function AIR_DISPATCH(lukeAnalysis, judeResult, callerIdentity) {
   if (isSports) {
     console.log('[AIR DISPATCH] ★ PRIORITY: SPORTS');
     try {
-      const result = await PLAY_getSports(query);
+      const result = await PLAY_getScores(query);
       if (result) {
         return { handled: true, agent: 'PLAY', data: result, type: 'sports' };
       }
