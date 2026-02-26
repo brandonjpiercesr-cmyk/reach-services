@@ -19553,6 +19553,22 @@ We Are All ABA.`;
     }
   }
 
+
+  // ⬡B:DEBUG:IMAN_TEST:20260226⬡
+  if (path === "/api/test-iman" && method === "GET") {
+    try {
+      const result = await ABACIA_IMAN_getInbox({ daysAgo: 7, limit: 5 });
+      return jsonResponse(res, 200, {
+        success: result.success,
+        messageCount: result.messages?.length || 0,
+        firstSubject: result.messages?.[0]?.subject || "none",
+        raw: result
+      });
+    } catch (e) {
+      return jsonResponse(res, 500, { error: e.message, stack: e.stack });
+    }
+  }
+
   // ⬡B:AIR:REACH.API.NOTFOUND:CODE:infrastructure.error.404:USER→REACH→ERROR:T10:v1.5.0:20260213:n1f2d⬡ CATCH-ALL
   // ═══════════════════════════════════════════════════════════════════════
   jsonResponse(res, 404, { 
