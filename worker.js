@@ -4941,26 +4941,29 @@ async function ABACIA_IMAN_getInbox(options = {}) {
   console.log('[ABACIA BRIDGE] Getting inbox via IMAN...');
   
   try {
-    // ⬡B:IMAN:FIX:use_days_param:20260226⬡
+    // ⬡B:IMAN:FIX:use_fetch:20260226⬡
+    // Use fetch instead of httpsRequest for reliability
     const days = options.daysAgo || 7;
     const limit = options.limit || 10;
     const unread = options.unreadOnly ? '&unread=true' : '';
     
-    const result = await httpsRequest({
-      hostname: 'abacia-services.onrender.com',
-      path: `/api/email/inbox?days=${days}&limit=${limit}${unread}`,
+    const url = `https://abacia-services.onrender.com/api/email/inbox?days=${days}&limit=${limit}${unread}`;
+    console.log('[ABACIA BRIDGE] Fetching:', url);
+    
+    const response = await fetch(url, {
       method: 'GET',
       headers: { 'Accept': 'application/json' }
     });
     
-    if (result.status === 200) {
-      const data = JSON.parse(result.data.toString());
+    if (response.ok) {
+      const data = await response.json();
       if (data.success && data.messages) {
         console.log('[ABACIA BRIDGE] Found', data.messages.length, 'emails from last', days, 'days');
         return data;
       }
     }
     
+    console.log('[ABACIA BRIDGE] Response not ok:', response.status);
     return { success: false, messages: [] };
     
   } catch (e) {
@@ -5956,8 +5959,8 @@ async function PLAY_getScores(query) {
   else if (queryLower.includes('baseball') || queryLower.includes('mlb')) { sport = 'baseball/mlb'; }
   
   try {
-    // ⬡B:TOUCH:FIX:play.multiday.search:20260216⬡
-    // Check last 5 days to find recent games, not just today
+    // ⬡B:PLAY:FIX:use_fetch:20260226⬡
+    // Check last 5 days to find recent games
     const now = new Date();
     let foundGame = null;
     
@@ -5968,15 +5971,14 @@ async function PLAY_getScores(query) {
       
       console.log('[PLAY] Checking date:', dateStr);
       
-      const result = await httpsRequest({
-        hostname: 'site.api.espn.com',
-        path: '/apis/site/v2/sports/' + sport + '/scoreboard?dates=' + dateStr,
+      const url = `https://site.api.espn.com/apis/site/v2/sports/${sport}/scoreboard?dates=${dateStr}`;
+      const response = await fetch(url, {
         method: 'GET',
         headers: { 'Accept': 'application/json' }
       });
       
-      if (result.status === 200) {
-        const data = JSON.parse(result.data.toString());
+      if (response.ok) {
+        const data = await response.json();
         const events = data.events || [];
         
         // Find team-specific game
@@ -9675,22 +9677,33 @@ async function AIR_DISPATCH(lukeAnalysis, judeResult, callerIdentity) {
     }
   }
   
-  // PRIORITY 2: EMAIL SEND - "send email", "email ... saying"
-  const isEmailSend = (query.includes('send') || query.includes('write') || query.includes('draft')) && 
-                      (query.includes('email') || query.includes('mail'));
-  
+  // PRIORITY 2: EMAIL SEND - "send email to X saying Y"
+  const isEmailSend = (query.includes('send') || query.includes('write')) && query.includes('email');
   if (isEmailSend) {
-    console.log('[AIR DISPATCH] ★ PRIORITY: EMAIL SEND');
+    console.log('[AIR DISPATCH] PRIORITY: EMAIL SEND');
     try {
-      const result = await IMAN_SEND_processEmail(query, callerIdentity);
-      if (result && result.success) {
-        return { handled: true, agent: 'IMAN', data: result.message || 'Email sent.', type: 'email_send' };
+      const emailMatch = query.match(/(?:send email to|email)\s+([\w.@]+)(?:\s+and)?\s+(?:say|saying|tell|about)\s+(.+)/i);
+      if (emailMatch) {
+        let targetEmail = emailMatch[1].includes('@') ? emailMatch[1] : null;
+        const messageText = emailMatch[2].trim();
+        if (!targetEmail) {
+          const contactRes = await fetch(`https://htlxjkbrstpwwtzsbyvb.supabase.co/rest/v1/aba_memory?memory_type=eq.ham_identity&content=ilike.*${encodeURIComponent(emailMatch[1])}*&limit=1`,
+            { headers: { 'apikey': process.env.SUPABASE_ANON_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}` } });
+          const contacts = await contactRes.json();
+          if (contacts?.[0]) { const m = contacts[0].content.match(/Email:\s*([\w.@]+)/); if (m) targetEmail = m[1]; }
+        }
+        if (targetEmail) {
+          const sendRes = await fetch('https://abacia-services.onrender.com/api/email/send', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ to: targetEmail, subject: 'Message from ' + (callerIdentity?.name || 'Brandon'), body: messageText })
+          });
+          const sendData = await sendRes.json();
+          if (sendData.success) return { handled: true, agent: 'IMAN_SEND', data: `Email sent to ${targetEmail}.`, type: 'email_send' };
+        }
+        return { handled: true, agent: 'IMAN_SEND', data: `Could not find email for ${emailMatch[1]}.`, type: 'email_send' };
       }
-    } catch (e) {
-      console.log('[AIR DISPATCH] IMAN_SEND error:', e.message);
-    }
+    } catch (e) { console.log('[AIR DISPATCH] IMAN_SEND error:', e.message); }
   }
-  
   // PRIORITY 3: SPORTS - "nba", "nfl", "score", "game", "sports"
   const sportsKeywords = ['nba', 'nfl', 'nhl', 'mlb', 'score', 'scores', 'game', 'games', 'sports', 'lakers', 'warriors', 'celtics', 'knicks', 'heat', 'bulls', 'playoffs', 'standings'];
   const isSports = sportsKeywords.some(kw => query.includes(kw));
