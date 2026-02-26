@@ -9865,23 +9865,6 @@ async function AIR_DISPATCH(lukeAnalysis, judeResult, callerIdentity) {
     }
   }
 
-  // ⬡B:AIR:REACH.DISPATCH.IMAN:ROUTE:email:HIGH_PRIORITY:v2.5.0:20260226⬡
-  // IMAN Agent - Email queries - PRIORITY: VERY HIGH - Check BEFORE META/FAMILY
-  // SKIP if this is a SEND command (handled by IMAN_SEND below)
-  const isEmailSendCmd = (query.includes('say') || query.includes('tell')) && query.includes('email');
-  if (!isEmailSendCmd && (query.includes('email') || query.includes('inbox') || query.includes('mail') ||
-      query.includes('unread') || query.includes('messages') || agentNames.includes('iman'))) {
-    console.log('[AIR DISPATCH] → L3: IMAN (Intelligent Mail Agent Nexus) - HIGH PRIORITY');
-    try {
-      const imanResult = await IMAN_readEmails(callerIdentity);
-      if (imanResult && imanResult.allowed) {
-        return { handled: true, agent: 'IMAN', data: imanResult.summary, type: 'email', count: imanResult.count, emails: imanResult.emails };
-      }
-    } catch (e) {
-      console.log('[AIR DISPATCH] IMAN error:', e.message);
-    }
-  }
-
   
   // ⬡B:AIR:REACH.DISPATCH.META:ROUTE:self_awareness:v3.0.0:20260221⬡
   // META/EXTRACT Agent - Self-awareness queries (L3: Intelligence)
@@ -10045,6 +10028,23 @@ async function AIR_DISPATCH(lukeAnalysis, judeResult, callerIdentity) {
     }
   }
 
+  // ⬡B:AIR:REACH.DISPATCH.IMAN:ROUTE:email:v2.4.0:20260214⬡
+  // IMAN Agent - Email queries (L3: Manager, EMAIL department)
+  // SKIP if this is a SEND command (handled by IMAN_SEND above)
+  const isEmailSend = (query.includes('say') || query.includes('tell')) && query.includes('email');
+  if (!isEmailSend && (query.includes('email') || query.includes('inbox') || query.includes('mail') ||
+      agentNames.includes('iman'))) {
+    console.log('[AIR DISPATCH] → L3: IMAN (Intelligent Mail Agent Nexus)');
+    try {
+      const result = await IMAN_readEmails(callerIdentity);
+      if (result && result.allowed) {
+        return { handled: true, agent: 'IMAN', data: result.summary, type: 'email', count: result.count };
+      }
+    } catch (e) {
+      console.log('[AIR DISPATCH] IMAN error:', e.message);
+    }
+  }
+  
   // ⬡B:AIR:REACH.DISPATCH.RADAR:ROUTE:calendar:v2.4.0:20260214⬡
   // RADAR Agent - Calendar queries (L3: Manager, CALENDAR department)
   if (query.includes('calendar') || query.includes('schedule') || query.includes('meeting') ||
