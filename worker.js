@@ -10010,10 +10010,10 @@ async function AIR_DISPATCH(lukeAnalysis, judeResult, callerIdentity) {
   // ⬡B:AIR:REACH.DISPATCH.PLAY:ROUTE:sports:v2.4.0:20260214⬡
   // PLAY Agent - Sports queries (L3: Manager, LIFESTYLE department)
   // NOTE: Only trigger for EXPLICIT sports terms, not generic words
-  const sportsKeywords = ['score', 'laker', 'lakers', 'dodger', 'dodgers', 'nba', 'nfl', 'mlb', 
+  const playSportsKeywords = ['score', 'laker', 'lakers', 'dodger', 'dodgers', 'nba', 'nfl', 'mlb', 
     'sports', 'basketball', 'football', 'baseball', 'soccer', 'hockey', 'standings', 'playoffs'];
   
-  const needsSports = sportsKeywords.some(kw => query.includes(kw)) || agentNames.includes('play');
+  const needsSports = playSportsKeywords.some(kw => query.includes(kw)) || agentNames.includes('play');
   
   // Exclude if family keywords present (family takes priority)
   if (needsSports && !needsFamily) {
