@@ -9837,6 +9837,13 @@ async function AIR_DISPATCH(lukeAnalysis, judeResult, callerIdentity) {
         let targetName = callMatch[1].replace(/[,.:;!?]/g, '').trim();
         console.log('[DIAL] Target name:', targetName);
         
+        // ⬡B:DIAL:FIX:call_me:20260226⬡
+        // Handle "call me" - use the caller's identity
+        if (targetName.toLowerCase() === 'me' || targetName.toLowerCase() === 'myself') {
+          targetName = callerIdentity?.name || 'Brandon';
+          console.log('[DIAL] "call me" detected - using caller identity:', targetName);
+        }
+        
         // Look up contact in brain
         const contactRes = await fetch(`https://htlxjkbrstpwwtzsbyvb.supabase.co/rest/v1/aba_memory?or=(memory_type.eq.ham_identity,memory_type.eq.contact,memory_type.eq.brandon_family)&content=ilike.*${encodeURIComponent(targetName)}*&limit=5`,
           { headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } });
