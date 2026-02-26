@@ -13842,8 +13842,14 @@ Phone: (336) 389-8116</p>
               }
             } catch {}
             
+            // ⬡B:DAWN:FIX:guest_greeting:20260226⬡
+            // FIX: Don't say "Mr. Pierce" for guests - use actual userName
+            const isGuest = !userName || userName === 'there' || userName === 'guest';
+            
             // Use VARA to compose JARVIS-style greeting
-            const dawnPrompt = `Generate a JARVIS-style greeting for ${userName}. Time: ${timeGreeting}. ${proactiveInfo ? 'Proactive context: ' + proactiveInfo : 'No urgent items.'} Be warm like a trusted butler. Include 1-2 proactive observations if relevant. Keep under 3 sentences.`;
+            const dawnPrompt = isGuest 
+              ? `Generate a warm JARVIS-style greeting for a new visitor to ABA. Time: ${timeGreeting}. Keep it welcoming and under 2 sentences. Do NOT use any specific names.`
+              : `Generate a JARVIS-style greeting for ${userName}. Time: ${timeGreeting}. ${proactiveInfo ? 'Proactive context: ' + proactiveInfo : 'No urgent items.'} Be warm like a trusted butler. Keep under 3 sentences.`;
             
             const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
               method: 'POST',
@@ -13851,7 +13857,10 @@ Phone: (336) 389-8116</p>
               body: JSON.stringify({
                 model: 'llama-3.1-8b-instant',
                 messages: [
-                  { role: 'system', content: 'You are VARA, ABA\'s voice assistant for Brandon Pierce. Be warm, professional, and slightly witty like a trusted butler. NEVER say Mr. Stark or Tony - always use Brandon or Mr. Pierce. Include proactive observations when available. Keep greetings under 2 sentences unless there is urgent news.' },
+                  { role: 'system', content: isGuest 
+                    ? 'You are VARA, ABA\'s voice assistant. Generate a warm welcome for a new visitor. Do NOT use any names like Mr. Pierce, Brandon, sir, etc. Just say a simple warm greeting.'
+                    : `You are VARA, ABA\'s voice assistant for ${userName}. Be warm, professional, and slightly witty like a trusted butler. Include proactive observations when available. Keep greetings under 2 sentences unless there is urgent news.`
+                  },
                   { role: 'user', content: dawnPrompt }
                 ],
                 max_tokens: 150,
@@ -13859,13 +13868,15 @@ Phone: (336) 389-8116</p>
               })
             });
             const groqData = await groqRes.json();
-            let greeting = groqData.choices?.[0]?.message?.content?.trim() || `${timeGreeting}, ${userName}.`;
+            let greeting = groqData.choices?.[0]?.message?.content?.trim() || `${timeGreeting}.`;
             
-            // PROTO enforcement on greeting - uses HAM name from brain
-            const protoResult = await PROTO_enforce(greeting, { name: userName || body.context?.userName });
-            if (protoResult.enforced) {
-              console.log('[DAWN_GREETING] PROTO cleaned greeting, HAM:', protoResult.hamName);
-              greeting = protoResult.text;
+            // PROTO enforcement on greeting - uses HAM name from brain (skip for guests)
+            if (!isGuest) {
+              const protoResult = await PROTO_enforce(greeting, { name: userName || body.context?.userName });
+              if (protoResult.enforced) {
+                console.log('[DAWN_GREETING] PROTO cleaned greeting, HAM:', protoResult.hamName);
+                greeting = protoResult.text;
+              }
             }
             
             console.log('[DAWN_GREETING] Generated:', greeting.substring(0, 50) + '...');
