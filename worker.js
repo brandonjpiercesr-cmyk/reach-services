@@ -9700,20 +9700,35 @@ async function AIR_DISPATCH(lukeAnalysis, judeResult, callerIdentity) {
                       !query.includes('send') && !query.includes('write') && !query.includes('draft');
   
   if (isEmailRead) {
-    console.log("[DEBUG] isEmailRead=true, calling IMAN_readEmails with:", JSON.stringify(callerIdentity));
-    console.log('[AIR DISPATCH] ★ PRIORITY: EMAIL READ');
+    console.log('[AIR DISPATCH] ★ PRIORITY: EMAIL READ - DIRECT FETCH');
     try {
-      const result = await IMAN_readEmails(callerIdentity);
-      console.log("[DEBUG] IMAN_readEmails returned:", JSON.stringify({allowed: result?.allowed, hasSummary: !!result?.summary, count: result?.count}));
-      if (result && result.allowed && result.summary) {
-        return { handled: true, agent: 'IMAN', data: result.summary, type: 'email', count: result.count };
+      // ⬡B:IMAN:NUCLEAR_FIX:direct_fetch:20260226⬡
+      // BYPASS ALL COMPLEXITY - Just fetch email directly
+      const emailUrl = 'https://abacia-services.onrender.com/api/email/inbox?days=7&limit=10';
+      console.log('[AIR DISPATCH] Fetching:', emailUrl);
+      
+      const emailResponse = await fetch(emailUrl);
+      const emailData = await emailResponse.json();
+      
+      console.log('[AIR DISPATCH] Email response:', JSON.stringify({success: emailData?.success, count: emailData?.messages?.length}));
+      
+      if (emailData.success && emailData.messages && emailData.messages.length > 0) {
+        const emails = emailData.messages;
+        const latest = emails[0];
+        const sender = latest.fromName || latest.from || 'Someone';
+        const subject = latest.subject || 'No subject';
+        const unreadCount = emails.filter(e => e.unread).length;
+        
+        let summary = `You have ${emails.length} emails in the last 7 days`;
+        if (unreadCount > 0) summary += ` (${unreadCount} unread)`;
+        summary += `. The most recent is from ${sender}: "${subject}".`;
+        
+        return { handled: true, agent: 'IMAN', data: summary, type: 'email', count: emails.length };
       }
-      // If allowed but no summary, still return something useful
-      if (result && result.allowed) {
-        return { handled: true, agent: 'IMAN', data: result.summary || 'I checked your inbox but found no recent emails.', type: 'email', count: result.count || 0 };
-      }
+      
+      return { handled: true, agent: 'IMAN', data: 'No recent emails found.', type: 'email', count: 0 };
     } catch (e) {
-      console.log('[AIR DISPATCH] IMAN error:', e.message);
+      console.log('[AIR DISPATCH] Email fetch error:', e.message);
     }
   }
   
