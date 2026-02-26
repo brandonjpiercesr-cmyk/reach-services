@@ -9745,7 +9745,7 @@ async function AIR_DISPATCH(lukeAnalysis, judeResult, callerIdentity) {
         if (!targetEmail) {
           console.log('[IMAN_SEND] Looking up contact:', targetName);
           const contactRes = await fetch(`https://htlxjkbrstpwwtzsbyvb.supabase.co/rest/v1/aba_memory?or=(memory_type.eq.ham_identity,memory_type.eq.contact)&content=ilike.*${encodeURIComponent(targetName)}*&limit=5`,
-            { headers: { 'apikey': SUPABASE_ANON, 'Authorization': `Bearer ${SUPABASE_ANON}` } });
+            { headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } });
           const contacts = await contactRes.json();
           console.log('[IMAN_SEND] Found', contacts?.length || 0, 'contacts');
           
@@ -9839,7 +9839,7 @@ async function AIR_DISPATCH(lukeAnalysis, judeResult, callerIdentity) {
         
         // Look up contact in brain
         const contactRes = await fetch(`https://htlxjkbrstpwwtzsbyvb.supabase.co/rest/v1/aba_memory?or=(memory_type.eq.ham_identity,memory_type.eq.contact,memory_type.eq.brandon_family)&content=ilike.*${encodeURIComponent(targetName)}*&limit=5`,
-          { headers: { 'apikey': SUPABASE_ANON, 'Authorization': `Bearer ${SUPABASE_ANON}` } });
+          { headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } });
         const contacts = await contactRes.json();
         console.log('[DIAL] Found', contacts?.length || 0, 'contacts');
         
