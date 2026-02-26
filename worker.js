@@ -9839,10 +9839,21 @@ async function AIR_DISPATCH(lukeAnalysis, judeResult, callerIdentity) {
   if (isPhoneCall) {
     console.log('[AIR DISPATCH] ★ PRIORITY: PHONE CALL (DIAL)');
     try {
+      // ⬡B:DIAL:FIX:regex_trailing:20260226⬡
       // Extract who to call: "call mom", "call BJ", "phone eric"
-      const callMatch = query.match(/(?:call|phone|dial|ring)\s+([^\s]+(?:\s+[^\s]+)?)/i);
+      // Stop at common trailing words: right, now, immediately, and, to, please, asap
+      const stopWords = ['right', 'now', 'immediately', 'and', 'to', 'please', 'asap', 'at', 'on', 'about', 'saying', 'tell'];
+      let callMatch = query.match(/(?:call|phone|dial|ring)\s+([a-zA-Z]+(?:\s+[a-zA-Z]+)?)/i);
       if (callMatch) {
         let targetName = callMatch[1].replace(/[,.:;!?]/g, '').trim();
+        
+        // Remove stop words from end of name
+        const words = targetName.split(/\s+/);
+        while (words.length > 0 && stopWords.includes(words[words.length - 1].toLowerCase())) {
+          words.pop();
+        }
+        targetName = words.join(' ') || callMatch[1].split(/\s+/)[0]; // Fallback to first word
+        
         console.log('[DIAL] Target name:', targetName);
         
         // ⬡B:DIAL:FIX:call_me:20260226⬡
@@ -11789,18 +11800,21 @@ async function IMAN_sendEmailGmail(to, subject, body) {
 
 // Lookup email for contact
 function getContactEmail(name) {
+  // ⬡B:IMAN:FIX:correct_emails:20260226⬡
   const emails = {
-    eric: 'dr.ericlane@gmail.com',  // Example - replace with real
+    eric: 'eric@globalmajoritygroup.com',
+    claudette: 'claudette@globalmajoritygroup.com',
     bj: 'bj@example.com',
     cj: 'cj@example.com',
-    brandon: 'brandonjpierce@gmail.com'
+    brandon: 'brandonjpiercesr@gmail.com'
   };
   return emails[name?.toLowerCase()] || null;
 }
 
 // Voice command: "Send an email to Eric about the meeting"
-async function IMAN_voiceEmailCommand(message, callerIdentity) {
-  console.log('[IMAN VOICE] Processing email command:', message);
+// ⬡B:IMAN:FIX:t10_auto_send:20260226⬡ - T10 skips confirmation, sends immediately
+async function IMAN_voiceEmailCommand(message, callerIdentity, trustLevel) {
+  console.log('[IMAN VOICE] Processing email command:', message, '| Trust:', trustLevel);
   
   const msgLower = message.toLowerCase();
   
@@ -11832,7 +11846,29 @@ async function IMAN_voiceEmailCommand(message, callerIdentity) {
     return { success: false, response: "I had trouble drafting that email. Want me to try again?" };
   }
   
-  // Return draft for confirmation
+  // ⬡B:IMAN:FIX:t10_auto_send:20260226⬡
+  // T10 = OWNER = Auto-send without confirmation
+  const isT10 = trustLevel === 'T10' || trustLevel === 10 || trustLevel === '10';
+  
+  if (isT10) {
+    console.log('[IMAN VOICE] T10 detected - AUTO-SENDING without confirmation');
+    // Actually send the email
+    const sendResult = await IMAN_sendEmail(draftResult);
+    if (sendResult && sendResult.success) {
+      return {
+        success: true,
+        response: `Email sent to ${recipientName} at ${recipientEmail}.`,
+        email_sent: true
+      };
+    } else {
+      return {
+        success: false,
+        response: `I drafted the email but had trouble sending it. Error: ${sendResult?.error || 'unknown'}`
+      };
+    }
+  }
+  
+  // Non-T10: Return draft for confirmation
   return {
     success: true,
     draft: draftResult,
@@ -15179,7 +15215,8 @@ Respond as this agent specifically — stay in character.`;
         console.log('[AIR VOICE TOOL] EMAIL REQUEST DETECTED!');
         
         try {
-          const emailResult = await IMAN_voiceEmailCommand(userMessage, callerIdentity);
+          // ⬡B:IMAN:FIX:pass_trust_level:20260226⬡ - Pass trust for T10 auto-send
+          const emailResult = await IMAN_voiceEmailCommand(userMessage, callerIdentity, callerIdentity.trust);
           
           if (emailResult.success && emailResult.awaiting_confirmation) {
             
