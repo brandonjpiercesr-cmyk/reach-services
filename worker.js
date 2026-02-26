@@ -12817,8 +12817,8 @@ async function AIR_text(userMessage, history, context = {}) {
 
   // ═══════════════════════════════════════════════════════════════════════════
   // ⬡B:REACH:ABACIA_FIRST:WIRE:text-routing:20260226⬡
-  // THINK TANK DECISION: Call ABACIA brain FIRST for ALL routing
-  // REACH = Dumb hand. ABACIA = Smart brain.
+  // THINK TANK DECISION: Call ABACIA brain for system prompts only
+  // DO NOT use ABACIA response directly - let REACH dispatch handle actions
   // ═══════════════════════════════════════════════════════════════════════════
   const abaciaResult = await ABACIA_route(userMessage, {
     channel: context.channel || 'chat',
@@ -12834,16 +12834,10 @@ async function AIR_text(userMessage, history, context = {}) {
     console.log('[AIR_text] ABACIA brain returned agents:', abaciaAgents.join(', '));
     console.log('[AIR_text] ABACIA trace:', abaciaResult.trace);
     
-    // If ABACIA returned a full response, use it directly
-    if (abaciaResult.response) {
-      console.log('[AIR_text] Using ABACIA full response');
-      return {
-        response: abaciaResult.response,
-        agents: abaciaAgents,
-        source: 'ABACIA',
-        trace: abaciaResult.trace
-      };
-    }
+    // ⬡B:AIR_text:FIX:no_abacia_shortcircuit:20260226⬡
+    // DO NOT use ABACIA response directly - it returns garbage for action queries
+    // Always let REACH dispatch handle email/sports/calendar/etc
+    // ABACIA is only for system prompts, not responses
   } else {
     console.log('[AIR_text] ABACIA brain unavailable, using local routing');
   }
