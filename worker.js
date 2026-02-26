@@ -13582,6 +13582,23 @@ const httpServer = http.createServer(async (req, res) => {
   // GET /api/voice/intelligence/:call_id - Get analysis for a call
   // ═══════════════════════════════════════════════════════════════════════
   if (path === '/api/voice/analyze' && method === 'POST') {
+
+  // ⬡B:TEST:IMAN:direct_test:20260226⬡
+  if (path === '/api/test/iman' && method === 'GET') {
+    try {
+      console.log('[TEST] Testing IMAN directly...');
+      const result = await ABACIA_IMAN_getInbox({ daysAgo: 7, limit: 5 });
+      console.log('[TEST] ABACIA_IMAN_getInbox returned:', JSON.stringify(result).substring(0, 200));
+      return jsonResponse(res, 200, { 
+        test: 'IMAN direct',
+        abaciaResult: result,
+        hasMessages: !!(result.messages && result.messages.length > 0)
+      });
+    } catch (e) {
+      return jsonResponse(res, 500, { error: e.message, stack: e.stack });
+    }
+  }
+
     try {
       const body = await parseBody(req);
       const { audio_url, call_id } = body;
