@@ -6340,18 +6340,18 @@ async function DIAL_callWithElevenLabs(phoneNumber, firstMessage, callerContext)
       requestBody.first_message = firstMessage;
     }
     
-    const result = await httpsRequest({
-      hostname: 'api.elevenlabs.io',
-      path: '/v1/convai/twilio/outbound-call',
+    // ⬡B:DIAL:FIX:use_fetch:20260226⬡ - httpsRequest unreliable, use fetch()
+    const result = await fetch('https://api.elevenlabs.io/v1/convai/twilio/outbound-call', {
       method: 'POST',
       headers: {
         'xi-api-key': ELEVENLABS_KEY,
         'Content-Type': 'application/json'
-      }
-    }, JSON.stringify(requestBody));
+      },
+      body: JSON.stringify(requestBody)
+    });
     
-    if (result.status === 200 || result.status === 201) {
-      const data = JSON.parse(result.data.toString());
+    if (result.ok) {
+      const data = await result.json();
       console.log('[DIAL] ElevenLabs call initiated:', data.conversation_id);
       
       // Log to brain
@@ -6380,7 +6380,8 @@ async function DIAL_callWithElevenLabs(phoneNumber, firstMessage, callerContext)
         message: 'I am calling ' + phoneNumber + ' now with a full two-way conversation capability.'
       };
     } else {
-      console.log('[DIAL] ElevenLabs API error:', result.status);
+      const errorText = await result.text();
+      console.log('[DIAL] ElevenLabs API error:', result.status, errorText);
       // Fallback to old Twilio TwiML method
       return await DIAL_callWithTwiML(phoneNumber, firstMessage);
     }
