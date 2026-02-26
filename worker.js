@@ -13718,6 +13718,9 @@ Phone: (336) 389-8116</p>
 
         // ── LOGIN GREETING ──────────────────────────────────────
         // STEP 1: Query brain for login screen content, AIR generates if missing
+        // ⬡B:REACH:ALL_GREETINGS_CLAUDE:FIX:20260226⬡
+        // All greetings now use Claude, not Groq
+        
         if (body.type === 'login_greeting') {
           try {
             // Check brain first for stored greeting
@@ -13731,90 +13734,95 @@ Phone: (336) 389-8116</p>
               console.log('[LOGIN_GREETING] Found in brain');
               return jsonResponse(res, 200, { response: parsed.greeting || parsed.content || 'Welcome back.', source: 'brain' });
             }
-            // Not in brain — VARA composes via Groq (bypass AIR brain retrieval)
-            const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+            
+            // Not in brain — VARA composes via Claude
+            const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.GROQ_API_KEY}` },
+              headers: { 
+                'Content-Type': 'application/json',
+                'x-api-key': process.env.ANTHROPIC_API_KEY,
+                'anthropic-version': '2023-06-01'
+              },
               body: JSON.stringify({
-                model: 'llama-3.1-8b-instant',
-                messages: [
-                  { role: 'system', content: 'You are VARA, a warm professional butler-style AI assistant. Generate ONLY a greeting. No code. No lists. No technical details.' },
-                  { role: 'user', content: 'Generate a warm 1-2 sentence welcome greeting for Brandon logging into his ABA dashboard. Be warm and personable like a trusted butler.' }
-                ],
+                model: 'claude-haiku-4-5-20251001',
                 max_tokens: 60,
-                temperature: 0.7
+                system: 'You are VARA, a warm professional butler-style AI assistant. Generate ONLY a greeting. No code. No lists. No technical details.',
+                messages: [{ role: 'user', content: 'Generate a warm 1-2 sentence welcome greeting for a user logging into the ABA dashboard. Be warm and personable like a trusted butler.' }]
               })
             });
-            const groqData = await groqRes.json();
-            const greeting = groqData.choices?.[0]?.message?.content?.trim() || 'Welcome back, Brandon.';
-            console.log('[LOGIN_GREETING] VARA composed:', greeting);
-            return jsonResponse(res, 200, { response: greeting, source: 'vara_composed' });
+            const claudeData = await claudeRes.json();
+            const greeting = claudeData.content?.[0]?.text?.trim() || 'Welcome back.';
+            console.log('[LOGIN_GREETING] Claude composed:', greeting);
+            return jsonResponse(res, 200, { response: greeting, source: 'vara_claude', model: 'claude-haiku-4-5-20251001' });
           } catch (err) {
             console.error('[LOGIN_GREETING] Error:', err.message);
-            return jsonResponse(res, 200, { response: 'Welcome back, Brandon.', source: 'fallback' });
+            return jsonResponse(res, 200, { response: 'Welcome back.', source: 'fallback' });
           }
         }
 
         // ── HAM GREETING (Roll Call) ────────────────────────────
-        // STEP 2: Check agent status, deliver warm VARA-style greeting
         if (body.type === 'ham_greeting') {
           try {
-            const agents = ['HAM', 'NOW', 'DAWN', 'PLAY', 'COLE', 'EMOTION'];
-            const agentStatus = agents.map(a => ({ name: a, status: 'online' }));
-            const onlineCount = agentStatus.filter(a => a.status === 'online').length;
+            // Get actual agent count from brain
+            const agentRes = await fetch(
+              `https://htlxjkbrstpwwtzsbyvb.supabase.co/rest/v1/aba_agent_jds?status=eq.active&select=acronym`,
+              { headers: { 'apikey': process.env.SUPABASE_ANON_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}` } }
+            );
+            const agentData = await agentRes.json();
+            const agentCount = agentData?.length || 85;
 
-            const rollCallPrompt = `Generate a warm 2-3 sentence greeting for Brandon who just logged in. ${onlineCount} agents are standing by and ready. Be like a trusted butler welcoming his boss. Do NOT list agent names. Do NOT be robotic. Example: "Welcome back, Brandon. The full team is here and ready to assist. What would you like to tackle first?"`;
-
-            // Use Groq directly to bypass AIR brain retrieval
-            const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+            const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.GROQ_API_KEY}` },
+              headers: { 
+                'Content-Type': 'application/json',
+                'x-api-key': process.env.ANTHROPIC_API_KEY,
+                'anthropic-version': '2023-06-01'
+              },
               body: JSON.stringify({
-                model: 'llama-3.1-8b-instant',
-                messages: [
-                  { role: 'system', content: 'You are VARA, a warm professional butler-style AI assistant. Generate ONLY a greeting. No code. No lists. No technical details. No agent names.' },
-                  { role: 'user', content: rollCallPrompt }
-                ],
+                model: 'claude-haiku-4-5-20251001',
                 max_tokens: 100,
-                temperature: 0.7
+                system: 'You are VARA, voice of ABA. Generate a warm butler-style greeting. Do NOT list agent names. Do NOT be robotic.',
+                messages: [{ role: 'user', content: `Generate a warm 2-3 sentence greeting for Brandon who just logged in. ${agentCount} agents are standing by and ready. Be like a trusted butler welcoming his boss.` }]
               })
             });
-            const groqData = await groqRes.json();
-            const greetingText = groqData.choices?.[0]?.message?.content?.trim() || `Good to see you, Brandon. All ${onlineCount} agents standing by.`;
+            const claudeData = await claudeRes.json();
+            const greetingText = claudeData.content?.[0]?.text?.trim() || `Good to see you, Brandon. All ${agentCount} agents standing by.`;
             console.log('[HAM_GREETING] Roll call delivered');
             return jsonResponse(res, 200, {
               response: greetingText,
-              agents: agentStatus,
-              source: 'roll_call'
+              agentCount: agentCount,
+              source: 'roll_call_claude',
+              model: 'claude-haiku-4-5-20251001'
             });
           } catch (err) {
             console.error('[HAM_GREETING] Error:', err.message);
-            return jsonResponse(res, 200, { response: 'Welcome back, Brandon. The team is ready.', agents: [], source: 'fallback' });
+            return jsonResponse(res, 200, { response: 'Welcome back, Brandon. The team is ready.', agentCount: 85, source: 'fallback' });
           }
         }
 
         // ── NAME CHAT ───────────────────────────────────────────
-        // STEP 3: Auto-name conversations via LUKE (Language Understanding and Knowledge Extraction)
         if (body.type === 'name_chat') {
           try {
             const messages = body.context?.conversationMessages || body.messages || '';
-            const lukePrompt = `Given these conversation messages, generate a 2-5 word chat title. No quotes, no punctuation at end. Just the title.\n\nMessages:\n${typeof messages === 'string' ? messages : JSON.stringify(messages)}`;
-
-            // Use Groq fast model for speed (LUKE agent)
-            const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+            
+            const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.GROQ_API_KEY}` },
+              headers: { 
+                'Content-Type': 'application/json',
+                'x-api-key': process.env.ANTHROPIC_API_KEY,
+                'anthropic-version': '2023-06-01'
+              },
               body: JSON.stringify({
-                model: 'llama-3.1-8b-instant',
-                messages: [{ role: 'user', content: lukePrompt }],
+                model: 'claude-haiku-4-5-20251001',
                 max_tokens: 20,
-                temperature: 0.3
+                system: 'Generate a 2-5 word chat title. No quotes, no punctuation at end. Just the title.',
+                messages: [{ role: 'user', content: `Title this conversation:\n\n${typeof messages === 'string' ? messages : JSON.stringify(messages)}` }]
               })
             });
-            const groqData = await groqRes.json();
-            const chatName = groqData.choices?.[0]?.message?.content?.trim() || 'New Chat';
-            console.log('[NAME_CHAT] LUKE named it:', chatName);
-            return jsonResponse(res, 200, { response: chatName, source: 'luke' });
+            const claudeData = await claudeRes.json();
+            const chatName = claudeData.content?.[0]?.text?.trim() || 'New Chat';
+            console.log('[NAME_CHAT] Claude named it:', chatName);
+            return jsonResponse(res, 200, { response: chatName, source: 'claude', model: 'claude-haiku-4-5-20251001' });
           } catch (err) {
             console.error('[NAME_CHAT] Error:', err.message);
             return jsonResponse(res, 200, { response: 'New Chat', source: 'fallback' });
@@ -13829,64 +13837,92 @@ Phone: (336) 389-8116</p>
             const hour = new Date().getHours();
             const timeGreeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
             
+            // ⬡B:DAWN:FIX:use_claude:20260226⬡
+            // DAWN now uses Claude, not Groq
+            
             // Query brain for proactive items
             let proactiveInfo = '';
+            let calendarInfo = '';
+            let emailInfo = '';
+            
             try {
+              // Get proactive items
               const presenceRes = await fetch(
-                `https://htlxjkbrstpwwtzsbyvb.supabase.co/rest/v1/aba_memory?memory_type=in.(proactive,scheduled_call,urgent)&order=created_at.desc&limit=3&select=content,memory_type`,
+                `https://htlxjkbrstpwwtzsbyvb.supabase.co/rest/v1/aba_memory?memory_type=in.(proactive,scheduled_call,urgent,reminder)&order=created_at.desc&limit=5&select=content,memory_type,created_at`,
                 { headers: { 'apikey': process.env.SUPABASE_ANON_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}` } }
               );
               const presenceData = await presenceRes.json();
               if (presenceData && presenceData.length > 0) {
-                proactiveInfo = presenceData.map(p => p.content).join('. ');
+                proactiveInfo = presenceData.map(p => p.content?.substring(0, 100)).join('. ');
               }
+              
+              // Get recent calendar (if available)
+              try {
+                const calRes = await fetch('https://abacia-services.onrender.com/api/calendar/upcoming?limit=3');
+                const calData = await calRes.json();
+                if (calData.events && calData.events.length > 0) {
+                  calendarInfo = calData.events.map(e => `${e.title} at ${e.start}`).join(', ');
+                }
+              } catch {}
+              
+              // Get unread email count
+              try {
+                const emailRes = await fetch('https://abacia-services.onrender.com/api/email/inbox?limit=5');
+                const emailData = await emailRes.json();
+                if (emailData.messages && emailData.messages.length > 0) {
+                  const unread = emailData.messages.filter(m => m.unread).length;
+                  if (unread > 0) {
+                    emailInfo = `${unread} unread email${unread > 1 ? 's' : ''}`;
+                  }
+                }
+              } catch {}
             } catch {}
             
-            // ⬡B:DAWN:FIX:guest_greeting:20260226⬡
-            // FIX: Don't say "Mr. Pierce" for guests - use actual userName
             const isGuest = !userName || userName === 'there' || userName === 'guest';
             
-            // Use VARA to compose JARVIS-style greeting
-            const dawnPrompt = isGuest 
-              ? `Generate a warm JARVIS-style greeting for a new visitor to ABA. Time: ${timeGreeting}. Keep it welcoming and under 2 sentences. Do NOT use any specific names.`
-              : `Generate a JARVIS-style greeting for ${userName}. Time: ${timeGreeting}. ${proactiveInfo ? 'Proactive context: ' + proactiveInfo : 'No urgent items.'} Be warm like a trusted butler. Keep under 3 sentences.`;
+            // Build context for Claude
+            let context = [];
+            if (proactiveInfo) context.push(`Proactive items: ${proactiveInfo}`);
+            if (calendarInfo) context.push(`Upcoming: ${calendarInfo}`);
+            if (emailInfo) context.push(`Inbox: ${emailInfo}`);
             
-            const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+            const systemPrompt = isGuest 
+              ? `You are VARA, voice of ABA (A Better AI). Generate a warm, JARVIS-style welcome for a new visitor. Time: ${timeGreeting}. Be welcoming but brief (1-2 sentences). Do NOT use any specific names or assume identity.`
+              : `You are VARA, voice of ABA (A Better AI), personal assistant to ${userName}. Time: ${timeGreeting}. Generate a warm JARVIS-style greeting. ${context.length > 0 ? 'Context: ' + context.join('. ') : 'No urgent items.'} Be warm like a trusted butler. Keep under 3 sentences. Include any relevant proactive info naturally.`;
+            
+            // Use Claude Haiku for speed
+            const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.GROQ_API_KEY}` },
+              headers: { 
+                'Content-Type': 'application/json',
+                'x-api-key': process.env.ANTHROPIC_API_KEY,
+                'anthropic-version': '2023-06-01'
+              },
               body: JSON.stringify({
-                model: 'llama-3.1-8b-instant',
-                messages: [
-                  { role: 'system', content: isGuest 
-                    ? 'You are VARA, ABA\'s voice assistant. Generate a warm welcome for a new visitor. Do NOT use any names like Mr. Pierce, Brandon, sir, etc. Just say a simple warm greeting.'
-                    : `You are VARA, ABA\'s voice assistant for ${userName}. Be warm, professional, and slightly witty like a trusted butler. Include proactive observations when available. Keep greetings under 2 sentences unless there is urgent news.`
-                  },
-                  { role: 'user', content: dawnPrompt }
-                ],
+                model: 'claude-haiku-4-5-20251001',
                 max_tokens: 150,
-                temperature: 0.7
+                system: systemPrompt,
+                messages: [{ role: 'user', content: 'Generate the greeting now.' }]
               })
             });
-            const groqData = await groqRes.json();
-            let greeting = groqData.choices?.[0]?.message?.content?.trim() || `${timeGreeting}.`;
             
-            // PROTO enforcement on greeting - uses HAM name from brain (skip for guests)
-            if (!isGuest) {
-              const protoResult = await PROTO_enforce(greeting, { name: userName || body.context?.userName });
-              if (protoResult.enforced) {
-                console.log('[DAWN_GREETING] PROTO cleaned greeting, HAM:', protoResult.hamName);
-                greeting = protoResult.text;
-              }
-            }
+            const claudeData = await claudeRes.json();
+            let greeting = claudeData.content?.[0]?.text?.trim() || `${timeGreeting}.`;
             
-            console.log('[DAWN_GREETING] Generated:', greeting.substring(0, 50) + '...');
+            // Clean any quotes from greeting
+            greeting = greeting.replace(/^["']|["']$/g, '');
+            
+            console.log('[DAWN_GREETING] Claude generated:', greeting.substring(0, 50) + '...');
             return jsonResponse(res, 200, {
               response: {
                 greeting: greeting,
-                context: proactiveInfo ? 'I have a few things to share with you.' : "I'm ready when you are.",
-                proactive: proactiveInfo || null
+                context: context.length > 0 ? 'I have a few things to share with you.' : "I'm ready when you are.",
+                proactive: proactiveInfo || null,
+                calendar: calendarInfo || null,
+                email: emailInfo || null
               },
-              source: 'dawn'
+              source: 'dawn_claude',
+              model: 'claude-haiku-4-5-20251001'
             });
           } catch (err) {
             console.error('[DAWN_GREETING] Error:', err.message);
