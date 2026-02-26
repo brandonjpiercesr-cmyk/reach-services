@@ -4937,13 +4937,18 @@ async function ABACIA_AIR_process(query, context) {
 
 // ⬡B:AIR:REACH.BRIDGE.EMAIL:FUNC:abacia.email.inbox:v2.3.0:20260214⬡
 // Get emails via ABACIA's IMAN agent (connected to Nylas)
-async function ABACIA_IMAN_getInbox() {
+async function ABACIA_IMAN_getInbox(options = {}) {
   console.log('[ABACIA BRIDGE] Getting inbox via IMAN...');
   
   try {
+    // ⬡B:IMAN:FIX:use_days_param:20260226⬡
+    const days = options.daysAgo || 7;
+    const limit = options.limit || 10;
+    const unread = options.unreadOnly ? '&unread=true' : '';
+    
     const result = await httpsRequest({
       hostname: 'abacia-services.onrender.com',
-      path: '/api/email/inbox',
+      path: `/api/email/inbox?days=${days}&limit=${limit}${unread}`,
       method: 'GET',
       headers: { 'Accept': 'application/json' }
     });
@@ -4951,16 +4956,16 @@ async function ABACIA_IMAN_getInbox() {
     if (result.status === 200) {
       const data = JSON.parse(result.data.toString());
       if (data.success && data.messages) {
-        console.log('[ABACIA BRIDGE] Found', data.messages.length, 'emails');
+        console.log('[ABACIA BRIDGE] Found', data.messages.length, 'emails from last', days, 'days');
         return data;
       }
     }
     
-    return { success: false, emails: [] };
+    return { success: false, messages: [] };
     
   } catch (e) {
     console.log('[ABACIA BRIDGE] Email error:', e.message);
-    return { success: false, emails: [] };
+    return { success: false, messages: [] };
   }
 }
 
