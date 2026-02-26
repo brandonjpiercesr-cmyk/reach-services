@@ -6072,137 +6072,56 @@ async function PLAY_getScores(query) {
 async function IMAN_readEmails(callerIdentity) {
   console.log('[IMAN] Reading emails for:', callerIdentity?.name || 'unknown', '| Trust:', callerIdentity?.trust || 'none');
   
-  // ⬡B:IMAN:FIX:trust_default:20260226⬡
-  // Default to T10 for API calls (authenticated users from MyABA)
-  // Only restrict for actual unknown callers (phone calls)
-  const trust = callerIdentity?.trust || 'T10';  // Default T10 for API calls
+  // ⬡B:IMAN:NUCLEAR_FIX:always_try:20260226⬡
+  // ALWAYS try to get emails - trust defaults to T10
+  const trust = callerIdentity?.trust || 'T10';
+  console.log('[IMAN] Effective trust level:', trust);
   
   if (!['T10', 'T9', 'T8', 'T7'].includes(trust)) {
-    return { allowed: false, summary: "I would be happy to share email updates once I know who I am speaking with. May I ask your name?" };
+    console.log('[IMAN] Trust too low, returning not allowed');
+    return { allowed: false, summary: "I need to verify who you are first." };
   }
   
-  // TRY ABACIA-SERVICES FIRST (has Nylas connected)
+  // TRY ABACIA-SERVICES (Nylas)
+  console.log('[IMAN] Fetching from ABACIA...');
   try {
-    console.log('[IMAN] Trying ABACIA-SERVICES for email...');
-    console.log("[DEBUG] IMAN calling ABACIA_IMAN_getInbox with trust:", callerIdentity?.trust);
-    const abaciaResult = await ABACIA_IMAN_getInbox({ daysAgo: 7, limit: 10 });
-    if (abaciaResult.success && abaciaResult.messages && abaciaResult.messages.length > 0) {
-      const emails = abaciaResult.messages;
-      const latest = emails[0];
-      const sender = latest.fromName || latest.from || 'Someone';
-      const subject = latest.subject || 'No subject';
-      
-      // Build a richer summary
-      const unreadCount = emails.filter(e => e.unread).length;
-      let summary = '';
-      
-      if (emails.length === 1) {
-        summary = `You have one email from ${sender} about "${subject}". Would you like me to read it?`;
-      } else {
-        summary = `You have ${emails.length} emails in the last 7 days`;
-        if (unreadCount > 0) summary += ` (${unreadCount} unread)`;
-        summary += `. The most recent is from ${sender}: "${subject}". `;
-        
-        // Add brief overview of other senders
-        const otherSenders = [...new Set(emails.slice(1, 4).map(e => e.fromName || e.from?.split('@')[0] || 'unknown'))];
-        if (otherSenders.length > 0) {
-          summary += `Other messages from: ${otherSenders.join(', ')}.`;
-        }
-        summary += ' Want me to go through them?';
-      }
-      
-      return { allowed: true, count: emails.length, unread: unreadCount, summary, emails };
-    }
-  } catch (e) {
-    console.log('[IMAN] ABACIA-SERVICES email failed, trying fallback:', e.message);
-  }
-  
-  // FALLBACK: Try Gmail tokens from brain
-  try {
-    const tokenResult = await httpsRequest({
-      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-      path: '/rest/v1/aba_memory?memory_type=eq.gmail_credentials&limit=1&order=created_at.desc',
+    const url = 'https://abacia-services.onrender.com/api/email/inbox?days=7&limit=10';
+    console.log('[IMAN] Calling:', url);
+    
+    const response = await fetch(url, { 
       method: 'GET',
-      headers: {
-        'apikey': SUPABASE_ANON,
-        'Authorization': 'Bearer ' + SUPABASE_ANON
-      }
+      headers: { 'Accept': 'application/json' }
     });
     
-    if (tokenResult.status === 200) {
-      const tokens = JSON.parse(tokenResult.data.toString());
-      if (tokens.length > 0 && tokens[0].content) {
-        let tokenData;
-        try {
-          tokenData = JSON.parse(tokens[0].content);
-        } catch (e) {
-          // Content might be the token directly
-          tokenData = { access_token: tokens[0].content };
-        }
+    console.log('[IMAN] Response status:', response.status);
+    
+    if (response.ok) {
+      const data = await response.json();
+      console.log('[IMAN] Got data - success:', data.success, 'count:', data.messages?.length);
+      
+      if (data.success && data.messages && data.messages.length > 0) {
+        const emails = data.messages;
+        const latest = emails[0];
+        const sender = latest.fromName || latest.from || 'Someone';
+        const subject = latest.subject || 'No subject';
+        const unreadCount = emails.filter(e => e.unread).length;
         
-        const accessToken = tokenData.access_token;
-        if (!accessToken) {
-          return { allowed: true, summary: "I need to reconnect to email. Could you authorize Gmail access when you get a chance?" };
-        }
+        let summary = `You have ${emails.length} emails in the last 7 days`;
+        if (unreadCount > 0) summary += ` (${unreadCount} unread)`;
+        summary += `. Most recent from ${sender}: "${subject}".`;
         
-        // Fetch unread emails
-        const gmailResult = await httpsRequest({
-          hostname: 'gmail.googleapis.com',
-          path: '/gmail/v1/users/me/messages?maxResults=5&q=is:unread',
-          method: 'GET',
-          headers: {
-            'Authorization': 'Bearer ' + accessToken,
-            'Accept': 'application/json'
-          }
-        });
-        
-        if (gmailResult.status === 200) {
-          const gmailData = JSON.parse(gmailResult.data.toString());
-          const messages = gmailData.messages || [];
-          
-          if (messages.length === 0) {
-            return { allowed: true, count: 0, summary: "Good news - your inbox is clear. No unread emails waiting for you." };
-          }
-          
-          // Get first email details
-          const msgResult = await httpsRequest({
-            hostname: 'gmail.googleapis.com',
-            path: '/gmail/v1/users/me/messages/' + messages[0].id + '?format=metadata&metadataHeaders=From&metadataHeaders=Subject',
-            method: 'GET',
-            headers: {
-              'Authorization': 'Bearer ' + accessToken,
-              'Accept': 'application/json'
-            }
-          });
-          
-          if (msgResult.status === 200) {
-            const msgData = JSON.parse(msgResult.data.toString());
-            const headers = msgData.payload?.headers || [];
-            const from = headers.find(h => h.name === 'From')?.value || 'Someone';
-            const subject = headers.find(h => h.name === 'Subject')?.value || 'No subject';
-            
-            // Extract just the name from email address
-            const senderMatch = from.match(/^([^<]+)/);
-            const senderName = senderMatch ? senderMatch[1].trim().replace(/"/g, '') : from.split('@')[0];
-            
-            // VARA-style warm response
-            if (messages.length === 1) {
-              return { allowed: true, count: 1, summary: 'You have one unread email - it is from ' + senderName + ' about "' + subject + '". Would you like me to read it or take care of it for you?' };
-            } else {
-              return { allowed: true, count: messages.length, summary: 'You have ' + messages.length + ' unread emails. The most recent one is from ' + senderName + ' regarding "' + subject + '". Want me to go through them with you?' };
-            }
-          }
-        } else if (gmailResult.status === 401) {
-          return { allowed: true, needsReauth: true, summary: "My email connection needs to be refreshed. Could you reauthorize Gmail when you have a moment?" };
-        }
+        console.log('[IMAN] Returning summary:', summary.substring(0, 80));
+        return { allowed: true, count: emails.length, unread: unreadCount, summary, emails };
       }
     }
     
-    return { allowed: true, summary: "I do not have email access set up yet. Would you like me to walk you through connecting your Gmail?" };
+    // No emails found
+    console.log('[IMAN] No emails found or fetch failed');
+    return { allowed: true, count: 0, summary: 'No recent emails found.', emails: [] };
     
   } catch (e) {
-    console.log('[IMAN] Error:', e.message);
-    return { allowed: true, summary: "I had a brief hiccup checking email. Let me try that again." };
+    console.log('[IMAN] Fetch error:', e.message);
+    return { allowed: true, count: 0, summary: 'Could not fetch emails right now. Try again in a moment.', emails: [] };
   }
 }
 
@@ -21917,3 +21836,4 @@ AGENTS.PHISH = {
 };
 // Deploy trigger: Thu Feb 26 17:33:57 UTC 2026
 // Deploy trigger 1772128014
+
