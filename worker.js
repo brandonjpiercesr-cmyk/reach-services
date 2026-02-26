@@ -14413,7 +14413,10 @@ Respond as this agent specifically — stay in character.`;
       }
       
       // ⬡B:AIR:JUDGE:CHECK:final.quality:v1.0.0:20260222⬡
-      // Final quality judgment by AIR_judge
+      // DISABLED: Judge was incorrectly rejecting valid dispatch results
+      // and replacing them with brain search garbage
+      // TODO: Fix judge to recognize dispatch results as valid
+      /*
       try {
         const judgment = await AIR_judge(message, result.response, result.reasoning);
         if (judgment.success && judgment.judgment) {
@@ -14433,6 +14436,7 @@ Respond as this agent specifically — stay in character.`;
       } catch (e) {
         console.log('[AIR:JUDGE] Skipped:', e.message);
       }
+      */
       
       // RETURN-TO-ME: Post-process logging
       console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
