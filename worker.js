@@ -9685,6 +9685,7 @@ async function AIR_DISPATCH(lukeAnalysis, judeResult, callerIdentity) {
   console.log('[AIR DISPATCH] Checking if agents can handle this...');
   
   const query = (lukeAnalysis?.raw || '').toLowerCase();
+  console.log("[AIR DISPATCH] Query received:", query);
   const intent = lukeAnalysis.intent;
   
   // ═══════════════════════════════════════════════════════════════════════════════
@@ -12766,6 +12767,7 @@ async function RETURN_TO_ME(input, output, agents_deployed, hamIdentity, mission
 
 function JUDE_smartRoute(lukeAnalysis) {
   const query = (lukeAnalysis?.raw || '').toLowerCase();
+  console.log("[AIR DISPATCH] Query received:", query);
   const intent = lukeAnalysis.intent || '';
   const agents = [];
   
