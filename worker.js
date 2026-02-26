@@ -9684,9 +9684,11 @@ async function AIR_DISPATCH(lukeAnalysis, judeResult, callerIdentity) {
   // ═══════════════════════════════════════════════════════════════════════════════
   
   // PRIORITY 1: EMAIL READ - "email", "inbox", "mail", "messages"
+  // ⬡B:IMAN:FIX:exclude_send_keywords:20260226⬡
   const emailReadKeywords = ['email', 'inbox', 'mail', 'messages', 'unread'];
+  const emailSendKeywords = ['send', 'write', 'draft', 'saying', 'say', 'tell'];
   const isEmailRead = emailReadKeywords.some(kw => query.includes(kw)) && 
-                      !query.includes('send') && !query.includes('write') && !query.includes('draft');
+                      !emailSendKeywords.some(kw => query.includes(kw));
   
   if (isEmailRead) {
     console.log('[AIR DISPATCH] ★ PRIORITY: EMAIL READ - DIRECT FETCH');
