@@ -10282,7 +10282,9 @@ async function AIR_process(userSaid, history, callerIdentity, demoState) {
       
       const json = JSON.parse(result.data.toString());
       if (json.candidates?.[0]?.content?.parts?.[0]?.text) {
-        response = json.candidates[0].content.parts[0].text;
+        response = json.content[0].text;
+          modelUsed = 'claude-haiku-4-5-20251001';
+          console.log('[AIR_text] Claude Haiku fallback responded');
         console.log('[AIR] Gemini Flash response received');
       }
     } catch (e) {
@@ -12844,9 +12846,11 @@ async function AIR_text(userMessage, history, context = {}) {
         }));
         const json = JSON.parse(result.data.toString());
         if (json.content?.[0]?.text) {
-          response = json.candidates[0].content.parts[0].text;
+          response = json.content[0].text;
+          modelUsed = 'claude-haiku-4-5-20251001';
+          console.log('[AIR_text] Claude Haiku fallback responded');
         }
-      } catch (e) { console.log('[AIR] Gemini error: ' + e.message); }
+      } catch (e) { console.log('[AIR_text] Claude Haiku error:', e.message); }
     }
 
     // BACKUP: Claude Haiku (COST FIX: was Sonnet 4.5 ⬡B:COST_FIX:20260225⬡)
