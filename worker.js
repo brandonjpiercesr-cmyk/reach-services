@@ -13484,7 +13484,8 @@ function IMAN_cancelEmail(countdownId) {
   return { success: false, reason: 'Not found' };
 }
 
-// Actually send the email via Nylas
+// ⬡B:IMAN:FIX:verify_send_status:20260226⬡
+// Actually send the email via Nylas - NOW WITH PROPER STATUS CHECK
 async function IMAN_sendEmail(draft) {
   try {
     const grantId = '41a3ace1-1c1e-47f3-b017-e5fd71ea1f3a'; // CLAUDETTE - ABA identity
@@ -13508,6 +13509,8 @@ async function IMAN_sendEmail(draft) {
       htmlBody = draft.body.split('\n').map(line => `<p style="margin: 0 0 10px 0;">${line || '&nbsp;'}</p>`).join('\n');
     }
     
+    console.log('[IMAN] Attempting to send email to:', draft.to, '| Subject:', draft.subject);
+    
     const sendResult = await httpsRequest({
       hostname: 'api.us.nylas.com',
       path: '/v3/grants/' + grantId + '/messages/send',
@@ -13522,9 +13525,27 @@ async function IMAN_sendEmail(draft) {
       body: htmlBody
     }));
     
-    console.log('[IMAN] Email sent to:', draft.to);
+    // ⬡B:IMAN:FIX:verify_send_status:20260226⬡ - ACTUALLY CHECK IF NYLAS SUCCEEDED
+    console.log('[IMAN] Nylas response status:', sendResult.status);
     
-    // Store in brain
+    if (sendResult.status !== 200 && sendResult.status !== 201 && sendResult.status !== 202) {
+      const errorBody = sendResult.data ? sendResult.data.toString() : 'No response body';
+      console.error('[IMAN] Nylas send FAILED:', sendResult.status, errorBody);
+      return { success: false, reason: 'Nylas error ' + sendResult.status + ': ' + errorBody.substring(0, 200) };
+    }
+    
+    // Parse response for message ID
+    let messageId = null;
+    try {
+      const responseData = JSON.parse(sendResult.data.toString());
+      messageId = responseData.data?.id || responseData.id || 'unknown';
+    } catch (e) {
+      messageId = 'parse_error';
+    }
+    
+    console.log('[IMAN] ✓ Email ACTUALLY sent to:', draft.to, '| Message ID:', messageId);
+    
+    // Store VERIFIED send to brain
     await httpsRequest({
       hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
       path: '/rest/v1/aba_memory',
@@ -13536,16 +13557,16 @@ async function IMAN_sendEmail(draft) {
         'Prefer': 'return=minimal'
       }
     }, JSON.stringify({
-      content: 'EMAIL SENT: To=' + draft.to + ' | Subject=' + draft.subject + ' | Body=' + draft.body.substring(0, 500),
+      content: 'EMAIL SENT: From claudette@globalmajoritygroup.com To ' + draft.to + ', Subject: ' + draft.subject + '. Sent at ' + new Date().toISOString() + '. MessageId: ' + messageId,
       memory_type: 'email_sent',
-      categories: ['iman', 'email', 'sent'],
+      categories: ['iman', 'email', 'sent', 'verified'],
       importance: 6,
       is_system: true,
       source: 'iman_send_' + Date.now(),
-      tags: ['email', 'sent', 'iman']
+      tags: ['email', 'sent', 'iman', 'nylas_verified']
     }));
     
-    return { success: true, to: draft.to, subject: draft.subject };
+    return { success: true, to: draft.to, subject: draft.subject, messageId };
   } catch (e) {
     console.error('[IMAN] Send error:', e.message);
     return { success: false, reason: e.message };
