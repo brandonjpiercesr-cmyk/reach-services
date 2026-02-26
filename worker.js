@@ -14093,6 +14093,23 @@ Phone: (336) 389-8116</p>
           }
         }
 
+        // ── DEBUG: TEST IMAN ──────────────────────────────────
+        // ⬡B:DEBUG:IMAN_TEST:20260226⬡
+        if (body.type === 'test_iman') {
+          try {
+            console.log('[DEBUG] Testing IMAN directly...');
+            const testIdentity = { name: 'Brandon', trust: 'T10' };
+            const result = await IMAN_readEmails(testIdentity);
+            return jsonResponse(res, 200, {
+              test: 'IMAN',
+              result: result,
+              identity: testIdentity
+            });
+          } catch (e) {
+            return jsonResponse(res, 200, { test: 'IMAN', error: e.message });
+          }
+        }
+
         // ── SAVE CONVERSATION (AIR → Supabase) ──────────────────
         // v2.0.0: Store conversations in Supabase, not Firebase
         if (body.type === 'save_conversation') {
