@@ -9703,8 +9703,13 @@ async function AIR_DISPATCH(lukeAnalysis, judeResult, callerIdentity) {
     console.log('[AIR DISPATCH] ★ PRIORITY: EMAIL READ');
     try {
       const result = await IMAN_readEmails(callerIdentity);
+      console.log("[DEBUG] IMAN_readEmails returned:", JSON.stringify({allowed: result?.allowed, hasSummary: !!result?.summary, count: result?.count}));
       if (result && result.allowed && result.summary) {
         return { handled: true, agent: 'IMAN', data: result.summary, type: 'email', count: result.count };
+      }
+      // If allowed but no summary, still return something useful
+      if (result && result.allowed) {
+        return { handled: true, agent: 'IMAN', data: result.summary || 'I checked your inbox but found no recent emails.', type: 'email', count: result.count || 0 };
       }
     } catch (e) {
       console.log('[AIR DISPATCH] IMAN error:', e.message);
