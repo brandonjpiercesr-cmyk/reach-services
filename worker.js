@@ -9892,9 +9892,16 @@ async function AIR_DISPATCH(lukeAnalysis, judeResult, callerIdentity) {
         } else {
           return { handled: true, agent: 'DIAL', data: `I couldn't find a phone number for ${targetName}. Can you tell me their number?`, type: 'phone_call' };
         }
+      } else {
+        // ⬡B:DIAL:FIX:no_match:20260226⬡
+        // callMatch failed - still return handled to prevent fallthrough
+        return { handled: true, agent: 'DIAL', data: `Who would you like me to call?`, type: 'phone_call' };
       }
     } catch (e) {
       console.log('[AIR DISPATCH] DIAL error:', e.message);
+      // ⬡B:DIAL:FIX:catch_return:20260226⬡
+      // Return handled even on error to prevent falling through to ABACIA_AIR
+      return { handled: true, agent: 'DIAL', data: `I had trouble placing that call. Can you try again?`, type: 'phone_call' };
     }
   }
   
