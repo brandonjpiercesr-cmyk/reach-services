@@ -9653,6 +9653,78 @@ async function AIR_DISPATCH(lukeAnalysis, judeResult, callerIdentity) {
   const intent = lukeAnalysis.intent;
   
   // ═══════════════════════════════════════════════════════════════════════════════
+  // ⬡B:AIR:DISPATCH:PRIORITY:email_sports_first:20260226⬡
+  // PRIORITY DISPATCHES - Check FIRST before anything else
+  // These are common user requests that should NOT fall through to brain search
+  // ═══════════════════════════════════════════════════════════════════════════════
+  
+  // PRIORITY 1: EMAIL READ - "email", "inbox", "mail", "messages"
+  const emailReadKeywords = ['email', 'inbox', 'mail', 'messages', 'unread'];
+  const isEmailRead = emailReadKeywords.some(kw => query.includes(kw)) && 
+                      !query.includes('send') && !query.includes('write') && !query.includes('draft');
+  
+  if (isEmailRead) {
+    console.log('[AIR DISPATCH] ★ PRIORITY: EMAIL READ');
+    try {
+      const result = await IMAN_readEmails(callerIdentity);
+      if (result && result.allowed && result.summary) {
+        return { handled: true, agent: 'IMAN', data: result.summary, type: 'email', count: result.count };
+      }
+    } catch (e) {
+      console.log('[AIR DISPATCH] IMAN error:', e.message);
+    }
+  }
+  
+  // PRIORITY 2: EMAIL SEND - "send email", "email ... saying"
+  const isEmailSend = (query.includes('send') || query.includes('write') || query.includes('draft')) && 
+                      (query.includes('email') || query.includes('mail'));
+  
+  if (isEmailSend) {
+    console.log('[AIR DISPATCH] ★ PRIORITY: EMAIL SEND');
+    try {
+      const result = await IMAN_SEND_processEmail(query, callerIdentity);
+      if (result && result.success) {
+        return { handled: true, agent: 'IMAN', data: result.message || 'Email sent.', type: 'email_send' };
+      }
+    } catch (e) {
+      console.log('[AIR DISPATCH] IMAN_SEND error:', e.message);
+    }
+  }
+  
+  // PRIORITY 3: SPORTS - "nba", "nfl", "score", "game", "sports"
+  const sportsKeywords = ['nba', 'nfl', 'nhl', 'mlb', 'score', 'scores', 'game', 'games', 'sports', 'lakers', 'warriors', 'celtics', 'knicks', 'heat', 'bulls', 'playoffs', 'standings'];
+  const isSports = sportsKeywords.some(kw => query.includes(kw));
+  
+  if (isSports) {
+    console.log('[AIR DISPATCH] ★ PRIORITY: SPORTS');
+    try {
+      const result = await PLAY_getSports(query);
+      if (result) {
+        return { handled: true, agent: 'PLAY', data: result, type: 'sports' };
+      }
+    } catch (e) {
+      console.log('[AIR DISPATCH] PLAY error:', e.message);
+    }
+  }
+  
+  // PRIORITY 4: WEATHER - "weather", "temperature", "forecast"
+  const weatherKeywords = ['weather', 'temperature', 'forecast', 'rain', 'sunny', 'cold', 'hot'];
+  const isWeather = weatherKeywords.some(kw => query.includes(kw));
+  
+  if (isWeather) {
+    console.log('[AIR DISPATCH] ★ PRIORITY: WEATHER');
+    try {
+      let location = callerIdentity?.name === 'Brandon' ? 'Greensboro, NC' : lukeAnalysis.raw;
+      const result = await CLIMATE_getWeather(location);
+      if (result) {
+        return { handled: true, agent: 'CLIMATE', data: result, type: 'weather' };
+      }
+    } catch (e) {
+      console.log('[AIR DISPATCH] CLIMATE error:', e.message);
+    }
+  }
+  
+  // ═══════════════════════════════════════════════════════════════════════════════
   // FORGE DISPATCH - Route 'create agent' requests to FORGE
   // ⬡B:AIR:FORGE_DISPATCH:CODE:agent_creation_routing:v1.0.0:20260224⬡
   // ═══════════════════════════════════════════════════════════════════════════════
