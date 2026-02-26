@@ -13669,7 +13669,7 @@ const httpServer = http.createServer(async (req, res) => {
         '/api/cron/scheduled-calls', '/api/voice/deepgram-token', 
         '/api/omi/manifest', '/api/omi/webhook', 
         '/api/sms/send', '/api/sms/receive',
-        '/api/elevenlabs/webhook', '/api/call/intelligence/:id', '/api/calls/recent'
+        '/api/elevenlabs/webhook', '/api/elevenlabs/llm', '/api/call/intelligence/:id', '/api/calls/recent'
       ],
       speech_intelligence: ['diarization', 'topics', 'entities', 'intent', 'sentiment', 'summarization', 'language_detection'],
       message: 'We are all ABA'
@@ -16368,7 +16368,7 @@ if (path === '/api/sms/send' && method === 'POST') {
     return jsonResponse(res, 200, { status: "no_transcript", callId });
   }
 
-  if (path === '/api/elevenlabs/webhook' && method === 'POST') {
+  if (path === '/api/elevenlabs/webhook', '/api/elevenlabs/llm' && method === 'POST') {
     try {
       const body = await parseBody(req);
       
@@ -16471,6 +16471,92 @@ if (path === '/api/sms/send' && method === 'POST') {
       // AGENT_LINK creates session handoff
       // MEMOS captures if noteworthy
       return jsonResponse(res, 200, { success: false, error: e.message });
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // ⬡B:AIR:ELEVENLABS_LLM:endpoint:brain_connected_calls:20260226⬡
+  // POST /api/elevenlabs/llm - Custom LLM for ElevenLabs Conversational AI
+  // This connects phone calls to ABACIA brain via AIR routing
+  // ═══════════════════════════════════════════════════════════════════════
+  if (path === '/api/elevenlabs/llm' && method === 'POST') {
+    console.log('[ELEVENLABS LLM] ★★★ Brain-connected call request ★★★');
+    try {
+      const body = await parseBody(req);
+      
+      const messages = body.messages || [];
+      const conversationId = body.conversation_id || body.conversationId || 'unknown';
+      const agentId = body.agent_id || 'unknown';
+      
+      // Get the last user message
+      const lastUserMessage = messages.filter(m => m.role === 'user').pop();
+      const userMessage = lastUserMessage?.content || '';
+      
+      console.log('[ELEVENLABS LLM] ConvID:', conversationId, '| Message:', userMessage.substring(0, 50));
+      
+      if (!userMessage) {
+        return jsonResponse(res, 200, { response: "I'm here. What can I help you with?" });
+      }
+      
+      // Build conversation history for AIR
+      const history = messages.slice(-10).map(m => ({
+        role: m.role === 'user' ? 'user' : 'assistant',
+        content: m.content
+      }));
+      
+      // Route through AIR - same as any other request!
+      // This gives phone calls full access to ABACIA brain
+      const airResult = await AIR_text(userMessage, {
+        source: 'elevenlabs_phone',
+        channel: 'phone_call',
+        conversation_id: conversationId,
+        ham_name: 'Caller', // Could be identified by caller ID later
+        trust_level: 'T5', // Default trust for phone calls
+        history: history
+      });
+      
+      // Extract response text
+      let responseText = 'I apologize, I had trouble processing that. Could you repeat?';
+      if (airResult?.response) {
+        responseText = typeof airResult.response === 'string' 
+          ? airResult.response 
+          : airResult.response.greeting || airResult.response.message || JSON.stringify(airResult.response);
+      }
+      
+      // Clean response for voice (remove markdown, excessive formatting)
+      responseText = responseText
+        .replace(/#{1,6}\s*/g, '') // Remove headers
+        .replace(/\*\*/g, '') // Remove bold
+        .replace(/\n+/g, ' ') // Single spaces
+        .replace(/\s+/g, ' ') // Collapse spaces
+        .trim();
+      
+      console.log('[ELEVENLABS LLM] Response:', responseText.substring(0, 80) + '...');
+      console.log('[ELEVENLABS LLM] Agents used:', airResult?.agents?.slice(0, 5).join(','));
+      
+      // Log to brain for continuity
+      storeToBrain({
+        content: `PHONE CALL TURN | ConvID: ${conversationId} | User: "${userMessage.substring(0, 100)}" | ABA: "${responseText.substring(0, 100)}"`,
+        memory_type: 'call_turn',
+        categories: ['call', 'elevenlabs', 'conversation'],
+        importance: 5,
+        tags: ['call', 'turn', conversationId],
+        source: 'elevenlabs_llm_' + Date.now()
+      }).catch(e => console.log('[BRAIN] Store error:', e.message));
+      
+      // Return response in ElevenLabs format
+      return jsonResponse(res, 200, { 
+        response: responseText,
+        conversation_id: conversationId,
+        agents: airResult?.agents || []
+      });
+      
+    } catch (e) {
+      console.log('[ELEVENLABS LLM] Error:', e.message);
+      return jsonResponse(res, 200, { 
+        response: "I apologize, I'm having some technical difficulties. Please try again.",
+        error: e.message
+      });
     }
   }
 
