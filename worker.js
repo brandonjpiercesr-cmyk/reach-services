@@ -9608,6 +9608,75 @@ async function AIR_DISPATCH(lukeAnalysis, judeResult, callerIdentity) {
   console.log("[AIR DISPATCH] Query received:", query);
   const intent = lukeAnalysis.intent;
   
+  // ⬡B:AIR:GATEKEEPER:phone_unknown:20260226⬡
+  // GATEKEEPER: For phone calls from unknown callers, don't give access to anything
+  // Ask for identification first
+  const isInboundPhone = callerIdentity?.source === 'twilio_elevenlabs' || 
+                      callerIdentity?.channel === 'phone_inbound' ||
+                      callerIdentity?.source?.includes('twilio');
+  const isUnknownCaller = !callerIdentity?.trust || 
+                          ['T1', 'T2', 'T3', 'T4'].includes(callerIdentity?.trust);
+  
+  if (isInboundPhone && isUnknownCaller) {
+    console.log('[AIR DISPATCH] ★ GATEKEEPER: Unknown caller on phone - requesting ID');
+    // Don't give access to email, calendar, or personal data
+    // Just be a polite gatekeeper
+    const greetings = [
+      "Good day. This is ABA, Brandon's personal assistant. May I ask who's calling?",
+      "Hello, you've reached Brandon Pierce's office. Who may I say is calling?",
+      "Hi there. I'm ABA, assisting Brandon. Could you tell me your name and what this is regarding?"
+    ];
+    const greeting = greetings[Math.floor(Math.random() * greetings.length)];
+    return { handled: true, agent: 'SHADOW', data: greeting, type: 'gatekeeper' };
+  }
+  
+  // ⬡B:OMI:WAKEWORD:HANDLER:20260226⬡
+  // OMI WAKEWORD: Strip "Hey ABA" and process the actual command
+  // Don't let it fall through to brain search for old transcripts
+  const isOMI = callerIdentity?.source === 'omi' || 
+                callerIdentity?.channel === 'wakeword' ||
+                callerIdentity?.source?.includes('omi');
+  
+  if (isOMI && query.includes('hey aba')) {
+    console.log('[AIR DISPATCH] ★ OMI WAKEWORD - Processing command');
+    // Strip the wake word and extract the actual command
+    let command = query.replace(/hey aba/gi, '').trim();
+    command = command.replace(/^[,\s]+/, '').trim(); // Clean up leading punctuation
+    
+    console.log('[OMI] Extracted command:', command);
+    
+    // Check what kind of command this is
+    if (command.includes('remind') || command.includes('remember') || command.includes('add') || command.includes('note')) {
+      // Store as a reminder/note in brain
+      const noteContent = command.replace(/remind me to|remember to|add|note that/gi, '').trim();
+      try {
+        await fetch('https://htlxjkbrstpwwtzsbyvb.supabase.co/rest/v1/aba_memory', {
+          method: 'POST',
+          headers: { 
+            'apikey': SUPABASE_KEY, 
+            'Authorization': `Bearer ${SUPABASE_KEY}`,
+            'Content-Type': 'application/json',
+            'Prefer': 'return=minimal'
+          },
+          body: JSON.stringify({
+            memory_type: 'reminder',
+            source: '⬡B:OMI:REMINDER:' + Date.now() + '⬡',
+            content: noteContent,
+            importance: 7
+          })
+        });
+        return { handled: true, agent: 'MEMOS', data: `Got it. I'll remember: "${noteContent}"`, type: 'reminder' };
+      } catch (e) {
+        console.log('[OMI] Reminder save error:', e.message);
+        return { handled: true, agent: 'MEMOS', data: `I heard: "${noteContent}". I'll keep that in mind.`, type: 'reminder' };
+      }
+    }
+    
+    // If not a reminder, update the query to be the clean command
+    // and let it fall through to other priority handlers
+    lukeAnalysis.raw = command;
+  }
+  
   // ═══════════════════════════════════════════════════════════════════════════════
   // ⬡B:AIR:DISPATCH:PRIORITY:email_sports_first:20260226⬡
   // PRIORITY DISPATCHES - Check FIRST before anything else
@@ -9652,30 +9721,69 @@ async function AIR_DISPATCH(lukeAnalysis, judeResult, callerIdentity) {
     }
   }
   
-  // PRIORITY 2: EMAIL SEND - "send email to X saying Y"
-  const isEmailSend = (query.includes('send') || query.includes('write')) && query.includes('email');
+  // PRIORITY 2: EMAIL SEND - "send email to X saying Y" or "email claudette saying..."
+  // ⬡B:IMAN_SEND:FIX:contact_lookup:20260226⬡
+  const isEmailSend = (query.includes('send') || query.includes('write') || query.includes('email')) && 
+                      (query.includes('saying') || query.includes('say') || query.includes('tell') || query.includes('about'));
   if (isEmailSend) {
     console.log('[AIR DISPATCH] PRIORITY: EMAIL SEND');
     try {
-      const emailMatch = query.match(/(?:send email to|email)\s+([\w.@]+)(?:\s+and)?\s+(?:say|saying|tell|about)\s+(.+)/i);
+      // Multiple regex patterns to catch different phrasings
+      let emailMatch = query.match(/(?:send email to|email to|email)\s+([^\s]+)\s+(?:and\s+)?(?:say|saying|tell|about)\s+(.+)/i);
+      if (!emailMatch) emailMatch = query.match(/(?:email|message|send to)\s+([^\s]+)\s+(.+)/i);
+      
       if (emailMatch) {
-        let targetEmail = emailMatch[1].includes('@') ? emailMatch[1] : null;
+        let targetName = emailMatch[1].replace(/[,.:;!?]/g, ''); // Clean punctuation
+        let targetEmail = targetName.includes('@') ? targetName : null;
         const messageText = emailMatch[2].trim();
+        
+        console.log('[IMAN_SEND] Target:', targetName, '| Has @:', !!targetEmail, '| Message:', messageText.substring(0, 50));
+        
+        // If no @ sign, look up contact in brain
         if (!targetEmail) {
-          const contactRes = await fetch(`https://htlxjkbrstpwwtzsbyvb.supabase.co/rest/v1/aba_memory?memory_type=eq.ham_identity&content=ilike.*${encodeURIComponent(emailMatch[1])}*&limit=1`,
-            { headers: { 'apikey': process.env.SUPABASE_ANON_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}` } });
+          console.log('[IMAN_SEND] Looking up contact:', targetName);
+          const contactRes = await fetch(`https://htlxjkbrstpwwtzsbyvb.supabase.co/rest/v1/aba_memory?or=(memory_type.eq.ham_identity,memory_type.eq.contact)&content=ilike.*${encodeURIComponent(targetName)}*&limit=5`,
+            { headers: { 'apikey': SUPABASE_ANON, 'Authorization': `Bearer ${SUPABASE_ANON}` } });
           const contacts = await contactRes.json();
-          if (contacts?.[0]) { const m = contacts[0].content.match(/Email:\s*([\w.@]+)/); if (m) targetEmail = m[1]; }
+          console.log('[IMAN_SEND] Found', contacts?.length || 0, 'contacts');
+          
+          if (contacts && contacts.length > 0) {
+            for (const contact of contacts) {
+              // Try multiple email patterns
+              const emailPatterns = [
+                /Email:\s*([\w.+-]+@[\w.-]+\.\w+)/i,
+                /email[:\s]*([\w.+-]+@[\w.-]+\.\w+)/i,
+                /([\w.+-]+@[\w.-]+\.\w+)/
+              ];
+              for (const pattern of emailPatterns) {
+                const m = contact.content.match(pattern);
+                if (m) {
+                  targetEmail = m[1];
+                  console.log('[IMAN_SEND] Found email:', targetEmail, 'from contact');
+                  break;
+                }
+              }
+              if (targetEmail) break;
+            }
+          }
         }
+        
         if (targetEmail) {
           const sendRes = await fetch('https://abacia-services.onrender.com/api/email/send', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ to: targetEmail, subject: 'Message from ' + (callerIdentity?.name || 'Brandon'), body: messageText })
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+              to: targetEmail, 
+              subject: 'Message from ' + (callerIdentity?.name || 'Brandon'), 
+              body: messageText 
+            })
           });
           const sendData = await sendRes.json();
-          if (sendData.success) return { handled: true, agent: 'IMAN_SEND', data: `Email sent to ${targetEmail}.`, type: 'email_send' };
+          if (sendData.success) {
+            return { handled: true, agent: 'IMAN_SEND', data: `Email sent to ${targetName} (${targetEmail}).`, type: 'email_send' };
+          }
         }
-        return { handled: true, agent: 'IMAN_SEND', data: `Could not find email for ${emailMatch[1]}.`, type: 'email_send' };
+        return { handled: true, agent: 'IMAN_SEND', data: `Could not find email for ${targetName}. Try saying the full email address.`, type: 'email_send' };
       }
     } catch (e) { console.log('[AIR DISPATCH] IMAN_SEND error:', e.message); }
   }
@@ -9709,6 +9817,75 @@ async function AIR_DISPATCH(lukeAnalysis, judeResult, callerIdentity) {
       }
     } catch (e) {
       console.log('[AIR DISPATCH] CLIMATE error:', e.message);
+    }
+  }
+  
+  // ⬡B:DIAL:PRIORITY:phone_call:20260226⬡
+  // PRIORITY 5: PHONE CALL - "call mom", "phone BJ", "dial eric"
+  const callKeywords = ['call', 'phone', 'dial', 'ring'];
+  const isPhoneCall = callKeywords.some(kw => query.includes(kw)) && 
+                      !query.includes('email') && !query.includes('recall') && !query.includes('called');
+  
+  if (isPhoneCall) {
+    console.log('[AIR DISPATCH] ★ PRIORITY: PHONE CALL (DIAL)');
+    try {
+      // Extract who to call: "call mom", "call BJ", "phone eric"
+      const callMatch = query.match(/(?:call|phone|dial|ring)\s+([^\s]+(?:\s+[^\s]+)?)/i);
+      if (callMatch) {
+        let targetName = callMatch[1].replace(/[,.:;!?]/g, '').trim();
+        console.log('[DIAL] Target name:', targetName);
+        
+        // Look up contact in brain
+        const contactRes = await fetch(`https://htlxjkbrstpwwtzsbyvb.supabase.co/rest/v1/aba_memory?or=(memory_type.eq.ham_identity,memory_type.eq.contact,memory_type.eq.brandon_family)&content=ilike.*${encodeURIComponent(targetName)}*&limit=5`,
+          { headers: { 'apikey': SUPABASE_ANON, 'Authorization': `Bearer ${SUPABASE_ANON}` } });
+        const contacts = await contactRes.json();
+        console.log('[DIAL] Found', contacts?.length || 0, 'contacts');
+        
+        let phoneNumber = null;
+        let contactFullName = targetName;
+        
+        if (contacts && contacts.length > 0) {
+          for (const contact of contacts) {
+            // Try multiple phone patterns
+            const phonePatterns = [
+              /Phone:\s*(\+?[\d\s()-]+)/i,
+              /phone[:\s]*(\+?[\d\s()-]+)/i,
+              /(\+1[\d]{10})/,
+              /(\(\d{3}\)\s*\d{3}[-\s]?\d{4})/
+            ];
+            for (const pattern of phonePatterns) {
+              const m = contact.content.match(pattern);
+              if (m) {
+                phoneNumber = m[1].replace(/[\s()-]/g, '');
+                // Try to get full name
+                const nameMatch = contact.content.match(/Name:\s*([^\n|]+)/i);
+                if (nameMatch) contactFullName = nameMatch[1].trim();
+                console.log('[DIAL] Found phone:', phoneNumber, 'for', contactFullName);
+                break;
+              }
+            }
+            if (phoneNumber) break;
+          }
+        }
+        
+        if (phoneNumber) {
+          // Extract message if any: "call mom and tell her I love her"
+          const messageMatch = query.match(/(?:and|to)\s+(?:say|tell|let.*know)\s+(.+)/i);
+          const message = messageMatch ? messageMatch[1] : `Hi, this is a call from Brandon via ABA.`;
+          
+          // Trigger DIAL
+          const dialResult = await DIAL_callWithElevenLabs(phoneNumber, message, { callerName: callerIdentity?.name || 'Brandon', targetName: contactFullName });
+          if (dialResult && dialResult.success) {
+            return { handled: true, agent: 'DIAL', data: `Calling ${contactFullName} now...`, type: 'phone_call' };
+          } else {
+            return { handled: true, agent: 'DIAL', data: `I'll try to reach ${contactFullName} at ${phoneNumber}.`, type: 'phone_call' };
+          }
+        } else {
+          return { handled: true, agent: 'DIAL', data: `I couldn't find a phone number for ${targetName}. Can you tell me their number?`, type: 'phone_call' };
+        }
+      }
+    } catch (e) {
+      console.log('[AIR DISPATCH] DIAL error:', e.message);
     }
   }
   
