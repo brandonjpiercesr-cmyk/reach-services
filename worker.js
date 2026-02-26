@@ -6115,49 +6115,6 @@ async function IMAN_readEmails(callerIdentity) {
   return { allowed: true, count: 0, summary: 'I checked your inbox but found no recent emails.' };
 }
 
-// TRY ABACIA-SERVICES (Nylas)
-  console.log('[IMAN] Fetching from ABACIA...');
-  try {
-    const url = 'https://abacia-services.onrender.com/api/email/inbox?days=7&limit=10';
-    console.log('[IMAN] Calling:', url);
-    
-    const response = await fetch(url, { 
-      method: 'GET',
-      headers: { 'Accept': 'application/json' }
-    });
-    
-    console.log('[IMAN] Response status:', response.status);
-    
-    if (response.ok) {
-      const data = await response.json();
-      console.log('[IMAN] Got data - success:', data.success, 'count:', data.messages?.length);
-      
-      if (data.success && data.messages && data.messages.length > 0) {
-        const emails = data.messages;
-        const latest = emails[0];
-        const sender = latest.fromName || latest.from || 'Someone';
-        const subject = latest.subject || 'No subject';
-        const unreadCount = emails.filter(e => e.unread).length;
-        
-        let summary = `You have ${emails.length} emails in the last 7 days`;
-        if (unreadCount > 0) summary += ` (${unreadCount} unread)`;
-        summary += `. Most recent from ${sender}: "${subject}".`;
-        
-        console.log('[IMAN] Returning summary:', summary.substring(0, 80));
-        return { allowed: true, count: emails.length, unread: unreadCount, summary, emails };
-      }
-    }
-    
-    // No emails found
-    console.log('[IMAN] No emails found or fetch failed');
-    return { allowed: true, count: 0, summary: 'No recent emails found.', emails: [] };
-    
-  } catch (e) {
-    console.log('[IMAN] Fetch error:', e.message);
-    return { allowed: true, count: 0, summary: 'Could not fetch emails right now. Try again in a moment.', emails: [] };
-  }
-}
-
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // ⬡B:AIR:REACH.VOICE.PROACTIVE:FUNC:greeting.smart:v2.1.0:20260214⬡
