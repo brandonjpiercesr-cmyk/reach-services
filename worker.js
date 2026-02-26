@@ -6084,7 +6084,7 @@ async function IMAN_readEmails(callerIdentity) {
   // TRY ABACIA-SERVICES FIRST (has Nylas connected)
   try {
     console.log('[IMAN] Trying ABACIA-SERVICES for email...');
-    console.log("[DEBUG] IMAN calling ABACIA_IMAN_getInbox");
+    console.log("[DEBUG] IMAN calling ABACIA_IMAN_getInbox with trust:", callerIdentity?.trust);
     const abaciaResult = await ABACIA_IMAN_getInbox({ daysAgo: 7, limit: 10 });
     if (abaciaResult.success && abaciaResult.messages && abaciaResult.messages.length > 0) {
       const emails = abaciaResult.messages;
