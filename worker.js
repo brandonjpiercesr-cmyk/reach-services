@@ -13075,9 +13075,18 @@ async function AIR_text(userMessage, history, context = {}) {
   let missionNumber = null;
   
   if (dispatchResult && dispatchResult.handled) {
-    console.log('[AIR] Agent ' + dispatchResult.agent + ' returned data - routing to VARA for formatting');
     missionNumber = '⬡M:' + dispatchResult.agent + ':' + Date.now() + '⬡';
     agents_deployed.push(dispatchResult.agent);
+    
+    // ⬡B:AIR:FIX:skip_vara_for_actions:20260226⬡
+    // Some dispatch types return already-formatted responses - skip VARA
+    const skipVaraTypes = ['phone_call', 'reminder', 'omi_command'];
+    if (skipVaraTypes.includes(dispatchResult.type)) {
+      console.log('[AIR] Agent ' + dispatchResult.agent + ' returned action response - skipping VARA');
+      response = dispatchResult.data;
+      agents_deployed.push('DIRECT');
+    } else {
+      console.log('[AIR] Agent ' + dispatchResult.agent + ' returned data - routing to VARA for formatting');
     
     // ⬡B:AIR:FIX:vara_formatting:20260226⬡
     // CRITICAL: Agent data must go through VARA for JARVIS-style formatting
@@ -13139,6 +13148,7 @@ FORMAT THIS DATA for Brandon in your VARA voice. Be brief, warm, and useful. If 
       console.log('[AIR] VARA formatting error:', e.message, '- using raw data');
       response = dispatchResult.data;
     }
+    } // Close the else block for skipVaraTypes check
   } else {
     // No agent handled it - proceed with LLM
     agents_deployed.push('PACK');
