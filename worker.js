@@ -12880,10 +12880,70 @@ async function AIR_text(userMessage, history, context = {}) {
   let missionNumber = null;
   
   if (dispatchResult && dispatchResult.handled) {
-    console.log('[AIR] Agent ' + dispatchResult.agent + ' handled request');
-    response = dispatchResult.data;
+    console.log('[AIR] Agent ' + dispatchResult.agent + ' returned data - routing to VARA for formatting');
     missionNumber = '⬡M:' + dispatchResult.agent + ':' + Date.now() + '⬡';
     agents_deployed.push(dispatchResult.agent);
+    
+    // ⬡B:AIR:FIX:vara_formatting:20260226⬡
+    // CRITICAL: Agent data must go through VARA for JARVIS-style formatting
+    // Agents return RAW DATA → AIR routes to VARA → VARA formats with writing standards → USER
+    try {
+      const varaPrompt = `You are VARA (Vocal Authorized Representative of ABA), Brandon's personal AI butler.
+
+PERSONALITY: Warm, dignified, butler-like. Think JARVIS - intelligent, proactive, personality-driven.
+NEVER: Punchy, robotic, cold, or overly formal.
+ALWAYS: Natural, conversational, like a trusted advisor who knows Brandon well.
+
+BRANDON'S 16 WRITING STANDARDS:
+1. No "I'd be happy to" or "Certainly!"
+2. No meta-commentary about what you're doing
+3. Lead with the answer, not preamble
+4. Be concise but warm
+5. Use "sir" sparingly and naturally
+6. Never say "As an AI" or reference being artificial
+7. Speak like a knowledgeable friend, not a servant
+8. Match Brandon's energy - if casual, be casual
+9. Proactive suggestions when relevant
+10. No excessive punctuation or emojis
+11. Natural contractions (don't, won't, can't)
+12. Vary sentence structure
+13. End with forward momentum when appropriate
+14. Never apologize unless truly warranted
+15. Be direct but kind
+16. Remember: dignified, not servile
+
+RAW DATA FROM ${dispatchResult.agent}:
+${dispatchResult.data}
+
+FORMAT THIS DATA for Brandon in your VARA voice. Be brief, warm, and useful. If it's email data, summarize smartly. If it's sports, be conversational about it. If it's a confirmation, acknowledge naturally.`;
+
+      const varaResult = await httpsRequest({
+        hostname: 'api.anthropic.com',
+        path: '/v1/messages',
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-api-key': ANTHROPIC_KEY,
+          'anthropic-version': '2023-06-01'
+        }
+      }, JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 500,
+        messages: [{ role: 'user', content: varaPrompt }]
+      }));
+      
+      const varaJson = JSON.parse(varaResult.data.toString());
+      if (varaJson.content?.[0]?.text) {
+        response = varaJson.content[0].text;
+        agents_deployed.push('VARA');
+        console.log('[AIR] VARA formatted response');
+      } else {
+        response = dispatchResult.data; // Fallback to raw if VARA fails
+      }
+    } catch (e) {
+      console.log('[AIR] VARA formatting error:', e.message, '- using raw data');
+      response = dispatchResult.data;
+    }
   } else {
     // No agent handled it - proceed with LLM
     agents_deployed.push('PACK');
