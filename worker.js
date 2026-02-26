@@ -842,7 +842,7 @@ AGENTS.DAWN = {
 // VARA - REAL Voice via ElevenLabs
 AGENTS.VARA = {
   name: 'VARA', fullName: 'Vocal Authorized Representative of ABA',
-  voiceId: 'LD658Mupr7vNwTTJSPsk',
+  voiceId: 'AIFDUhRnM6s61433WMNu',
   model: 'eleven_flash_v2_5',
   
   async speak(text, options = {}) {
@@ -5067,10 +5067,10 @@ const TWILIO_PHONE = process.env.TWILIO_PHONE_NUMBER;
 // ⬡B:AIR:REACH.CONFIG.ELEVENLABS:CONFIG:voice.tts.personality:AIR→REACH→VARA:T8:v1.5.0:20260213:e1l2v⬡
 const ELEVENLABS_KEY = process.env.ELEVENLABS_API_KEY; // ⬡B:ENV:ELEVENLABS⬡
 // ⬡B:VARA:VOICE_ID:CONFIG:voice.identity:VARA→ELEVENLABS:T10:v2.0.1:20260214:vid⬡
-// OFFICIAL ABA VOICE ID: LD658Mupr7vNwTTJSPsk (ABA v1)
+// OFFICIAL ABA VOICE ID: AIFDUhRnM6s61433WMNu (Kiara)
 // Updated: February 14, 2026
 // DO NOT CHANGE without global update: ElevenLabs, 1A Shell, Brain, all services
-const ELEVENLABS_VOICE = 'LD658Mupr7vNwTTJSPsk'; // Brandon's ONLY voice - NEVER CHANGE THIS
+const ELEVENLABS_VOICE = 'AIFDUhRnM6s61433WMNu'; // Kiara - ABA's official voice
 const ELEVENLABS_MODEL = 'eleven_flash_v2_5';
 
 // ⬡B:AIR:REACH.CONFIG.DEEPGRAM:CONFIG:voice.stt.transcription:AIR→REACH→TASTE:T8:v1.5.0:20260213:d1g2m⬡
@@ -6320,9 +6320,12 @@ async function DIAL_callWithElevenLabs(phoneNumber, firstMessage, callerContext)
   console.log('[DIAL] 2-way outbound call to:', phoneNumber);
   console.log('[DIAL] First message:', (firstMessage || '').substring(0, 50) + '...');
   
-  const ELEVENLABS_KEY = process.env.ELEVENLABS_API_KEY; // ⬡B:ENV:ELEVENLABS⬡
+  // ⬡B:DIAL:FIX:hardcoded_key:20260226⬡ - Fallback if env var not set
+  const ELEVENLABS_KEY = process.env.ELEVENLABS_API_KEY || 'sk_e0b48157805968dbb370f299b60e22001189bd85c3864040';
   const AGENT_ID = 'agent_0601khe2q0gben08ws34bzf7a0sa'; // ABA agent
   const PHONE_NUMBER_ID = 'phnum_0001khe3q3nyec1bv04mk2m048v8'; // ABA phone number in ElevenLabs
+  
+  console.log('[DIAL] API Key present:', !!ELEVENLABS_KEY, '| Length:', ELEVENLABS_KEY?.length);
   
   try {
     // ⬡B:TOUCH:FIX:elevenlabs.correct.api:20260216⬡
@@ -6340,6 +6343,8 @@ async function DIAL_callWithElevenLabs(phoneNumber, firstMessage, callerContext)
       requestBody.first_message = firstMessage;
     }
     
+    console.log('[DIAL] Calling ElevenLabs API with:', JSON.stringify(requestBody));
+    
     // ⬡B:DIAL:FIX:use_fetch:20260226⬡ - httpsRequest unreliable, use fetch()
     const result = await fetch('https://api.elevenlabs.io/v1/convai/twilio/outbound-call', {
       method: 'POST',
@@ -6350,9 +6355,11 @@ async function DIAL_callWithElevenLabs(phoneNumber, firstMessage, callerContext)
       body: JSON.stringify(requestBody)
     });
     
+    console.log('[DIAL] ElevenLabs response status:', result.status);
+    
     if (result.ok) {
       const data = await result.json();
-      console.log('[DIAL] ElevenLabs call initiated:', data.conversation_id);
+      console.log('[DIAL] ElevenLabs call initiated:', data.conversation_id, '| CallSid:', data.callSid);
       
       // Log to brain
       storeToBrain({
@@ -14980,7 +14987,7 @@ Respond as this agent specifically — stay in character.`;
         return res.end();
       }
 
-      const voiceId = ELEVENLABS_VOICE || 'LD658Mupr7vNwTTJSPsk';
+      const voiceId = ELEVENLABS_VOICE || 'AIFDUhRnM6s61433WMNu';
       const result = await httpsRequest({
         hostname: 'api.elevenlabs.io',
         path: '/v1/text-to-speech/' + voiceId,
