@@ -6356,7 +6356,7 @@ async function DIAL_callWithElevenLabs(phoneNumber, firstMessage, callerContext)
       
       // Log to brain
       storeToBrain({
-        content: 'OUTBOUND CALL INITIATED: ' + phoneNumber + ' | Purpose: ' + purpose + ' | ConvID: ' + (data.conversation_id || 'unknown'),
+        content: 'OUTBOUND CALL INITIATED: ' + phoneNumber + ' | Purpose: ' + (firstMessage || 'call') + ' | ConvID: ' + (data.conversation_id || 'unknown'),
         memory_type: 'call_log',
         categories: ['call', 'outbound', 'elevenlabs'],
         importance: 6,
@@ -6369,7 +6369,7 @@ async function DIAL_callWithElevenLabs(phoneNumber, firstMessage, callerContext)
         type: 'outbound_call',
         source: 'dial',
         phone: phoneNumber,
-        purpose: purpose,
+        purpose: firstMessage || 'call',
         conversation_id: data.conversation_id,
         timestamp: new Date().toISOString()
       });
@@ -6382,13 +6382,13 @@ async function DIAL_callWithElevenLabs(phoneNumber, firstMessage, callerContext)
     } else {
       console.log('[DIAL] ElevenLabs API error:', result.status);
       // Fallback to old Twilio TwiML method
-      return await DIAL_callWithTwiML(phoneNumber, purpose);
+      return await DIAL_callWithTwiML(phoneNumber, firstMessage);
     }
     
   } catch (e) {
     console.log('[DIAL] ElevenLabs outbound error:', e.message);
     // Fallback
-    return await DIAL_callWithTwiML(phoneNumber, purpose);
+    return await DIAL_callWithTwiML(phoneNumber, firstMessage);
   }
 }
 
