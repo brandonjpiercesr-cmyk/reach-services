@@ -6052,6 +6052,7 @@ async function IMAN_readEmails(callerIdentity) {
   // TRY ABACIA-SERVICES FIRST (has Nylas connected)
   try {
     console.log('[IMAN] Trying ABACIA-SERVICES for email...');
+    console.log("[DEBUG] IMAN calling ABACIA_IMAN_getInbox");
     const abaciaResult = await ABACIA_IMAN_getInbox({ daysAgo: 7, limit: 10 });
     if (abaciaResult.success && abaciaResult.messages && abaciaResult.messages.length > 0) {
       const emails = abaciaResult.messages;
@@ -9666,6 +9667,7 @@ async function AIR_DISPATCH(lukeAnalysis, judeResult, callerIdentity) {
                       !query.includes('send') && !query.includes('write') && !query.includes('draft');
   
   if (isEmailRead) {
+    console.log("[DEBUG] isEmailRead=true, calling IMAN_readEmails with:", JSON.stringify(callerIdentity));
     console.log('[AIR DISPATCH] ★ PRIORITY: EMAIL READ');
     try {
       const result = await IMAN_readEmails(callerIdentity);
