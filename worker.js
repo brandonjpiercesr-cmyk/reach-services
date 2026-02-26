@@ -13577,15 +13577,8 @@ const httpServer = http.createServer(async (req, res) => {
     }
   }
 
-  // ═══════════════════════════════════════════════════════════════════════
-  // ⬡B:TOUCH:API.SPEECH.INTELLIGENCE:endpoint:20260216⬡
-  // SPEECH INTELLIGENCE API - Analyze audio with full Deepgram features
-  // POST /api/voice/analyze - Analyze audio URL
-  // GET /api/voice/intelligence/:call_id - Get analysis for a call
-  // ═══════════════════════════════════════════════════════════════════════
-  if (path === '/api/voice/analyze' && method === 'POST') {
-
   // ⬡B:TEST:IMAN:direct_test:20260226⬡
+  // Test IMAN email fetch directly
   if (path === '/api/test/iman' && method === 'GET') {
     try {
       console.log('[TEST] Testing IMAN directly...');
@@ -13601,6 +13594,13 @@ const httpServer = http.createServer(async (req, res) => {
     }
   }
 
+  // ═══════════════════════════════════════════════════════════════════════
+  // ⬡B:TOUCH:API.SPEECH.INTELLIGENCE:endpoint:20260216⬡
+  // SPEECH INTELLIGENCE API - Analyze audio with full Deepgram features
+  // POST /api/voice/analyze - Analyze audio URL
+  // GET /api/voice/intelligence/:call_id - Get analysis for a call
+  // ═══════════════════════════════════════════════════════════════════════
+  if (path === '/api/voice/analyze' && method === 'POST') {
     try {
       const body = await parseBody(req);
       const { audio_url, call_id } = body;
