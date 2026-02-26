@@ -12650,7 +12650,7 @@ Generate ONLY the greeting, nothing else:`;
 }
 
 async function HAM_identify(context) {
-  const { caller_number, device_id, ham_id, source } = context;
+  const { caller_number, device_id, ham_id, source, channel } = context;
   
   // ⬡B:HAM:FIX:force_t10_myaba:20260226⬡
   // CRITICAL: MyABA = authenticated = ALWAYS T10
@@ -12661,7 +12661,8 @@ async function HAM_identify(context) {
       trust: 'T10',
       name: context.ham_name || 'Brandon',
       email: context.ham_email || 'brandon@globalmajoritygroup.com',
-      source: 'myaba_forced'
+      source: source,
+      channel: channel || 'chat'
     };
   }
   
@@ -12675,7 +12676,8 @@ async function HAM_identify(context) {
       trust: trust_level,
       name: ham_name,
       email: ham_email,
-      source: 'passed_identity'
+      source: source,
+      channel: channel
     };
   }
   
@@ -12683,7 +12685,7 @@ async function HAM_identify(context) {
   if (ham_id) {
     const trustLevel = ham_id.includes('t10') ? 'T10' : ham_id.includes('t8') ? 'T8' : 'T5';
     console.log('[HAM] Identified by ham_id:', ham_id, '| Trust:', trustLevel);
-    return { id: ham_id, trust: trustLevel, name: ham_id.split('_')[0] };
+    return { id: ham_id, trust: trustLevel, name: ham_id.split('_')[0], source: source, channel: channel };
   }
   
   // Try to identify by phone number from BRAIN
