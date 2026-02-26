@@ -64,6 +64,38 @@ const http = require('http');
 const https = require('https');
 const { WebSocketServer, WebSocket } = require('ws');
 
+// ⬡B:REACH:FIX:fetch_polyfill:20260226⬡
+// Polyfill fetch for Node.js < 18
+const fetch = globalThis.fetch || (async (url, options = {}) => {
+  const https = require('https');
+  const http = require('http');
+  const urlObj = new URL(url);
+  const isHttps = urlObj.protocol === 'https:';
+  const lib = isHttps ? https : http;
+  
+  return new Promise((resolve, reject) => {
+    const req = lib.request(url, {
+      method: options.method || 'GET',
+      headers: options.headers || {}
+    }, (res) => {
+      const chunks = [];
+      res.on('data', chunk => chunks.push(chunk));
+      res.on('end', () => {
+        const body = Buffer.concat(chunks).toString();
+        resolve({
+          ok: res.statusCode >= 200 && res.statusCode < 300,
+          status: res.statusCode,
+          json: async () => JSON.parse(body),
+          text: async () => body
+        });
+      });
+    });
+    req.on('error', reject);
+    if (options.body) req.write(options.body);
+    req.end();
+  });
+});
+
 // ⬡B:AIR:REACH.SERVER.PORT:CONFIG:infrastructure.network.binding:AIR→REACH:T10:v1.5.0:20260213:p0r3t⬡
 const PORT = process.env.PORT || 3000;
 
