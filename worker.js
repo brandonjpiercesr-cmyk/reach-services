@@ -12923,7 +12923,9 @@ async function AIR_text(userMessage, history, context = {}) {
   const judeResult = await JUDE_findAgents(lukeAnalysis);
   
   // TRY AGENT DISPATCH FIRST
+  console.log('[AIR_text] Calling AIR_DISPATCH with lukeAnalysis.raw:', lukeAnalysis?.raw?.substring(0, 50));
   const dispatchResult = await AIR_DISPATCH(lukeAnalysis, judeResult, hamIdentity);
+  console.log('[AIR_text] AIR_DISPATCH returned:', JSON.stringify({handled: dispatchResult?.handled, agent: dispatchResult?.agent, type: dispatchResult?.type}));
   
   let response = null;
   let missionNumber = null;
