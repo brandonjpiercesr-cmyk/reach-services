@@ -13523,6 +13523,34 @@ const httpServer = http.createServer(async (req, res) => {
 
   // ⬡B:TEST:DISPATCH:20260226⬡
   // Test dispatch directly
+
+  // ⬡B:TEST:AIR_TEXT_FULL:20260226⬡
+  if (path === '/api/test/air_text' && method === 'GET') {
+    try {
+      const testQuery = url.searchParams.get('q') || 'check my email';
+      console.log('[TEST] Testing full AIR_text with query:', testQuery);
+      
+      const context = {
+        source: 'myaba',
+        channel: 'test',
+        ham_name: 'Brandon',
+        ham_email: 'brandonjpiercesr@gmail.com',
+        trust_level: 'T10'
+      };
+      
+      const result = await AIR_text(testQuery, [], context);
+      
+      return jsonResponse(res, 200, { 
+        test: 'AIR_TEXT_FULL',
+        query: testQuery,
+        response: result.response?.substring(0, 500),
+        agents: result.agents,
+        type: result.type
+      });
+    } catch (e) {
+      return jsonResponse(res, 500, { error: e.message, stack: e.stack?.substring(0, 500) });
+    }
+  }
   if (path === '/api/test/dispatch' && method === 'GET') {
     try {
       const testQuery = url.searchParams.get('q') || 'check my email';
