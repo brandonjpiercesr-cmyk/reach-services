@@ -12655,13 +12655,47 @@ function JUDE_smartRoute(lukeAnalysis) {
 }
 async function AIR_text(userMessage, history, context = {}) {
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ⬡B:REACH:ABACIA_FIRST:WIRE:text-routing:20260226⬡
+  // THINK TANK DECISION: Call ABACIA brain FIRST for ALL routing
+  // REACH = Dumb hand. ABACIA = Smart brain.
+  // ═══════════════════════════════════════════════════════════════════════════
+  const abaciaResult = await ABACIA_route(userMessage, {
+    channel: context.channel || 'chat',
+    callerName: context.ham_id || context.caller_number,
+    source: context.source || 'api_router'
+  });
+  
+  let abaciaSystemPrompt = null;
+  let abaciaAgents = [];
+  if (abaciaResult && abaciaResult.success) {
+    abaciaSystemPrompt = abaciaResult.systemPrompt || abaciaResult.system_prompt;
+    abaciaAgents = abaciaResult.routing?.respondingAgents || abaciaResult.routing?.agents || [];
+    console.log('[AIR_text] ABACIA brain returned agents:', abaciaAgents.join(', '));
+    console.log('[AIR_text] ABACIA trace:', abaciaResult.trace);
+    
+    // If ABACIA returned a full response, use it directly
+    if (abaciaResult.response) {
+      console.log('[AIR_text] Using ABACIA full response');
+      return {
+        response: abaciaResult.response,
+        agents: abaciaAgents,
+        source: 'ABACIA',
+        trace: abaciaResult.trace
+      };
+    }
+  } else {
+    console.log('[AIR_text] ABACIA brain unavailable, using local routing');
+  }
+  // ═══════════════════════════════════════════════════════════════════════════
+
   // ⬡B:AIR:LAYER0:ALWAYS_ON:v1:20260221⬡ - CORE AGENTS ALWAYS RUN
   const layer0 = { ham: { id: 'brandon_t10', trust: 'T10' }, startTime: Date.now() };
   console.log('[LAYER0] HAM identified:', layer0.ham.id, '| Trust:', layer0.ham.trust);
   // SCRIBE logs automatically via existing console.log capture
 
   const startTime = Date.now();
-  const agents_deployed = [];
+  const agents_deployed = abaciaAgents.length > 0 ? [...abaciaAgents] : [];
   
   // ═══════════════════════════════════════════════════════════════════════════
   // LAYER 0: ALWAYS ON - Run on EVERY request
@@ -12744,26 +12778,72 @@ async function AIR_text(userMessage, history, context = {}) {
     const missionPackage = PACK_assemble(lukeAnalysis, coleResult, judeResult, history || [], null, null);
     missionNumber = missionPackage.missionNumber;
 
-    // PRIMARY: Gemini Flash 2.0
-    if (GEMINI_KEY && !response) {
+    // ⬡B:REACH:ABACIA_PROMPT:WIRE:use-brain-prompt-text:20260226⬡
+    // THINK TANK: Use ABACIA's system prompt if brain returned one
+    if (abaciaSystemPrompt) {
+      console.log('[AIR_text] Using ABACIA brain system prompt');
+      missionPackage.systemPrompt = abaciaSystemPrompt;
+    }
+
+    // PRIMARY: Claude Sonnet 4.6 (NO Gemini per Brandon)
+    if (ANTHROPIC_KEY && !response) {
       try {
         const messages = (history || []).map(h => ({
-          role: h.role === 'assistant' ? 'model' : 'user',
-          parts: [{ text: h.content }]
+          role: h.role,
+          content: h.content
         }));
-        messages.push({ role: 'user', parts: [{ text: userMessage }] });
+        messages.push({ role: 'user', content: userMessage });
         const result = await httpsRequest({
-          hostname: 'generativelanguage.googleapis.com',
-          path: '/v1beta/models/gemini-2.0-flash:generateContent?key=' + GEMINI_KEY,
+          hostname: 'api.anthropic.com',
+          path: '/v1/messages',
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' }
+          headers: { 
+            'Content-Type': 'application/json',
+            'x-api-key': ANTHROPIC_KEY,
+            'anthropic-version': '2023-06-01'
+          }
         }, JSON.stringify({
-          systemInstruction: { parts: [{ text: missionPackage.systemPrompt }] },
-          contents: messages,
-          generationConfig: { maxOutputTokens: 2048, temperature: 0.7 }
+          model: 'claude-sonnet-4-6',
+          max_tokens: 2048,
+          system: missionPackage.systemPrompt,
+          messages: messages
         }));
         const json = JSON.parse(result.data.toString());
-        if (json.candidates?.[0]?.content?.parts?.[0]?.text) {
+        if (json.content?.[0]?.text) {
+          response = json.content[0].text;
+          modelUsed = 'claude-sonnet-4-6';
+          console.log('[AIR_text] Claude Sonnet 4.6 responded');
+        }
+      } catch (e) {
+        console.log('[AIR_text] Claude failed:', e.message);
+      }
+    }
+
+    // FALLBACK: Claude Haiku
+    if (ANTHROPIC_KEY && !response) {
+      try {
+        const messages = (history || []).map(h => ({
+          role: h.role,
+          content: h.content
+        }));
+        messages.push({ role: 'user', content: userMessage });
+        const result = await httpsRequest({
+          hostname: 'api.anthropic.com',
+          path: '/v1/messages',
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'x-api-key': ANTHROPIC_KEY,
+            'anthropic-version': '2023-06-01'
+          }
+        }, JSON.stringify({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 2048,
+          system: missionPackage.systemPrompt,
+          messages: messages
+        }));
+        const json = JSON.parse(result.data.toString());
+        if (json.content?.[0]?.text) {
           response = json.candidates[0].content.parts[0].text;
         }
       } catch (e) { console.log('[AIR] Gemini error: ' + e.message); }
