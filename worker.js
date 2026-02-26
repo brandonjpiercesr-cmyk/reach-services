@@ -19557,12 +19557,24 @@ We Are All ABA.`;
   // ⬡B:DEBUG:IMAN_TEST:20260226⬡
   if (path === "/api/test-iman" && method === "GET") {
     try {
-      const result = await ABACIA_IMAN_getInbox({ daysAgo: 7, limit: 5 });
+      // Test 1: Direct ABACIA call
+      const abaciaResult = await ABACIA_IMAN_getInbox({ daysAgo: 7, limit: 5 });
+      
+      // Test 2: Full IMAN_readEmails with identity
+      const testIdentity = { name: "Brandon", trust: "T10", email: "test@test.com" };
+      const imanResult = await IMAN_readEmails(testIdentity);
+      
       return jsonResponse(res, 200, {
-        success: result.success,
-        messageCount: result.messages?.length || 0,
-        firstSubject: result.messages?.[0]?.subject || "none",
-        raw: result
+        abacia: {
+          success: abaciaResult.success,
+          count: abaciaResult.messages?.length || 0,
+          firstSubject: abaciaResult.messages?.[0]?.subject || "none"
+        },
+        iman: {
+          allowed: imanResult?.allowed,
+          summary: imanResult?.summary,
+          count: imanResult?.count
+        }
       });
     } catch (e) {
       return jsonResponse(res, 500, { error: e.message, stack: e.stack });
