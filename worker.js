@@ -12858,8 +12858,9 @@ async function AIR_text(userMessage, history, context = {}) {
   
   // TRY AGENT DISPATCH FIRST
   console.log('[AIR_text] Calling AIR_DISPATCH with lukeAnalysis.raw:', lukeAnalysis?.raw?.substring(0, 50));
+  console.log('[AIR_text] hamIdentity before dispatch:', JSON.stringify(hamIdentity));
   const dispatchResult = await AIR_DISPATCH(lukeAnalysis, judeResult, hamIdentity);
-  console.log('[AIR_text] AIR_DISPATCH returned:', JSON.stringify({handled: dispatchResult?.handled, agent: dispatchResult?.agent, type: dispatchResult?.type}));
+  console.log('[AIR_text] AIR_DISPATCH returned:', JSON.stringify({handled: dispatchResult?.handled, agent: dispatchResult?.agent, type: dispatchResult?.type, dataPreview: dispatchResult?.data?.substring?.(0, 100)}));
   
   let response = null;
   let missionNumber = null;
