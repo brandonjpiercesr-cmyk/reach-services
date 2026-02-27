@@ -15037,6 +15037,57 @@ Respond as this agent specifically — stay in character.`;
         agentHints: agentHints || []
       });
 
+      // ⬡B:STATS:LOGGING:v1.0:20260227⬡
+      // Log prompt cache and compression stats
+      try {
+        const usage = result.usage || {};
+        if (usage.cache_read_input_tokens || usage.cache_creation_input_tokens) {
+          // Log cache stats
+          await fetch(SUPABASE_URL + '/rest/v1/prompt_cache_stats', {
+            method: 'POST',
+            headers: {
+              'apikey': SUPABASE_ANON,
+              'Authorization': 'Bearer ' + SUPABASE_ANON,
+              'Content-Type': 'application/json',
+              'Prefer': 'return=minimal'
+            },
+            body: JSON.stringify({
+              request_id: result.requestId || Date.now().toString(),
+              model: result.model || 'claude-sonnet-4-20250514',
+              cache_creation_input_tokens: usage.cache_creation_input_tokens || 0,
+              cache_read_input_tokens: usage.cache_read_input_tokens || 0,
+              input_tokens: usage.input_tokens || 0,
+              output_tokens: usage.output_tokens || 0
+            })
+          });
+          console.log('[CACHE STATS] Hit rate:', 
+            Math.round((usage.cache_read_input_tokens || 0) / ((usage.cache_read_input_tokens || 0) + (usage.input_tokens || 1)) * 100) + '%'
+          );
+        }
+        
+        if (result.compression) {
+          // Log compression stats
+          await fetch(SUPABASE_URL + '/rest/v1/compression_stats', {
+            method: 'POST',
+            headers: {
+              'apikey': SUPABASE_ANON,
+              'Authorization': 'Bearer ' + SUPABASE_ANON,
+              'Content-Type': 'application/json',
+              'Prefer': 'return=minimal'
+            },
+            body: JSON.stringify({
+              conversation_id: conversationId,
+              original_tokens: result.compression.original || 0,
+              compressed_tokens: result.compression.compressed || 0,
+              tier: result.compression.tier || 'none'
+            })
+          });
+          console.log('[COMPRESSION] Ratio:', result.compression.ratio || '0%');
+        }
+      } catch (statsErr) {
+        console.log('[STATS] Logging error (non-fatal):', statsErr.message);
+      }
+
       return jsonResponse(res, 200, {
         success: true,
         response: result.response,
