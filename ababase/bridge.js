@@ -138,7 +138,7 @@ function createSupabaseClient(url, key) {
 async function processWithAbabse(request) {
   const {
     message,
-    userId = BRANDON_USER_ID,
+    userId,
     conversationId,
     channel = 'api',
     agentHints = []
@@ -153,13 +153,24 @@ async function processWithAbabse(request) {
     };
   }
 
-  console.log('[ABABASE] Processing:', { message: message.substring(0, 50), userId, channel });
+  // ⬡B:ABABASE:USER_MAPPING:FIX:20260227⬡
+  // For now, map all users to Brandon's Supabase ID
+  // MyABA sends Firebase UID but ababase needs Supabase UUID
+  // TODO: Add user_mappings table to map Firebase UID → Supabase UUID
+  const effectiveUserId = BRANDON_USER_ID;
+  
+  console.log('[ABABASE] Processing:', { 
+    message: message.substring(0, 50), 
+    requestedUserId: userId,
+    effectiveUserId,
+    channel 
+  });
 
   // Create Supabase client
   const supabase = createSupabaseClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
   // Build context assembler
-  const assembler = new ContextAssembler(supabase, userId);
+  const assembler = new ContextAssembler(supabase, effectiveUserId);
 
   // Detect which agents are needed based on message
   const detectedAgents = detectAgentsFromMessage(message, agentHints);
@@ -181,7 +192,7 @@ async function processWithAbabse(request) {
   // Call AIR core processor
   const result = await airProcess({
     supabaseClient: supabase,
-    userId,
+    userId: effectiveUserId,
     conversationId,
     message,
     channel: channel || 'api'
