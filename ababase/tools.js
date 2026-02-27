@@ -668,50 +668,6 @@ async function executeToolCall(toolName, input, context) {
         return { error: e.message, status: 'error' };
       }
     }
-        
-        console.log('[search_brain v2] Indexed query:', url.substring(0, 150));
-        
-        const response = await fetch(url, {
-          headers: {
-            'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0bHhqa2Jyc3Rwd3d0enNieXZiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA1MzI4MjEsImV4cCI6MjA4NjEwODgyMX0.MOgNYkezWpgxTO3ZHd0omZ0WLJOOR-tL7hONXWG9eBw',
-            'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0bHhqa2Jyc3Rwd3d0enNieXZiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA1MzI4MjEsImV4cCI6MjA4NjEwODgyMX0.MOgNYkezWpgxTO3ZHd0omZ0WLJOOR-tL7hONXWG9eBw'
-          }
-        });
-        
-        if (!response.ok) {
-          const errText = await response.text();
-          console.error('[search_brain] Error:', errText);
-          return { error: 'Brain search failed', status: 'error' };
-        }
-        
-        const results = await response.json();
-        
-        if (!results || results.length === 0) {
-          return {
-            status: 'no_results',
-            message: `No brain records found matching "${query}"` + (memoryType ? ` with type ${memoryType}` : ''),
-            results: []
-          };
-        }
-        
-        const formatted = results.map(r => ({
-          source: r.source,
-          type: r.memory_type,
-          importance: r.importance,
-          content: typeof r.content === 'string' ? r.content.substring(0, 500) : JSON.stringify(r.content).substring(0, 500),
-          created: r.created_at
-        }));
-        
-        return {
-          status: 'success',
-          count: formatted.length,
-          results: formatted
-        };
-      } catch (e) {
-        console.error('[search_brain] Error:', e.message);
-        return { error: e.message, status: 'error' };
-      }
-    }
     
     default:
       return {
