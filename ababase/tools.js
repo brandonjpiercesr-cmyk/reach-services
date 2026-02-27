@@ -414,31 +414,40 @@ async function executeToolCall(toolName, input, context) {
     }
     
     case 'search_brain': {
-      // ⬡B:ABABASE:BRAIN_SEARCH:v1.0:20260227⬡
-      // Search aba_memory for stored information
+      // ⬡B:ABABASE:BRAIN_SEARCH:v2.0:INDEXED:20260227⬡
+      // Search aba_memory using INDEXED fields only
+      // NEVER ilike on content (full table scan on 238K rows = timeout)
       try {
-        const query = (input.query || '').replace(/['"]/g, ''); // Sanitize quotes only
+        const query = (input.query || '').replace(/['"]/g, '');
         const memoryType = input.memory_type;
         const limit = input.limit || 10;
         
-        // Build the query URL - don't encode the query itself, Supabase handles it
         let url = `https://htlxjkbrstpwwtzsbyvb.supabase.co/rest/v1/aba_memory?select=source,memory_type,content,importance,created_at`;
-        url += `&or=(source.ilike.*${query}*,content.ilike.*${query}*)`;
+        
+        // memory_type filter (exact match, uses index)
         if (memoryType) {
           url += `&memory_type=eq.${memoryType}`;
         }
+        
+        // source ILIKE (uses GIN trigram index after SQL runs)
+        if (query) {
+          url += `&source=ilike.*${query}*`;
+        }
+        
         url += `&order=importance.desc,created_at.desc&limit=${limit}`;
         
-        console.log('[search_brain] Query URL:', url.substring(0, 200));
+        console.log('[search_brain v2] Indexed query:', url.substring(0, 150));
         
         const response = await fetch(url, {
           headers: {
-            'apikey': process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0bHhqa2Jyc3Rwd3d0enNieXZiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA1MzI4MjEsImV4cCI6MjA4NjEwODgyMX0.MOgNYkezWpgxTO3ZHd0omZ0WLJOOR-tL7hONXWG9eBw',
-            'Authorization': 'Bearer ' + (process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0bHhqa2Jyc3Rwd3d0enNieXZiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA1MzI4MjEsImV4cCI6MjA4NjEwODgyMX0.MOgNYkezWpgxTO3ZHd0omZ0WLJOOR-tL7hONXWG9eBw')
+            'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0bHhqa2Jyc3Rwd3d0enNieXZiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA1MzI4MjEsImV4cCI6MjA4NjEwODgyMX0.MOgNYkezWpgxTO3ZHd0omZ0WLJOOR-tL7hONXWG9eBw',
+            'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0bHhqa2Jyc3Rwd3d0enNieXZiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA1MzI4MjEsImV4cCI6MjA4NjEwODgyMX0.MOgNYkezWpgxTO3ZHd0omZ0WLJOOR-tL7hONXWG9eBw'
           }
         });
         
         if (!response.ok) {
+          const errText = await response.text();
+          console.error('[search_brain] Error:', errText);
           return { error: 'Brain search failed', status: 'error' };
         }
         
@@ -447,12 +456,11 @@ async function executeToolCall(toolName, input, context) {
         if (!results || results.length === 0) {
           return {
             status: 'no_results',
-            message: `No brain records found matching "${query}"`,
+            message: `No brain records found matching "${query}"` + (memoryType ? ` with type ${memoryType}` : ''),
             results: []
           };
         }
         
-        // Format results
         const formatted = results.map(r => ({
           source: r.source,
           type: r.memory_type,
