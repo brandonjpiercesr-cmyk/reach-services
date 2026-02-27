@@ -265,40 +265,46 @@ async function executeToolCall(toolName, input, context) {
     }
     
     case 'dial_phone': {
-      // ElevenLabs outbound call
+      // ElevenLabs outbound call via Twilio integration
       const elevenLabsApiKey = process.env.ELEVENLABS_API_KEY;
-      const agentId = process.env.ELEVENLABS_AGENT_ID;
+      // These are hardcoded agent configs from REACH
+      const AGENT_ID = 'agent_0601khe2q0gben08ws34bzf7a0sa';
+      const PHONE_NUMBER_ID = 'phnum_0001khe3q3nyec1bv04mk2m048v8';
       
-      if (!elevenLabsApiKey || !agentId) {
+      if (!elevenLabsApiKey) {
         return { error: 'ElevenLabs integration not configured', status: 'failed' };
       }
       
       try {
-        const response = await fetch('https://api.elevenlabs.io/v1/convai/conversations', {
+        const requestBody = {
+          agent_id: AGENT_ID,
+          agent_phone_number_id: PHONE_NUMBER_ID,
+          to_number: input.phone_number
+        };
+        
+        if (input.first_message) {
+          requestBody.first_message = input.first_message;
+        }
+        
+        const response = await fetch('https://api.elevenlabs.io/v1/convai/twilio/outbound-call', {
           method: 'POST',
           headers: {
             'xi-api-key': elevenLabsApiKey,
             'Content-Type': 'application/json'
           },
-          body: JSON.stringify({
-            agent_id: agentId,
-            phone_number: input.phone_number,
-            first_message: input.first_message,
-            custom_llm_extra_body: {
-              context: input.context
-            }
-          })
+          body: JSON.stringify(requestBody)
         });
         
         const result = await response.json();
         
         if (!response.ok) {
-          return { error: result.message || 'Failed to initiate call', status: 'failed' };
+          return { error: result.message || result.detail || 'Failed to initiate call', status: 'failed' };
         }
         
         return {
           status: 'success',
           conversation_id: result.conversation_id,
+          call_sid: result.callSid,
           confirmation: `Call initiated to ${input.phone_number}`
         };
       } catch (err) {
@@ -310,7 +316,7 @@ async function executeToolCall(toolName, input, context) {
       // Twilio SMS
       const twilioAccountSid = process.env.TWILIO_ACCOUNT_SID;
       const twilioAuthToken = process.env.TWILIO_AUTH_TOKEN;
-      const twilioFromNumber = process.env.TWILIO_FROM_NUMBER;
+      const twilioFromNumber = process.env.TWILIO_PHONE_NUMBER || process.env.TWILIO_FROM_NUMBER;
       
       if (!twilioAccountSid || !twilioAuthToken || !twilioFromNumber) {
         return { error: 'Twilio integration not configured', status: 'failed' };
