@@ -64,6 +64,16 @@ const http = require('http');
 const https = require('https');
 const { WebSocketServer, WebSocket } = require('ws');
 
+// ⬡B:ABABASE:BRIDGE:IMPORT:v1.0.0:20260227⬡
+// ABABASE integration - fat context + exact contact matching
+let ababase = null;
+try {
+  ababase = require('./ababase/bridge');
+  console.log('[ABABASE] Bridge loaded successfully, version:', ababase.VERSION);
+} catch (e) {
+  console.log('[ABABASE] Bridge not loaded (optional):', e.message);
+}
+
 // ⬡B:REACH:FIX:fetch_polyfill:20260226⬡
 // Polyfill fetch for Node.js < 18
 const fetch = globalThis.fetch || (async (url, options = {}) => {
@@ -14820,6 +14830,105 @@ Respond as this agent specifically — stay in character.`;
       });
     } catch (e) {
       console.error('[ROUTER] Error:', e.message);
+      return jsonResponse(res, 500, { error: e.message });
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // ⬡B:ABABASE:AIR.V2:PROCESS:v1.0.0:20260227⬡
+  // /api/air/v2/process - ABABASE AIR with fat context injection
+  // This is the new architecture with:
+  // - Exact contact matching (no semantic search confusion)
+  // - HAM (Human ABA Master) context injection
+  // - Single-threaded agentic loop
+  // - Prompt caching for cost reduction
+  // ═══════════════════════════════════════════════════════════════════════
+  if (path === '/api/air/v2/process' && method === 'POST') {
+    if (!ababase) {
+      return jsonResponse(res, 503, { 
+        error: 'ABABASE not loaded', 
+        hint: 'Ensure ababase/bridge.js exists and all dependencies installed'
+      });
+    }
+
+    try {
+      const body = await parseBody(req);
+      const { message, userId, conversationId, channel, agentHints } = body;
+      
+      if (!message) {
+        return jsonResponse(res, 400, { error: 'message required' });
+      }
+
+      console.log('[ABABASE] /api/air/v2/process called:', {
+        message: message.substring(0, 50) + '...',
+        channel: channel || 'api'
+      });
+
+      const result = await ababase.processWithAbabse({
+        message,
+        userId,
+        conversationId,
+        channel: channel || 'api',
+        agentHints: agentHints || []
+      });
+
+      return jsonResponse(res, 200, {
+        success: true,
+        response: result.response,
+        actions: result.actions || [],
+        metadata: {
+          model: result.model,
+          tokensUsed: result.tokensUsed,
+          cost: result.cost,
+          agentsInvoked: result.agentsInvoked,
+          toolsExecuted: result.toolsExecuted
+        }
+      });
+
+    } catch (e) {
+      console.error('[ABABASE] Process error:', e.message);
+      return jsonResponse(res, 500, { 
+        error: e.message,
+        stack: process.env.NODE_ENV === 'development' ? e.stack : undefined
+      });
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // ⬡B:ABABASE:CONTACT.LOOKUP:v1.0.0:20260227⬡
+  // /api/air/v2/contact - Direct contact lookup (exact match, no semantic)
+  // Fixes the BJ/Brandon bug permanently
+  // ═══════════════════════════════════════════════════════════════════════
+  if (path === '/api/air/v2/contact' && method === 'POST') {
+    if (!ababase) {
+      return jsonResponse(res, 503, { error: 'ABABASE not loaded' });
+    }
+
+    try {
+      const body = await parseBody(req);
+      const { name, userId } = body;
+      
+      if (!name) {
+        return jsonResponse(res, 400, { error: 'name required' });
+      }
+
+      const contact = await ababase.lookupContact(name, userId);
+      
+      if (!contact) {
+        return jsonResponse(res, 404, { 
+          error: 'Contact not found',
+          name: name,
+          hint: 'Use exact name match (e.g., "Brandon" not "Brandon Pierce")'
+        });
+      }
+
+      return jsonResponse(res, 200, {
+        success: true,
+        contact: contact
+      });
+
+    } catch (e) {
+      console.error('[ABABASE] Contact lookup error:', e.message);
       return jsonResponse(res, 500, { error: e.message });
     }
   }
