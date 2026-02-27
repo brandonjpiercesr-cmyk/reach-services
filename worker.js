@@ -14415,6 +14415,53 @@ Phone: (336) 389-8116</p>
           }
         }
 
+        // ── SHARE CONVERSATION ────────────────────────────────────
+        // Save to chat_shares table, match recipients on signup
+        if (body.type === 'share_conversation') {
+          try {
+            const { conversationId, emails, permission } = body.context || body;
+            const sharedBy = body.userId || body.ham_id || 'unknown';
+            
+            if (!conversationId || !emails || emails.length === 0) {
+              return jsonResponse(res, 400, { error: 'Missing conversationId or emails' });
+            }
+            
+            // Insert each recipient
+            const inserts = emails.map(email => ({
+              chat_id: conversationId,
+              shared_by_user_id: sharedBy,
+              recipient_email: email.toLowerCase().trim(),
+              permission: permission || 'view'
+            }));
+            
+            const insertRes = await fetch(
+              `${SUPABASE_URL}/rest/v1/chat_shares`,
+              {
+                method: 'POST',
+                headers: {
+                  'apikey': SUPABASE_ANON,
+                  'Authorization': 'Bearer ' + SUPABASE_ANON,
+                  'Content-Type': 'application/json',
+                  'Prefer': 'return=minimal'
+                },
+                body: JSON.stringify(inserts)
+              }
+            );
+            
+            if (insertRes.ok) {
+              console.log('[SHARE] Shared', conversationId, 'with', emails.length, 'recipients');
+              return jsonResponse(res, 200, { success: true, shared: emails.length });
+            } else {
+              const errText = await insertRes.text();
+              console.error('[SHARE] Insert failed:', errText);
+              return jsonResponse(res, 500, { error: 'Failed to save share' });
+            }
+          } catch (err) {
+            console.error('[SHARE] Error:', err.message);
+            return jsonResponse(res, 500, { error: err.message });
+          }
+        }
+
         // ── DAWN GREETING (JARVIS-style) ────────────────────────
         // v2.0.0: Rich contextual greeting with proactive info
         if (body.type === 'dawn_greeting') {
@@ -14667,6 +14714,61 @@ Phone: (336) 389-8116</p>
             return jsonResponse(res, 200, { success: true, conversationId });
           } catch (err) {
             console.error('[ARCHIVE_CONVERSATION] Error:', err.message);
+            return jsonResponse(res, 500, { error: err.message });
+          }
+        }
+
+        // ── SHARE CHAT ─────────────────────────────────────────────
+        // v2.1.0: Share chat by email - recipients matched on signup
+        if (body.type === 'share_chat') {
+          try {
+            const { conversationId, recipientEmails, permission } = body.context || body;
+            const userId = body.userId || 'anonymous';
+            
+            if (!conversationId || !recipientEmails || !recipientEmails.length) {
+              return jsonResponse(res, 400, { error: 'conversationId and recipientEmails required' });
+            }
+            
+            // Store share records in aba_memory (will migrate to chat_shares table later)
+            const shares = recipientEmails.map(email => ({
+              source: `chat_share.${conversationId}.${email.replace(/[^a-z0-9]/gi, '_')}`,
+              memory_type: 'chat_share',
+              content: JSON.stringify({
+                chat_id: conversationId,
+                shared_by: userId,
+                recipient_email: email.toLowerCase().trim(),
+                permission: permission || 'view',
+                shared_at: new Date().toISOString()
+              }),
+              importance: 5,
+              tags: ['chat_share', 'pending']
+            }));
+            
+            for (const share of shares) {
+              await fetch(
+                'https://htlxjkbrstpwwtzsbyvb.supabase.co/rest/v1/aba_memory',
+                {
+                  method: 'POST',
+                  headers: {
+                    'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY,
+                    'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+                    'Content-Type': 'application/json',
+                    'Prefer': 'return=minimal'
+                  },
+                  body: JSON.stringify(share)
+                }
+              );
+            }
+            
+            console.log('[SHARE_CHAT] Shared', conversationId, 'with', recipientEmails.length, 'people');
+            return jsonResponse(res, 200, { 
+              success: true, 
+              conversationId, 
+              sharedWith: recipientEmails,
+              message: `Shared with ${recipientEmails.length} ${recipientEmails.length === 1 ? 'person' : 'people'}`
+            });
+          } catch (err) {
+            console.error('[SHARE_CHAT] Error:', err.message);
             return jsonResponse(res, 500, { error: err.message });
           }
         }
