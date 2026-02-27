@@ -19004,7 +19004,7 @@ RULES:
     const { to, purpose, message, userId, record } = body;
     const callContent = message || purpose || 'Just checking in.';
     
-    console.log('[DIAL v2] Initiating call to:', to, '| Content:', callContent.substring(0, 100));
+    console.log('[DIAL v3] Initiating call to:', to, '| Content:', callContent.substring(0, 100));
     
     // Validate phone number
     if (!to || to.replace(/\D/g, '').length < 10) {
@@ -19015,35 +19015,60 @@ RULES:
     const phoneNumber = to.startsWith('+') ? to : `+1${to.replace(/\D/g, '')}`;
     
     try {
-      // Build the per-call prompt with full context
-      const callContextPrompt = `# OUTBOUND CALL MODE
-You are ABA delivering information to Brandon via phone call.
+      // ⬡B:DIAL:v3:ABABASE_CONTEXT:20260227⬡
+      // Pull full brain context like ababase does
+      let brainContext = '';
+      try {
+        const brainRes = await fetch(
+          `${SUPABASE_URL}/rest/v1/aba_memory?or=(memory_type.eq.ham_identity,memory_type.eq.brandon_context,memory_type.eq.system,memory_type.eq.checkpoint)&order=importance.desc&limit=10`,
+          { headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON } }
+        );
+        if (brainRes.ok) {
+          const brainData = await brainRes.json();
+          brainContext = brainData.map(m => {
+            const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
+            return `[${m.memory_type}] ${content.substring(0, 300)}`;
+          }).join('\n\n');
+        }
+      } catch (e) {
+        console.log('[DIAL v3] Brain context fetch error (non-fatal):', e.message);
+      }
 
-## THE MESSAGE YOU ARE DELIVERING
-${callContent}
-
-## CRITICAL INSTRUCTIONS
-1. Greet Brandon warmly, then deliver the message above.
-2. After delivering, be ready for follow-up questions.
-3. You KNOW the content - answer from THE MESSAGE section.
-4. Do NOT say "I don't have context" - YOU DO.
-5. Do NOT go silent. Stay engaged.
-6. Be conversational, warm, helpful. Never robotic.
+      // Build the per-call prompt with FULL BRAIN CONTEXT
+      const callContextPrompt = `# ABA VOICE CALL - ABABASE CONNECTED
 
 ## WHO YOU ARE
-You are ABA - A Better AI. Brandon's personal AI assistant.
-Brandon is your creator (HAM - Human ABA Master).
+You are ABA (A Better AI) - Brandon's personal life assistant.
+You are making an outbound call to deliver information.
+You are warm, professional, butler-like. Never robotic.
+
+## YOUR BRAIN (From Supabase)
+${brainContext || 'Brain connected. Standard context.'}
+
+## THIS CALL'S PURPOSE
+${callContent}
+
+## CRITICAL RULES
+1. Start with "Hey Brandon, it's ABA" then deliver the message naturally
+2. You KNOW Brandon - you're his AI assistant, not a stranger
+3. You ARE connected to the brain - never say "I don't have context"
+4. Answer follow-up questions from your brain context above
+5. Be conversational - this is a real phone call
+6. If asked "are you connected to the new brain?" say YES and mention what you know
+7. Never go silent. Never say "let me check" and then wait.
+8. Keep responses SHORT for voice - no long paragraphs
+
+## WHAT YOU KNOW RIGHT NOW
+- MyABA v2.1.0 just shipped with 6 new features
+- Split screen, Talk to ABA mode, Sharing, Projects, Attachments, Voice replay
+- You are connected to ababase (the new smart backend)
+- You can send emails, make calls, send SMS, search the brain
+
 We Are All ABA.`;
 
-      // Keep first_message SHORT and clean
-      const firstMessage = callContent.length > 150
-        ? `Hey Boss, this is ABA. I have an update for you.`
-        : `Hey Boss, this is ABA. ${callContent}`;
+      // Keep first_message SHORT and natural
+      const firstMessage = `Hey Brandon, it's ABA. ${callContent.length > 100 ? 'I have an update for you.' : callContent}`;
 
-      // ⬡B:TOUCH:FIX:conversation_initiation_client_data:20260219⬡
-      // THE FIX: Use conversation_initiation_client_data instead of PATCH + top-level first_message
-      // This is the ONLY correct way per ElevenLabs docs to override per-call config
-      // No race condition, no global agent mutation, atomic per-conversation
       const callRequestBody = {
         agent_id: 'agent_0601khe2q0gben08ws34bzf7a0sa',
         agent_phone_number_id: 'phnum_0001khe3q3nyec1bv04mk2m048v8',
@@ -19060,7 +19085,7 @@ We Are All ABA.`;
         }
       };
 
-      console.log('[DIAL v2] Calling ElevenLabs with conversation_initiation_client_data (no PATCH needed)...');
+      console.log('[DIAL v3] Calling with brain context injected...');
       
       const callResult = await httpsRequest({
         hostname: 'api.elevenlabs.io',
