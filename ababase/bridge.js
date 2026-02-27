@@ -144,7 +144,16 @@ async function processWithAbabse(request) {
     agentHints = []
   } = request;
 
-  console.log('[ABABASE] Processing:', { message: message?.substring(0, 50), userId, channel });
+  // Validate message exists
+  if (!message || typeof message !== 'string') {
+    return {
+      success: false,
+      error: 'Message is required and must be a string',
+      response: null
+    };
+  }
+
+  console.log('[ABABASE] Processing:', { message: message.substring(0, 50), userId, channel });
 
   // Create Supabase client
   const supabase = createSupabaseClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
@@ -171,11 +180,11 @@ async function processWithAbabse(request) {
 
   // Call AIR core processor
   const result = await airProcess({
-    supabase,
+    supabaseClient: supabase,
     userId,
     conversationId,
-    context,
-    anthropicKey: ANTHROPIC_API_KEY
+    message,
+    channel: channel || 'api'
   });
 
   return result;
