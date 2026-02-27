@@ -16760,7 +16760,7 @@ if (path === '/api/sms/send' && method === 'POST') {
     return jsonResponse(res, 200, { status: "no_transcript", callId });
   }
 
-  if (path === '/api/elevenlabs/webhook', '/api/elevenlabs/llm' && method === 'POST') {
+  if ((path === '/api/elevenlabs/webhook' || path === '/api/elevenlabs/llm') && method === 'POST') {
     try {
       const body = await parseBody(req);
       
