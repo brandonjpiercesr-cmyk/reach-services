@@ -14905,23 +14905,48 @@ Respond as this agent specifically — stay in character.`;
         }
       }
       
-      // Default: route through AIR_text (LUKE/COLE/JUDE/PACK)
-      console.log('[ROUTER] Routing message through AIR: "' + message.substring(0, 80) + '"');
+      // Default: route through ABABASE (replaces old AIR_text)
+      // ⬡B:ROUTER:ABABASE_REDIRECT:v3.0:20260227⬡
+      console.log('[ROUTER v3] Routing through ABABASE: "' + message.substring(0, 80) + '"');
       
-      // ⬡B:REACH:HAM_IDENTITY:FIX:pass_full_identity:20260226⬡
-      // Pass full HAM identity from MyABA for proper authentication
-      const hamContext = {
-        source: body.source || "api",
-        channel: body.channel || "chat",
-        caller_number: body.caller_number,
-        ham_id: body.ham_id || body.userId,
-        ham_name: body.ham_name || body.context?.userName || 'Brandon',
-        ham_email: body.ham_email || body.context?.userEmail,
-        trust_level: body.trust_level || (body.source === 'myaba' ? 'T10' : 'T5')  // MyABA = authenticated = T10
-      };
-      console.log('[ROUTER] HAM identity:', hamContext.ham_name, '| Trust:', hamContext.trust_level);
-      
-      let result = await AIR_text(message, history || [], hamContext);
+      // Use ababase if available, fallback to AIR_text
+      let result;
+      if (ababase) {
+        try {
+          result = await ababase.processWithAbabse({
+            message: message,
+            userId: body.userId || body.ham_id || 'brandon',
+            conversationId: body.conversationId,
+            channel: body.channel || body.source || 'router',
+            agentHints: []
+          });
+          console.log('[ROUTER v3] ABABASE success');
+        } catch (e) {
+          console.log('[ROUTER v3] ABABASE error, falling back to AIR_text:', e.message);
+          const hamContext = {
+            source: body.source || "api",
+            channel: body.channel || "chat",
+            caller_number: body.caller_number,
+            ham_id: body.ham_id || body.userId,
+            ham_name: body.ham_name || body.context?.userName || 'Brandon',
+            ham_email: body.ham_email || body.context?.userEmail,
+            trust_level: body.trust_level || 'T10'
+          };
+          result = await AIR_text(message, history || [], hamContext);
+        }
+      } else {
+        // Fallback if ababase not loaded
+        const hamContext = {
+          source: body.source || "api",
+          channel: body.channel || "chat",
+          caller_number: body.caller_number,
+          ham_id: body.ham_id || body.userId,
+          ham_name: body.ham_name || body.context?.userName || 'Brandon',
+          ham_email: body.ham_email || body.context?.userEmail,
+          trust_level: body.trust_level || 'T10'
+        };
+        result = await AIR_text(message, history || [], hamContext);
+      }
       
       // ⬡B:AIR:VALIDATOR:CHECK:response.quality:v1.0.0:20260222⬡
       // Validate response before sending - reject garbage
@@ -19814,10 +19839,18 @@ We Are All ABA.`;
   // ═══════════════════════════════════════════════════════════════════════════════
   
   // GET /api/sage/search - Search brain via SAGE
-  if (path === '/api/sage/search' && method === 'GET') {
-    const query = url.searchParams.get('q') || '';
-    const forceWeb = url.searchParams.get('forceWeb') === 'true';
-    const includeWeb = url.searchParams.get('includeWeb') === 'true';
+  if ((path === '/api/sage/search' && method === 'GET') || (path === '/api/sage/search' && method === 'POST')) {
+    let query, forceWeb, includeWeb;
+    if (method === 'POST') {
+      const body = await parseBody(req);
+      query = body.query || body.q || '';
+      forceWeb = body.forceWeb === true;
+      includeWeb = body.includeWeb === true;
+    } else {
+      query = url.searchParams.get('q') || '';
+      forceWeb = url.searchParams.get('forceWeb') === 'true';
+      includeWeb = url.searchParams.get('includeWeb') === 'true';
+    }
     console.log('[SAGE] API search:', query, '| forceWeb:', forceWeb, '| includeWeb:', includeWeb);
     const results = await SAGE_search(query, { forceWeb, includeWeb });
     
