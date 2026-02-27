@@ -4267,23 +4267,48 @@ async function getCurrentHAMName(callerIdentity) {
 }
 
 // Lookup contact by name (fuzzy matching) - DYNAMIC from brain
+// ⬡B:REACH:CONTACT_LOOKUP:EXACT_MATCH:v2.0:20260227⬡
+// EXACT CONTACT MATCHING - Fixes BJ/Brandon confusion
 async function lookupContact(nameInput) {
   if (!nameInput) return null;
   const name = nameInput.toLowerCase().trim();
-  const contacts = await loadHAMContacts();
   
-  // Direct match
-  if (contacts[name]) return contacts[name];
-  
-  // Fuzzy matches
-  for (const [key, contact] of Object.entries(contacts)) {
-    const fullNameLower = (contact.fullName || '').toLowerCase();
-    const nameLower = (contact.name || '').toLowerCase();
-    if (fullNameLower.includes(name) || nameLower.includes(name) || name.includes(key)) {
-      return contact;
+  // STEP 1: Check ababase contacts table (exact match)
+  try {
+    const exactUrl = SUPABASE_URL + '/rest/v1/contacts?or=(name_normalized.eq.' + 
+      encodeURIComponent(name) + ',nickname.eq.' + encodeURIComponent(name) + ')&limit=1';
+    const exactRes = await fetch(exactUrl, {
+      headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON }
+    });
+    if (exactRes.ok) {
+      const exactData = await exactRes.json();
+      if (exactData && exactData.length > 0) {
+        const c = exactData[0];
+        console.log('[CONTACT] Exact match found:', c.name);
+        return {
+          phone: c.phone_primary,
+          name: c.name,
+          fullName: c.name,
+          email: c.email_primary,
+          trust: 'T' + (c.trust_level || 5),
+          role: c.relationship || 'contact'
+        };
+      }
     }
+  } catch (e) {
+    console.log('[CONTACT] Exact match error:', e.message);
   }
   
+  // STEP 2: Fall back to HAM_CONTACTS_CACHE (direct key match only)
+  const contacts = await loadHAMContacts();
+  if (contacts[name]) {
+    console.log('[CONTACT] HAM cache direct match:', name);
+    return contacts[name];
+  }
+  
+  // STEP 3: NO FUZZY MATCHING - prevents BJ/Brandon confusion
+  // If no exact match, return null
+  console.log('[CONTACT] No exact match for:', name);
   return null;
 }
 
@@ -15696,7 +15721,8 @@ Respond as this agent specifically — stay in character.`;
           
           // ⬡B:TOUCH:PHASE3:SPURT3.0:use.master.contacts:20260216⬡
           // Use centralized MASTER_CONTACTS with timezone support
-          const contact = lookupContact(person);
+          // ⬡B:FIX:await_lookupContact:20260227⬡
+          const contact = await lookupContact(person);
           if (contact) {
             targetPhone = contact.phone;
             targetName = contact.name;
@@ -16516,7 +16542,8 @@ if (path === '/api/sms/send' && method === 'POST') {
       console.log('[SMS RECEIVE] Parsed - From:', from, '| Body:', smsBody.substring(0, 50));
       
       // Look up who texted
-      const sender = lookupContact(from) || { name: from, phone: from };
+      // ⬡B:FIX:await_lookupContact:20260227⬡
+      const sender = (await lookupContact(from)) || { name: from, phone: from };
       
       // Store to brain
       await storeToBrain({
