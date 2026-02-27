@@ -417,17 +417,19 @@ async function executeToolCall(toolName, input, context) {
       // ⬡B:ABABASE:BRAIN_SEARCH:v1.0:20260227⬡
       // Search aba_memory for stored information
       try {
-        const query = input.query || '';
+        const query = (input.query || '').replace(/['"]/g, ''); // Sanitize quotes only
         const memoryType = input.memory_type;
         const limit = input.limit || 10;
         
-        // Build the query URL
+        // Build the query URL - don't encode the query itself, Supabase handles it
         let url = `https://htlxjkbrstpwwtzsbyvb.supabase.co/rest/v1/aba_memory?select=source,memory_type,content,importance,created_at`;
-        url += `&or=(content.ilike.*${encodeURIComponent(query)}*,source.ilike.*${encodeURIComponent(query)}*)`;
+        url += `&or=(source.ilike.*${query}*,content.ilike.*${query}*)`;
         if (memoryType) {
           url += `&memory_type=eq.${memoryType}`;
         }
         url += `&order=importance.desc,created_at.desc&limit=${limit}`;
+        
+        console.log('[search_brain] Query URL:', url.substring(0, 200));
         
         const response = await fetch(url, {
           headers: {
