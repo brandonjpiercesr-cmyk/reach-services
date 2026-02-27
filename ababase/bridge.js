@@ -159,11 +159,15 @@ async function processWithAbabse(request) {
   // TODO: Add user_mappings table to map Firebase UID → Supabase UUID
   const effectiveUserId = BRANDON_USER_ID;
   
+  // Detect which agents are needed based on message
+  const detectedAgents = detectAgentsFromMessage(message, agentHints);
+  
   console.log('[ABABASE] Processing:', { 
     message: message.substring(0, 50), 
     requestedUserId: userId,
     effectiveUserId,
-    channel 
+    channel,
+    agentsDetected: detectedAgents
   });
 
   // Create Supabase client
@@ -171,9 +175,6 @@ async function processWithAbabse(request) {
 
   // Build context assembler
   const assembler = new ContextAssembler(supabase, effectiveUserId);
-
-  // Detect which agents are needed based on message
-  const detectedAgents = detectAgentsFromMessage(message, agentHints);
 
   // Assemble full context
   const context = await assembler.assemble({
@@ -186,7 +187,8 @@ async function processWithAbabse(request) {
   console.log('[ABABASE] Context assembled:', {
     tokens: context.metadata.estimatedTokens,
     agents: context.metadata.agentsLoaded,
-    contacts: context.metadata.contactCount
+    contacts: context.metadata.contactCount,
+    utilization: context.metadata.utilizationPercent + '%'
   });
 
   // Call AIR core processor
@@ -198,7 +200,42 @@ async function processWithAbabse(request) {
     channel: channel || 'api'
   });
 
-  return result;
+  // ⬡B:ABABASE:TRACE:v1.0:20260227⬡
+  // Flatten metadata for worker.js compatibility + full trace data
+  return {
+    success: true,
+    response: result.response,
+    actions: result.actionsExecuted || [],
+    
+    // Flattened fields for worker.js
+    model: 'claude-sonnet-4-5-20250929',
+    tokensUsed: result.metadata?.tokens ? 
+      (result.metadata.tokens.input + result.metadata.tokens.output) : 0,
+    cost: result.metadata?.cost?.total || 0,
+    agentsInvoked: detectedAgents,
+    toolsExecuted: result.actionsExecuted?.map(a => a.tool) || [],
+    
+    // Full trace data
+    trace: {
+      agentsDetected: detectedAgents,
+      agentsLoaded: context.metadata.agentsLoaded,
+      contextTokens: context.metadata.estimatedTokens,
+      contextUtilization: context.metadata.utilizationPercent,
+      contactsLoaded: context.metadata.contactCount,
+      iterations: result.metadata?.iterations || 1,
+      cacheHitRate: result.metadata?.cost?.cacheHitRate || 0,
+      tokens: result.metadata?.tokens || {},
+      costBreakdown: result.metadata?.cost?.breakdown || {}
+    },
+    
+    // Legacy fields
+    usage: result.metadata?.tokens ? {
+      input_tokens: result.metadata.tokens.input,
+      output_tokens: result.metadata.tokens.output,
+      cache_read_input_tokens: result.metadata.tokens.cacheRead,
+      cache_creation_input_tokens: result.metadata.tokens.cacheWrite
+    } : {}
+  };
 }
 
 // ═══════════════════════════════════════════════════════════════════
