@@ -403,14 +403,196 @@ async function executeToolCall(toolName, input, context) {
       };
     }
     
-    case 'search_calendar':
-    case 'create_event':
+    case 'search_calendar': {
+      // ⬡B:ABABASE:CALI:CALENDAR_SEARCH:v1.0:20260227⬡
+      try {
+        const NYLAS_API_KEY = process.env.NYLAS_API_KEY || 'nyk_v0_cqGwgMrNAnF8Lj1vQegdFjLNPIXqHqdcWlpE2FMaRivhmEqfHKYH7EBRPqM7Njad';
+        const NYLAS_GRANT_ID = '41a3ace1-1c1e-47f3-b017-e5fd71ea1f3a';
+        
+        // Build date range
+        const now = new Date();
+        let startTime = input.start_date ? new Date(input.start_date) : now;
+        let endTime = input.end_date ? new Date(input.end_date) : new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+        
+        const url = `https://api.us.nylas.com/v3/grants/${NYLAS_GRANT_ID}/events?calendar_id=primary&start=${Math.floor(startTime.getTime()/1000)}&end=${Math.floor(endTime.getTime()/1000)}&limit=20`;
+        
+        console.log('[search_calendar] Fetching:', url.substring(0, 80));
+        
+        const response = await fetch(url, {
+          headers: {
+            'Authorization': `Bearer ${NYLAS_API_KEY}`,
+            'Accept': 'application/json'
+          }
+        });
+        
+        if (!response.ok) {
+          const errText = await response.text();
+          console.error('[search_calendar] Nylas error:', errText);
+          return { status: 'error', message: 'Calendar API error: ' + errText.substring(0, 100) };
+        }
+        
+        const data = await response.json();
+        const events = data.data || [];
+        
+        // Filter by query if provided
+        let filtered = events;
+        if (input.query) {
+          const q = input.query.toLowerCase();
+          filtered = events.filter(e => 
+            (e.title || '').toLowerCase().includes(q) ||
+            (e.description || '').toLowerCase().includes(q)
+          );
+        }
+        
+        // Format events
+        const formatted = filtered.map(e => ({
+          id: e.id,
+          title: e.title || 'No title',
+          start: e.when?.start_time ? new Date(e.when.start_time * 1000).toISOString() : 'Unknown',
+          end: e.when?.end_time ? new Date(e.when.end_time * 1000).toISOString() : 'Unknown',
+          location: e.location || null,
+          attendees: (e.participants || []).map(p => p.email).join(', '),
+          status: e.status
+        }));
+        
+        return {
+          status: 'success',
+          count: formatted.length,
+          date_range: {
+            start: startTime.toISOString(),
+            end: endTime.toISOString()
+          },
+          events: formatted
+        };
+      } catch (e) {
+        console.error('[search_calendar] Error:', e.message);
+        return { status: 'error', message: e.message };
+      }
+    }
+    
+    case 'create_event': {
+      // ⬡B:ABABASE:CALI:CREATE_EVENT:v1.0:20260227⬡
+      try {
+        const NYLAS_API_KEY = process.env.NYLAS_API_KEY || 'nyk_v0_cqGwgMrNAnF8Lj1vQegdFjLNPIXqHqdcWlpE2FMaRivhmEqfHKYH7EBRPqM7Njad';
+        const NYLAS_GRANT_ID = '41a3ace1-1c1e-47f3-b017-e5fd71ea1f3a';
+        
+        const eventData = {
+          title: input.title,
+          when: {
+            start_time: Math.floor(new Date(input.start_time).getTime() / 1000),
+            end_time: Math.floor(new Date(input.end_time).getTime() / 1000)
+          },
+          location: input.location || undefined,
+          description: input.description || undefined,
+          participants: (input.attendees || []).map(email => ({ email }))
+        };
+        
+        const response = await fetch(`https://api.us.nylas.com/v3/grants/${NYLAS_GRANT_ID}/events?calendar_id=primary`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${NYLAS_API_KEY}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(eventData)
+        });
+        
+        if (!response.ok) {
+          const errText = await response.text();
+          return { status: 'error', message: 'Failed to create event: ' + errText.substring(0, 100) };
+        }
+        
+        const created = await response.json();
+        return {
+          status: 'success',
+          event_id: created.data?.id,
+          title: input.title,
+          start: input.start_time,
+          end: input.end_time,
+          confirmation: `Created event "${input.title}"`
+        };
+      } catch (e) {
+        console.error('[create_event] Error:', e.message);
+        return { status: 'error', message: e.message };
+      }
+    }
+    
     case 'get_sports_scores': {
-      // Placeholder for future implementation
-      return {
-        status: 'not_implemented',
-        message: `${toolName} is not yet implemented. Coming soon.`
-      };
+      // ⬡B:ABABASE:PLAY:SPORTS_SCORES:v1.0:20260227⬡
+      // Uses ESPN API (free, no auth required)
+      try {
+        const league = input.league?.toLowerCase() || 'nba';
+        const team = input.team?.toLowerCase();
+        
+        // ESPN API endpoints
+        const espnMap = {
+          'nba': 'basketball/nba',
+          'nfl': 'football/nfl',
+          'mlb': 'baseball/mlb',
+          'nhl': 'hockey/nhl',
+          'mls': 'soccer/usa.1',
+          'wnba': 'basketball/wnba',
+          'ncaafb': 'football/college-football',
+          'ncaamb': 'basketball/mens-college-basketball'
+        };
+        
+        const espnPath = espnMap[league] || 'basketball/nba';
+        const url = `https://site.api.espn.com/apis/site/v2/sports/${espnPath}/scoreboard`;
+        
+        console.log('[get_sports_scores] Fetching:', url);
+        
+        const response = await fetch(url, {
+          headers: { 'Accept': 'application/json' }
+        });
+        
+        if (!response.ok) {
+          return { status: 'error', message: 'ESPN API error' };
+        }
+        
+        const data = await response.json();
+        const events = data.events || [];
+        
+        // Filter by team if provided
+        let filtered = events;
+        if (team) {
+          filtered = events.filter(e => {
+            const teams = e.competitions?.[0]?.competitors || [];
+            return teams.some(t => 
+              (t.team?.name || '').toLowerCase().includes(team) ||
+              (t.team?.displayName || '').toLowerCase().includes(team)
+            );
+          });
+        }
+        
+        // Format scores
+        const scores = filtered.slice(0, 10).map(e => {
+          const comp = e.competitions?.[0];
+          const teams = comp?.competitors || [];
+          const home = teams.find(t => t.homeAway === 'home');
+          const away = teams.find(t => t.homeAway === 'away');
+          
+          return {
+            id: e.id,
+            name: e.name || 'Unknown',
+            status: comp?.status?.type?.description || 'Unknown',
+            home_team: home?.team?.displayName || 'Home',
+            home_score: home?.score || '0',
+            away_team: away?.team?.displayName || 'Away',
+            away_score: away?.score || '0',
+            venue: comp?.venue?.fullName || null,
+            date: e.date
+          };
+        });
+        
+        return {
+          status: 'success',
+          league: league.toUpperCase(),
+          count: scores.length,
+          games: scores
+        };
+      } catch (e) {
+        console.error('[get_sports_scores] Error:', e.message);
+        return { status: 'error', message: e.message };
+      }
     }
     
     case 'search_brain': {
