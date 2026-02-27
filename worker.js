@@ -15098,7 +15098,8 @@ Respond as this agent specifically — stay in character.`;
           cost: result.cost,
           agentsInvoked: result.agentsInvoked,
           toolsExecuted: result.toolsExecuted
-        }
+        },
+        trace: result.trace || null  // Full trace data from ababase
       });
 
     } catch (e) {
