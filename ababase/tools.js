@@ -183,6 +183,28 @@ const TOOL_DEFINITIONS = [
       },
       required: ['context_type', 'label', 'content']
     }
+  },
+  {
+    name: 'search_brain',
+    description: 'Search the ABA brain (aba_memory) for stored information. Use this to find checkpoints, configs, HAM identities, past decisions, and any stored context. Returns matching records.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Search query - keywords to find in brain content'
+        },
+        memory_type: {
+          type: 'string',
+          description: 'Optional: Filter by memory type (checkpoint, ham_identity, system, milestone, etc.)'
+        },
+        limit: {
+          type: 'number',
+          description: 'Max results to return (default 10)'
+        }
+      },
+      required: ['query']
+    }
   }
 ];
 
@@ -389,6 +411,63 @@ async function executeToolCall(toolName, input, context) {
         status: 'not_implemented',
         message: `${toolName} is not yet implemented. Coming soon.`
       };
+    }
+    
+    case 'search_brain': {
+      // ⬡B:ABABASE:BRAIN_SEARCH:v1.0:20260227⬡
+      // Search aba_memory for stored information
+      try {
+        const query = input.query || '';
+        const memoryType = input.memory_type;
+        const limit = input.limit || 10;
+        
+        // Build the query URL
+        let url = `https://htlxjkbrstpwwtzsbyvb.supabase.co/rest/v1/aba_memory?select=source,memory_type,content,importance,created_at`;
+        url += `&or=(content.ilike.*${encodeURIComponent(query)}*,source.ilike.*${encodeURIComponent(query)}*)`;
+        if (memoryType) {
+          url += `&memory_type=eq.${memoryType}`;
+        }
+        url += `&order=importance.desc,created_at.desc&limit=${limit}`;
+        
+        const response = await fetch(url, {
+          headers: {
+            'apikey': process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0bHhqa2Jyc3Rwd3d0enNieXZiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA1MzI4MjEsImV4cCI6MjA4NjEwODgyMX0.MOgNYkezWpgxTO3ZHd0omZ0WLJOOR-tL7hONXWG9eBw',
+            'Authorization': 'Bearer ' + (process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0bHhqa2Jyc3Rwd3d0enNieXZiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA1MzI4MjEsImV4cCI6MjA4NjEwODgyMX0.MOgNYkezWpgxTO3ZHd0omZ0WLJOOR-tL7hONXWG9eBw')
+          }
+        });
+        
+        if (!response.ok) {
+          return { error: 'Brain search failed', status: 'error' };
+        }
+        
+        const results = await response.json();
+        
+        if (!results || results.length === 0) {
+          return {
+            status: 'no_results',
+            message: `No brain records found matching "${query}"`,
+            results: []
+          };
+        }
+        
+        // Format results
+        const formatted = results.map(r => ({
+          source: r.source,
+          type: r.memory_type,
+          importance: r.importance,
+          content: typeof r.content === 'string' ? r.content.substring(0, 500) : JSON.stringify(r.content).substring(0, 500),
+          created: r.created_at
+        }));
+        
+        return {
+          status: 'success',
+          count: formatted.length,
+          results: formatted
+        };
+      } catch (e) {
+        console.error('[search_brain] Error:', e.message);
+        return { error: e.message, status: 'error' };
+      }
     }
     
     default:
