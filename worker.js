@@ -22530,55 +22530,56 @@ conversationWss.on('connection', (ws, req) => {
     deepgramWs.on('close', () => console.log('[CONVERSATION] Deepgram closed | Trace:', traceId));
   };
   
-  // Process user speech through AIR and send TTS response
+  // ⬡B:FIX:CONVERSATION.USE_LOCAL_AIR:CODE:voice.real_fcw:20260228⬡
+  // Process user speech through LOCAL AIR (not external abacia-services garbage)
+  // This uses the REAL Fat Context Window (FCW) with all 88 agents
   async function processAndRespond(userText, ws, streamSid, traceId) {
-    console.log('[CONVERSATION] Processing:', userText.substring(0, 50) + '...');
+    console.log('[CONVERSATION] Processing through LOCAL AIR:', userText.substring(0, 50) + '...');
     
     try {
-      // Route through AIR (ABACIA services) or fallback to local
-      let response = '';
+      // Build caller identity for AIR
+      const callerIdentity = {
+        name: 'Brandon',  // Default to Brandon - enhance with caller lookup later
+        userId: 'brandon',
+        phone: 'inbound_call',
+        trustLevel: 'T10'
+      };
       
-      try {
-        // Try ABACIA-SERVICES AIR first
-        const airResult = await httpsRequest({
-          hostname: 'abacia-services.onrender.com',
-          path: '/api/air/process',
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' }
-        }, JSON.stringify({
-          query: userText,
-          context: { source: 'phone_call', trace: traceId },
-          source: 'aba-reach-phone'
-        }));
-        
-        if (airResult.status === 200) {
-          const data = JSON.parse(airResult.data.toString());
-          response = data.response || data.text || '';
-        }
-      } catch (e) {
-        console.log('[CONVERSATION] ABACIA AIR unavailable, using local');
-      }
+      // Use the REAL AIR_process function with full FCW
+      // This includes: LUKE analysis, COLE context, JUDE agents, PACK assembly
+      console.log('[CONVERSATION] Invoking AIR_process with full FCW...');
+      console.log('[CONVERSATION] TraceID:', traceId);
       
-      // Fallback to local Gemini if AIR failed
-      if (!response) {
-        response = await generateLocalResponse(userText, traceId);
-      }
+      const result = await AIR_process(userText, [], callerIdentity, null);
       
-      if (!response) {
-        response = "I'm sorry, I didn't catch that. Could you please repeat?";
-      }
+      const response = result?.response || "I'm sorry, I didn't catch that. Could you try again?";
       
-      console.log('[CONVERSATION] VARA responds:', response.substring(0, 50) + '...');
+      // Log full trace for debugging (Brandon wants to SEE this)
+      console.log('[CONVERSATION] === AIR RESPONSE TRACE ===');
+      console.log('[CONVERSATION] User said:', userText);
+      console.log('[CONVERSATION] Agent:', result?.agent || 'PACK/LLM');
+      console.log('[CONVERSATION] Direct response?:', result?.directResponse || false);
+      console.log('[CONVERSATION] Response preview:', response.substring(0, 150) + '...');
+      console.log('[CONVERSATION] Mission:', result?.missionNumber || 'N/A');
+      console.log('[CONVERSATION] ========================');
       
-      // Store VARA response
-      transcriptBuffer.push({ speaker: 'VARA', text: response, timestamp: new Date().toISOString() });
+      // Store VARA (Vocal Authorized Representative of ABA) response
+      transcriptBuffer.push({ 
+        speaker: 'VARA', 
+        text: response, 
+        timestamp: new Date().toISOString(),
+        agent: result?.agent,
+        trace: traceId
+      });
       
       // Convert to TTS and send back through Twilio stream
       await sendTTSToStream(response, ws, streamSid);
       
     } catch (e) {
-      console.error('[CONVERSATION] Process error:', e.message);
-      await sendTTSToStream("I'm having a bit of trouble. Could you repeat that?", ws, streamSid);
+      console.error('[CONVERSATION] AIR process error:', e.message);
+      console.error('[CONVERSATION] Stack:', e.stack);
+      // Warm error response, not robotic
+      await sendTTSToStream("I'm having a moment here. Let me try that again for you.", ws, streamSid);
     }
   }
   
