@@ -8986,6 +8986,238 @@ async function checkEmails(pulseId) {
               source: 'iman_idealist_' + new Date().toISOString().split('T')[0],
               tags: ['command_center', 'iman', 'idealist', 'jobs']
             }));
+            
+            // ═══════════════════════════════════════════════════════════════════
+            // ⬡B:REACH.AWA.AUTONOMOUS_PIPELINE:TRIGGER:air.auto_generate:20260228⬡
+            // AIR AUTONOMOUS PIPELINE: Auto-generate cover letters + resumes
+            // This is what Brandon wants - AIR does everything, frontend displays
+            // ═══════════════════════════════════════════════════════════════════
+            console.log('[AIR:AWA] Starting autonomous cover letter + resume generation for ' + seededCount + ' jobs');
+            
+            for (const jobUrl of jobUrls) {
+              try {
+                const slug = jobUrl.split('/').pop();
+                const titleClean = slug.replace(/^[a-f0-9]{20}-/, '').replace(/-/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+                
+                // 1. Store to awa_jobs table (the real jobs table, not just memory)
+                const jobData = {
+                  user_id: 'brandon', // Default assignee - AIR will reassign if needed
+                  company_name: 'Via Idealist', // Will be updated when scraped
+                  job_title: titleClean,
+                  job_url: jobUrl,
+                  source: 'idealist',
+                  status: 'saved',
+                  priority: 5,
+                  notes: 'Auto-seeded from Idealist email: ' + subject
+                };
+                
+                const jobResult = await httpsRequest({
+                  hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+                  path: '/rest/v1/awa_jobs',
+                  method: 'POST',
+                  headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=representation' }
+                }, JSON.stringify(jobData));
+                
+                const savedJob = JSON.parse(jobResult.data.toString());
+                const jobId = savedJob[0]?.id;
+                
+                if (!jobId) {
+                  console.log('[AIR:AWA] Failed to save job to awa_jobs:', titleClean);
+                  continue;
+                }
+                
+                console.log('[AIR:AWA] Saved job to awa_jobs:', jobId, titleClean);
+                
+                // 2. Match job to team member (simple keyword matching for now)
+                // Brandon = executive, VP, director, foundation, fundraising
+                // Eric = athletics, education, university, leadership
+                // BJ = grants, development associate, manager
+                // CJ = coordinator, community, outreach
+                const titleLower = titleClean.toLowerCase();
+                let assignedTo = 'brandon'; // Default
+                
+                if (titleLower.includes('athletics') || titleLower.includes('education') || titleLower.includes('university') || titleLower.includes('college')) {
+                  assignedTo = 'eric';
+                } else if (titleLower.includes('associate') || titleLower.includes('grant') || titleLower.includes('writer')) {
+                  assignedTo = 'bj';
+                } else if (titleLower.includes('coordinator') || titleLower.includes('outreach') || titleLower.includes('community')) {
+                  assignedTo = 'cj';
+                }
+                
+                // Update job assignment
+                await httpsRequest({
+                  hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+                  path: '/rest/v1/awa_jobs?id=eq.' + jobId,
+                  method: 'PATCH',
+                  headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json' }
+                }, JSON.stringify({ user_id: assignedTo }));
+                
+                console.log('[AIR:AWA] Assigned job to:', assignedTo);
+                
+                // 3. Get team member profile
+                const profile = TEAM_PROFILES[assignedTo] || TEAM_PROFILES.brandon;
+                
+                // Skip if profile is blank
+                if (!profile.experience || profile.experience.length < 10) {
+                  console.log('[AIR:AWA] Skipping cover letter - profile blank for:', assignedTo);
+                  continue;
+                }
+                
+                // 4. Auto-generate cover letter via internal call
+                const coverLetterPrompt = `You are JOBA (Job Application Agent) generating a cover letter for ${profile.name}.
+
+CANDIDATE PROFILE:
+Name: ${profile.name}
+Title: ${profile.title}
+Experience: ${profile.experience}
+Skills: ${profile.skills.join(', ')}
+Key Achievements: ${profile.achievements.join('; ')}
+Personal Hook: ${profile.personalHook}
+Closing Style: ${profile.closingStyle}
+
+COMPANY: Via Idealist (auto-seeded)
+JOB: ${titleClean}
+URL: ${jobUrl}
+
+WRITING STANDARDS (MANDATORY):
+- NO em dashes ever
+- NO choppy tech bro sentences
+- NO "I would be happy to" or "I am excited to apply"
+- NO corporate jargon
+- Write like a warm, confident professional
+- Use natural contractions
+- Be specific about achievements with numbers
+- Keep to ONE PAGE (3 paragraphs max)
+
+Generate a compelling cover letter:`;
+
+                const claudeResult = await httpsRequest({
+                  hostname: 'api.anthropic.com',
+                  path: '/v1/messages',
+                  method: 'POST',
+                  headers: {
+                    'x-api-key': process.env.ANTHROPIC_API_KEY,
+                    'anthropic-version': '2023-06-01',
+                    'Content-Type': 'application/json'
+                  }
+                }, JSON.stringify({
+                  model: 'claude-3-haiku-20240307', // Use Haiku for speed in autonomous mode
+                  max_tokens: 1500,
+                  messages: [{ role: 'user', content: coverLetterPrompt }]
+                }));
+
+                const claudeData = JSON.parse(claudeResult.data.toString());
+                const coverLetterContent = claudeData.content?.[0]?.text || '';
+                
+                if (coverLetterContent.length > 100) {
+                  // Store cover letter
+                  await httpsRequest({
+                    hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+                    path: '/rest/v1/awa_cover_letters',
+                    method: 'POST',
+                    headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' }
+                  }, JSON.stringify({
+                    user_id: assignedTo,
+                    job_id: jobId,
+                    content: coverLetterContent,
+                    tone: 'professional',
+                    generated_by: 'JOBA-AUTO',
+                    status: 'draft'
+                  }));
+                  console.log('[AIR:AWA] Auto-generated cover letter for:', profile.name, '-', titleClean);
+                }
+                
+                // 5. Auto-generate resume
+                const resumePrompt = `You are JOBA generating a tailored resume for ${profile.name}.
+
+CANDIDATE:
+Name: ${profile.name}
+Title: ${profile.title}
+Email: ${profile.email}
+Phone: ${profile.phone}
+Location: ${profile.location}
+Experience: ${profile.experience}
+Skills: ${profile.skills.join(', ')}
+Achievements: ${profile.achievements.join('; ')}
+Education: ${profile.education}
+
+TARGET ROLE: ${titleClean}
+
+Generate a ONE PAGE tailored resume in this format:
+
+${profile.name.toUpperCase()}
+${profile.email} | ${profile.phone} | ${profile.location}
+
+PROFESSIONAL SUMMARY
+[2-3 sentences for this role]
+
+EXPERIENCE
+[Most relevant positions with achievements]
+
+EDUCATION
+${profile.education}
+
+SKILLS
+[Most relevant skills]
+
+Write the resume:`;
+
+                const resumeResult = await httpsRequest({
+                  hostname: 'api.anthropic.com',
+                  path: '/v1/messages',
+                  method: 'POST',
+                  headers: {
+                    'x-api-key': process.env.ANTHROPIC_API_KEY,
+                    'anthropic-version': '2023-06-01',
+                    'Content-Type': 'application/json'
+                  }
+                }, JSON.stringify({
+                  model: 'claude-3-haiku-20240307',
+                  max_tokens: 2000,
+                  messages: [{ role: 'user', content: resumePrompt }]
+                }));
+
+                const resumeData = JSON.parse(resumeResult.data.toString());
+                const resumeContent = resumeData.content?.[0]?.text || '';
+                
+                if (resumeContent.length > 100) {
+                  // Store resume
+                  await httpsRequest({
+                    hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+                    path: '/rest/v1/awa_resumes',
+                    method: 'POST',
+                    headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' }
+                  }, JSON.stringify({
+                    user_id: assignedTo,
+                    name: 'Resume for ' + titleClean + ' - AUTO',
+                    content: resumeContent,
+                    target_role: titleClean,
+                    keywords: profile.skills
+                  }));
+                  console.log('[AIR:AWA] Auto-generated resume for:', profile.name, '-', titleClean);
+                }
+                
+                // 6. Log to Command Center
+                await httpsRequest({
+                  hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+                  path: '/rest/v1/aba_memory',
+                  method: 'POST',
+                  headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' }
+                }, JSON.stringify({
+                  content: '[COMMAND_CENTER] JOBA*AIR*auto_generated: Cover letter + resume for ' + profile.name + ' - ' + titleClean,
+                  memory_type: 'system',
+                  categories: ['command_center', 'joba', 'awa', 'automated'],
+                  importance: 7, is_system: true,
+                  source: 'joba_auto_' + new Date().toISOString().split('T')[0],
+                  tags: ['command_center', 'joba', 'cover_letter', 'resume', 'auto']
+                }));
+                
+              } catch (autoGenErr) {
+                console.error('[AIR:AWA] Auto-gen error for job:', autoGenErr.message);
+              }
+            }
+            
+            console.log('[AIR:AWA] Autonomous pipeline complete');
           }
         } catch (idealistErr) {
           console.error('[PULSE:IMAN] Idealist parse error:', idealistErr.message);
