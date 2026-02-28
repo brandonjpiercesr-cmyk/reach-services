@@ -6810,7 +6810,12 @@ async function JUDE_findAgents(analysis) {
         'code': ['CODING', 'INFRASTRUCTURE'],
         'voice': ['VOICE'],
         'greeting': ['CORE'],
-        'general': ['CORE', 'INTELLIGENCE']
+        'general': ['CORE', 'INTELLIGENCE'],
+        'job': ['AWA', 'CORE'],
+        'apply': ['AWA', 'OUTREACH'],
+        'career': ['AWA', 'INTELLIGENCE'],
+        'resume': ['AWA'],
+        'cover_letter': ['AWA']
       };
       
       const relevantDepts = intentDeptMap[intent] || ['CORE'];
@@ -9028,20 +9033,65 @@ async function checkEmails(pulseId) {
                 
                 console.log('[AIR:AWA] Saved job to awa_jobs:', jobId, titleClean);
                 
-                // 2. Match job to team member (simple keyword matching for now)
-                // Brandon = executive, VP, director, foundation, fundraising
-                // Eric = athletics, education, university, leadership
-                // BJ = grants, development associate, manager
-                // CJ = coordinator, community, outreach
-                const titleLower = titleClean.toLowerCase();
-                let assignedTo = 'brandon'; // Default
+                // 2. Match job to team member using JOBA's rules from aba_agent_jds (FCW approach)
+                // Load JOBA JD which contains the team matching rules
+                let jobaRules = '';
+                try {
+                  const jobaJdResult = await httpsRequest({
+                    hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+                    path: '/rest/v1/aba_agent_jds?agent_id=eq.JOBA&select=responsibilities',
+                    method: 'GET',
+                    headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
+                  });
+                  const jobaData = JSON.parse(jobaJdResult.data.toString());
+                  jobaRules = jobaData[0]?.responsibilities || '';
+                } catch (e) {
+                  console.log('[AIR:AWA] Could not load JOBA JD:', e.message);
+                }
                 
-                if (titleLower.includes('athletics') || titleLower.includes('education') || titleLower.includes('university') || titleLower.includes('college')) {
-                  assignedTo = 'eric';
-                } else if (titleLower.includes('associate') || titleLower.includes('grant') || titleLower.includes('writer')) {
-                  assignedTo = 'bj';
-                } else if (titleLower.includes('coordinator') || titleLower.includes('outreach') || titleLower.includes('community')) {
-                  assignedTo = 'cj';
+                // Use LLM to decide team member assignment based on JOBA rules
+                let assignedTo = 'brandon'; // Default fallback
+                try {
+                  const matchPrompt = `You are JOBA (Job Opportunity Bot Assistant). Given a job title, determine which team member it fits best.
+
+TEAM MATCHING RULES (from your JD):
+${jobaRules || 'Brandon = Executive Director, CDO, VP Development, Chief roles. Eric = Athletics, Education, University roles. BJ = Director of Development, Grant Writer roles. CJ = Development Manager, Coordinator, Community roles. Vante = Development Manager, Coordinator roles. Dwayne = Operations, Finance, Administrative roles.'}
+
+AVAILABLE TEAM:
+- brandon (Executive level, CDO, VP Development, Foundation leadership)
+- eric (Athletics, Education, University, College)
+- bj (Director of Development, Grant Writer, DOD)
+- cj (Development Manager, Coordinator, Community)
+- vante (Development Manager, Coordinator - same tier as CJ)
+- dwayne (Operations, Finance, Administrative, Budget)
+
+JOB TITLE: ${titleClean}
+
+Respond with ONLY the lowercase team member id that fits best (brandon, eric, bj, cj, vante, or dwayne). Nothing else.`;
+
+                  const matchResult = await httpsRequest({
+                    hostname: 'api.anthropic.com',
+                    path: '/v1/messages',
+                    method: 'POST',
+                    headers: {
+                      'x-api-key': process.env.ANTHROPIC_API_KEY,
+                      'anthropic-version': '2023-06-01',
+                      'Content-Type': 'application/json'
+                    }
+                  }, JSON.stringify({
+                    model: 'claude-3-haiku-20240307',
+                    max_tokens: 20,
+                    messages: [{ role: 'user', content: matchPrompt }]
+                  }));
+
+                  const matchData = JSON.parse(matchResult.data.toString());
+                  const suggested = (matchData.content?.[0]?.text || '').toLowerCase().trim();
+                  if (['brandon', 'eric', 'bj', 'cj', 'vante', 'dwayne'].includes(suggested)) {
+                    assignedTo = suggested;
+                  }
+                  console.log('[AIR:AWA] JOBA matched job to:', assignedTo, '(LLM decision)');
+                } catch (matchErr) {
+                  console.log('[AIR:AWA] Match error, defaulting to brandon:', matchErr.message);
                 }
                 
                 // Update job assignment
