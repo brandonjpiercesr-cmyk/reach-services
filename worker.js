@@ -602,6 +602,94 @@ function memoryRetrieve(tier, key) {
 
 const ABACIA_URL = 'https://abacia-services.onrender.com';
 
+// ═══════════════════════════════════════════════════════════════════════════
+// ⬡B:REACH.AWA.TEAM_PROFILES:CONST:cover_letter_generation:20260228⬡
+// Team profiles for personalized cover letter and resume generation
+// Users: Brandon, Eric, BJ, CJ, Vante, Dwayne
+// ═══════════════════════════════════════════════════════════════════════════
+const TEAM_PROFILES = {
+  brandon: {
+    id: 'brandon', name: 'Brandon J. Pierce Sr.', 
+    title: 'Co-Founder & Head of Enterprise Operations',
+    email: 'brandon@globalmajoritygroup.com', phone: '336-549-9608',
+    location: 'Greensboro/High Point, North Carolina',
+    experience: '15+ years nonprofit fundraising and development. Former Coca-Cola Foundation reviewer with $195M+ in grant applications reviewed. Co-founded GMG, influencing over $260M in philanthropic capital across 65 organizations.',
+    skills: ['Grant Writing', 'Strategic Planning', 'Nonprofit Development', 'Executive Leadership', 'Capital Campaigns', 'Donor Relations', 'Board Governance', 'Financial Management'],
+    achievements: ['$260M+ capital raised across career', '65+ organizations served', '25-30% grant success rate (2-3x industry average)', '13,000+ proposals reviewed at Coca-Cola Foundation', 'Founded Global Majority Group'],
+    education: 'BA Political Science & Government, UNC Charlotte',
+    personalHook: 'What drives me goes beyond the work itself. My wife Bethany and I are raising four children: Bailey-J, Joshua, Jeremiah, and Bella-Ann. Growing up watching my community struggle for resources shaped how I see this work.',
+    closingStyle: 'Confident and forward-looking, emphasizing partnership potential'
+  },
+  eric: {
+    id: 'eric', name: 'Dr. Eric R. Lane Sr.', 
+    title: 'Co-Founder & Operations Lead',
+    email: 'eric@globalmajoritygroup.com', phone: '323-600-7676',
+    location: 'Remote (based in Los Angeles, California)',
+    experience: '17 years of fundraising leadership. Division I basketball (Boise State) and Euro League professional. Athletic Director at St. John Bosco (national champion program, pioneered first HS NIL deal). Grew CSUF Athletics fundraising from $1.4M to $3M in 2 years.',
+    skills: ['Executive Leadership', 'Organizational Development', 'Strategic Fundraising', 'Community Engagement', 'Board Governance', 'Capital Campaigns', 'Major Gifts', 'Athletic Administration'],
+    achievements: ['Ed.D. from USC', 'Division I basketball and Euro League pro', 'St. John Bosco AD - national champ, first HS NIL deal', 'Grew CSUF Athletics fundraising $1.4M to $3M in 2 years', '$260M+ influenced through GMG'],
+    education: 'Ed.D. in Educational Leadership, USC',
+    personalHook: 'My path to fundraising came through athletics. As a Division I basketball player at Boise State and later playing professionally in the Euro League, I learned that success comes from preparation and relationship building.',
+    closingStyle: 'Authoritative yet approachable, emphasizing vision and impact'
+  },
+  bj: {
+    id: 'bj', name: 'Bryan J. Pierce', 
+    title: 'Director of Development',
+    email: 'bryanjpiercejr@gmail.com', phone: '980-395-8662',
+    location: 'Greensboro, NC 27407',
+    experience: 'Nearly 10 years in development and communications. Led development for 10+ nonprofit clients at GID Consulting. Managed $2.5M annual grant portfolio at HomeFree-USA.',
+    skills: ['Grant Writing', 'Grant Management', 'Donor Relations', 'Fundraising Operations', 'CRM Management', 'Corporate Sponsors', 'Federal Grants', 'Event Coordination'],
+    achievements: ['Helped clients raise $3M+ collectively', 'HomeFree-USA: managed $2.5M annual grant portfolio', 'Brand-ON Consulting: $1M+ raised, 20-30% grant success rate', 'Led development for 10+ nonprofit clients'],
+    education: 'North Carolina A&T State University',
+    personalHook: 'What drives me to do this work goes deeper than just a paycheck. My wife Genesis and I are raising five kids in a blended family, starting with our oldest, Uriah.',
+    closingStyle: 'Warm and grateful, emphasizing community impact'
+  },
+  cj: {
+    id: 'cj', name: 'C.J. Moore', 
+    title: 'Development Manager',
+    email: 'cj@envolvenonprofit.com', phone: '919-917-0686',
+    location: 'Greensboro, NC',
+    experience: 'Development professional with experience in nonprofit fundraising operations. Strong focus on community engagement and mission-driven work.',
+    skills: ['Grant Writing', 'Donor Cultivation', 'Community Outreach', 'Event Planning', 'Database Management', 'Volunteer Coordination', 'Communications', 'Stakeholder Relations'],
+    achievements: ['Supported grant portfolios exceeding $1M', 'Strong community partnerships', 'Experience with Envolve Nonprofit Experts'],
+    education: 'Bachelor\'s Degree',
+    personalHook: 'I bring a commitment to service and a dedication to supporting work that strengthens communities.',
+    closingStyle: 'Earnest and mission-focused, emphasizing dedication'
+  },
+  vante: {
+    id: 'vante', name: 'Vante', 
+    title: '',
+    email: '', phone: '',
+    location: '',
+    experience: '',
+    skills: [],
+    achievements: [],
+    education: '',
+    personalHook: '',
+    closingStyle: ''
+  },
+  dwayne: {
+    id: 'dwayne', name: 'Dwayne', 
+    title: '',
+    email: '', phone: '',
+    location: '',
+    experience: '',
+    skills: [],
+    achievements: [],
+    education: '',
+    personalHook: '',
+    closingStyle: ''
+  }
+};
+
+// GMG company profile for cover letters
+const GMG_PROFILE = {
+  name: 'Global Majority Group',
+  tagline: 'Excellence Rooted in Lived Experience',
+  description: 'BIPOC-led consultancy specializing in grant writing, development strategy, and fractional executive services for organizations serving BIPOC and LMI communities.',
+  metrics: { capitalRaised: '$260M+', organizations: '65+', grantSuccessRate: '25-30%', markets: '15+' }
+};
+
 /**
  * Call ABACIA's AIR for routing decision
  * This is THE function that connects the hand to the brain
@@ -20623,14 +20711,150 @@ We Are All ABA.`;
     }
   }
 
+  // AWA RESUMES - Generate tailored resume with JOBA
+  // ⬡B:REACH.AWA.RESUME_GEN:ROUTE:joba.generate_resume:20260228⬡
+  if (path === '/api/awa/resumes/generate' && method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      const userId = req.headers?.get?.('x-user-id') || body.user_id || 'brandon';
+      
+      // Get team member profile
+      const profileKey = userId.toLowerCase().replace('_t10', '').replace('_t9', '').replace('_t8', '').replace('_t7', '');
+      const profile = TEAM_PROFILES[profileKey] || TEAM_PROFILES.brandon;
+      
+      // If profile is blank, return error
+      if (!profile.experience || profile.experience.length < 10) {
+        return jsonResponse(res, 400, { 
+          error: 'Profile not set up for ' + profile.name,
+          message: 'Please add experience and skills for this team member before generating resumes.'
+        });
+      }
+
+      const targetRole = body.target_role || body.job_title || 'Development Professional';
+      const jobDescription = body.job_description || '';
+
+      // Build personalized resume prompt
+      const prompt = `You are JOBA (Job Application Agent) generating a tailored resume for ${profile.name}.
+
+CANDIDATE PROFILE:
+Name: ${profile.name}
+Current Title: ${profile.title}
+Location: ${profile.location}
+Email: ${profile.email}
+Phone: ${profile.phone}
+Experience: ${profile.experience}
+Skills: ${profile.skills.join(', ')}
+Achievements: ${profile.achievements.join('; ')}
+Education: ${profile.education}
+
+TARGET ROLE: ${targetRole}
+${jobDescription ? 'JOB DESCRIPTION: ' + jobDescription : ''}
+
+WRITING STANDARDS (MANDATORY):
+- NO em dashes ever
+- Use action verbs: Led, Managed, Developed, Increased, Achieved
+- Quantify achievements with numbers and percentages
+- Keep to ONE PAGE
+- Professional but warm tone
+- ATS-friendly formatting (clean sections)
+
+Generate a tailored resume in this format:
+
+${profile.name.toUpperCase()}
+${profile.email} | ${profile.phone} | ${profile.location}
+
+PROFESSIONAL SUMMARY
+[2-3 sentences highlighting most relevant experience for the target role]
+
+EXPERIENCE
+[List 2-3 most relevant positions with bullet points of achievements]
+
+EDUCATION
+${profile.education}
+
+SKILLS
+[Most relevant skills for the role, comma-separated]
+
+Write the full tailored resume now:`;
+
+      const claudeResult = await httpsRequest({
+        hostname: 'api.anthropic.com',
+        path: '/v1/messages',
+        method: 'POST',
+        headers: {
+          'x-api-key': process.env.ANTHROPIC_API_KEY,
+          'anthropic-version': '2023-06-01',
+          'Content-Type': 'application/json'
+        }
+      }, JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 2000,
+        messages: [{ role: 'user', content: prompt }]
+      }));
+
+      const claudeData = JSON.parse(claudeResult.data || '{}');
+      const resumeContent = claudeData.content?.[0]?.text || 'Failed to generate';
+
+      // Store resume
+      const resumeData = {
+        user_id: userId,
+        name: 'Resume for ' + targetRole + ' - ' + new Date().toISOString().split('T')[0],
+        content: resumeContent,
+        target_role: targetRole,
+        keywords: profile.skills,
+        is_master: false
+      };
+
+      const result = await httpsRequest({
+        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+        path: '/rest/v1/awa_resumes',
+        method: 'POST',
+        headers: {
+          'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY,
+          'Authorization': 'Bearer ' + (process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY),
+          'Content-Type': 'application/json',
+          'Prefer': 'return=representation'
+        }
+      }, JSON.stringify(resumeData));
+      
+      const created = JSON.parse(result.data || '[]');
+      return jsonResponse(res, 201, { 
+        resume: created[0], 
+        content: resumeContent,
+        profile_used: profile.name,
+        target_role: targetRole,
+        generated_by: 'JOBA (Job Application Agent)',
+        message: 'Resume generated for ' + profile.name
+      });
+    } catch (e) {
+      return jsonResponse(res, 500, { error: e.message });
+    }
+  }
+
   // AWA COVER LETTERS - Generate with JOBA
+  // ⬡B:REACH.AWA.COVER_LETTER_GEN:ROUTE:joba.generate:20260228⬡
   if (path === '/api/awa/cover-letters' && method === 'POST') {
     try {
       const body = await parseBody(req);
-      const userId = req.headers?.get?.('x-user-id') || body.user_id || 'brandon_t10';
+      const userId = req.headers?.get?.('x-user-id') || body.user_id || 'brandon';
+      
+      // Get team member profile - map user_id to profile key
+      const profileKey = userId.toLowerCase().replace('_t10', '').replace('_t9', '').replace('_t8', '').replace('_t7', '');
+      const profile = TEAM_PROFILES[profileKey] || TEAM_PROFILES.brandon;
+      
+      // If profile is blank (Vante, Dwayne), return error
+      if (!profile.experience || profile.experience.length < 10) {
+        return jsonResponse(res, 400, { 
+          error: 'Profile not set up for ' + profile.name,
+          message: 'Please add experience and skills for this team member before generating cover letters.'
+        });
+      }
       
       // Get job details
+      let jobTitle = body.job_title || '';
+      let companyName = body.company_name || '';
       let jobDetails = body.job_description || '';
+      
       if (body.job_id && !jobDetails) {
         const jobResult = await httpsRequest({
           hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
@@ -20644,17 +20868,51 @@ We Are All ABA.`;
         const jobs = JSON.parse(jobResult.data || '[]');
         if (jobs[0]) {
           jobDetails = jobs[0].job_description || '';
+          jobTitle = jobs[0].job_title || jobTitle;
+          companyName = jobs[0].company_name || companyName;
         }
       }
 
-      // Generate cover letter via Claude
-      const prompt = `Generate a professional cover letter for this job:
-Company: ${body.company_name || 'the company'}
-Position: ${body.job_title || 'the position'}
-Job Description: ${jobDetails}
-Tone: ${body.tone || 'professional'}
+      // Build personalized cover letter prompt using real profile data
+      const prompt = `You are JOBA (Job Application Agent) generating a cover letter for ${profile.name}.
 
-Write a compelling cover letter that highlights relevant experience. Keep it concise (3 paragraphs max).`;
+CANDIDATE PROFILE:
+Name: ${profile.name}
+Title: ${profile.title}
+Location: ${profile.location}
+Experience: ${profile.experience}
+Skills: ${profile.skills.join(', ')}
+Key Achievements: ${profile.achievements.join('; ')}
+Education: ${profile.education}
+Personal Hook: ${profile.personalHook}
+Closing Style: ${profile.closingStyle}
+
+COMPANY: ${companyName || 'the organization'}
+
+JOB:
+Position: ${jobTitle || 'the position'}
+Description: ${jobDetails || 'Not provided'}
+
+WRITING STANDARDS (MANDATORY):
+- NO em dashes (—) ever
+- NO choppy tech bro sentences
+- NO "I would be happy to" or "I am excited to apply"
+- NO corporate jargon
+- Write like a warm, confident professional - not a robot
+- Use natural contractions (I'm, I've, we're)
+- Be specific about achievements with numbers
+- Keep it to ONE PAGE (3 paragraphs max)
+- End with confidence, not begging
+
+TONE: ${body.tone || 'professional'}
+
+Generate a compelling, personalized cover letter that:
+1. Opens with a specific hook relevant to the company's mission
+2. Connects ${profile.name.split(' ')[0]}'s experience directly to the job requirements
+3. Weaves in the personal hook naturally (not forced)
+4. Closes with confidence using their closing style
+
+Write the full cover letter now:`;
 
       const claudeResult = await httpsRequest({
         hostname: 'api.anthropic.com',
@@ -20667,7 +20925,7 @@ Write a compelling cover letter that highlights relevant experience. Keep it con
         }
       }, JSON.stringify({
         model: 'claude-sonnet-4-20250514',
-        max_tokens: 1000,
+        max_tokens: 1500,
         messages: [{ role: 'user', content: prompt }]
       }));
 
@@ -20682,7 +20940,7 @@ Write a compelling cover letter that highlights relevant experience. Keep it con
         content: coverLetterContent,
         tone: body.tone || 'professional',
         generated_by: 'JOBA',
-        prompt_used: prompt,
+        prompt_used: prompt.substring(0, 500) + '...',
         status: 'draft'
       };
 
@@ -20702,8 +20960,9 @@ Write a compelling cover letter that highlights relevant experience. Keep it con
       return jsonResponse(res, 201, { 
         cover_letter: created[0], 
         content: coverLetterContent,
+        profile_used: profile.name,
         generated_by: 'JOBA (Job Application Agent)',
-        message: 'Cover letter generated' 
+        message: 'Cover letter generated for ' + profile.name
       });
     } catch (e) {
       return jsonResponse(res, 500, { error: e.message });
