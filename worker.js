@@ -16301,6 +16301,39 @@ Respond as this agent specifically — stay in character.`;
       }, storeData);
 
       console.log('[TASTE] Transcript stored in brain');
+
+      // ═══════════════════════════════════════════════════════════════════════════
+      // ⬡B:REACH.OMI.USER_CONTEXTS:PHASE9:fat_prompt_inclusion:20260228⬡
+      // PHASE 9: Store OMI transcripts in user_contexts for fat prompt inclusion
+      // This allows AIR to see ambient context when processing any request
+      // ═══════════════════════════════════════════════════════════════════════════
+      try {
+        const userId = body.uid || 'brandon_t10';
+        const contextData = JSON.stringify({
+          user_id: userId,
+          context_type: 'omi_ambient',
+          context_key: 'omi_transcript_' + Date.now(),
+          context_value: transcript.substring(0, 2000),
+          source: 'omi_webhook',
+          expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() // 24hr expiry
+        });
+        
+        await httpsRequest({
+          hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+          path: '/rest/v1/user_contexts',
+          method: 'POST',
+          headers: {
+            'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY,
+            'Authorization': 'Bearer ' + (process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY),
+            'Content-Type': 'application/json',
+            'Prefer': 'return=minimal'
+          }
+        }, contextData);
+        console.log('[OMI→FAT_PROMPT] Transcript stored in user_contexts');
+      } catch (ucErr) {
+        console.log('[OMI→FAT_PROMPT] user_contexts storage failed:', ucErr.message);
+      }
+
       // ═══════════════════════════════════════════════════════════════════════════
       // ⬡B:REACH.OMI.WAKE_WORD:FIX:instant_aba_commands:20260220⬡
       // FIX: Detect wake words ("Hey ABA", "ABA") in STREAMING and route to AIR IMMEDIATELY
@@ -20414,11 +20447,294 @@ We Are All ABA.`;
     }
   }
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ⬡B:REACH.AWA:PHASE8:apply_with_aba:20260228⬡
+  // AWA (Apply With ABA) - Job Application Satellite App
+  // Routes: /api/awa/jobs, /api/awa/applications, /api/awa/resumes, /api/awa/cover-letters
+  // Agent: JOBA (Job Application Agent)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // AWA JOBS - List all tracked jobs
+  if (path === '/api/awa/jobs' && method === 'GET') {
+    try {
+      const userId = req.headers?.get?.('x-user-id') || 'brandon_t10';
+      const result = await httpsRequest({
+        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+        path: '/rest/v1/awa_jobs?user_id=eq.' + encodeURIComponent(userId) + '&order=created_at.desc&limit=50',
+        method: 'GET',
+        headers: {
+          'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY,
+          'Authorization': 'Bearer ' + (process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY)
+        }
+      });
+      const jobs = JSON.parse(result.data || '[]');
+      return jsonResponse(res, 200, { jobs, count: jobs.length });
+    } catch (e) {
+      return jsonResponse(res, 500, { error: e.message });
+    }
+  }
+
+  // AWA JOBS - Create new job
+  if (path === '/api/awa/jobs' && method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      const userId = req.headers?.get?.('x-user-id') || body.user_id || 'brandon_t10';
+      
+      const jobData = {
+        user_id: userId,
+        company_name: body.company_name || body.company,
+        job_title: body.job_title || body.title,
+        job_url: body.job_url || body.url,
+        job_description: body.job_description || body.description,
+        location: body.location,
+        salary_min: body.salary_min,
+        salary_max: body.salary_max,
+        remote_type: body.remote_type || 'unknown',
+        status: body.status || 'saved',
+        priority: body.priority || 5,
+        notes: body.notes,
+        source: body.source,
+        tags: body.tags || []
+      };
+
+      const result = await httpsRequest({
+        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+        path: '/rest/v1/awa_jobs',
+        method: 'POST',
+        headers: {
+          'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY,
+          'Authorization': 'Bearer ' + (process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY),
+          'Content-Type': 'application/json',
+          'Prefer': 'return=representation'
+        }
+      }, JSON.stringify(jobData));
+      
+      const created = JSON.parse(result.data || '[]');
+      return jsonResponse(res, 201, { job: created[0], message: 'Job saved to AWA' });
+    } catch (e) {
+      return jsonResponse(res, 500, { error: e.message });
+    }
+  }
+
+  // AWA JOBS - Update job status
+  if (path.startsWith('/api/awa/jobs/') && method === 'PATCH') {
+    try {
+      const jobId = path.split('/')[4];
+      const body = await parseBody(req);
+      
+      const updates = {};
+      if (body.status) updates.status = body.status;
+      if (body.priority) updates.priority = body.priority;
+      if (body.notes) updates.notes = body.notes;
+      if (body.applied_at) updates.applied_at = body.applied_at;
+      
+      const result = await httpsRequest({
+        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+        path: '/rest/v1/awa_jobs?id=eq.' + jobId,
+        method: 'PATCH',
+        headers: {
+          'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY,
+          'Authorization': 'Bearer ' + (process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY),
+          'Content-Type': 'application/json',
+          'Prefer': 'return=representation'
+        }
+      }, JSON.stringify(updates));
+      
+      const updated = JSON.parse(result.data || '[]');
+      return jsonResponse(res, 200, { job: updated[0], message: 'Job updated' });
+    } catch (e) {
+      return jsonResponse(res, 500, { error: e.message });
+    }
+  }
+
+  // AWA APPLICATIONS - List applications
+  if (path === '/api/awa/applications' && method === 'GET') {
+    try {
+      const userId = req.headers?.get?.('x-user-id') || 'brandon_t10';
+      const result = await httpsRequest({
+        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+        path: '/rest/v1/awa_applications?user_id=eq.' + encodeURIComponent(userId) + '&order=created_at.desc&limit=50',
+        method: 'GET',
+        headers: {
+          'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY,
+          'Authorization': 'Bearer ' + (process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY)
+        }
+      });
+      const applications = JSON.parse(result.data || '[]');
+      return jsonResponse(res, 200, { applications, count: applications.length });
+    } catch (e) {
+      return jsonResponse(res, 500, { error: e.message });
+    }
+  }
+
+  // AWA RESUMES - List resumes
+  if (path === '/api/awa/resumes' && method === 'GET') {
+    try {
+      const userId = req.headers?.get?.('x-user-id') || 'brandon_t10';
+      const result = await httpsRequest({
+        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+        path: '/rest/v1/awa_resumes?user_id=eq.' + encodeURIComponent(userId) + '&order=created_at.desc',
+        method: 'GET',
+        headers: {
+          'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY,
+          'Authorization': 'Bearer ' + (process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY)
+        }
+      });
+      const resumes = JSON.parse(result.data || '[]');
+      return jsonResponse(res, 200, { resumes, count: resumes.length });
+    } catch (e) {
+      return jsonResponse(res, 500, { error: e.message });
+    }
+  }
+
+  // AWA RESUMES - Upload/Create resume
+  if (path === '/api/awa/resumes' && method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      const userId = req.headers?.get?.('x-user-id') || body.user_id || 'brandon_t10';
+      
+      const resumeData = {
+        user_id: userId,
+        name: body.name || 'Resume ' + new Date().toISOString().split('T')[0],
+        content: body.content,
+        file_url: body.file_url,
+        target_role: body.target_role,
+        target_industry: body.target_industry,
+        keywords: body.keywords || [],
+        is_master: body.is_master || false
+      };
+
+      const result = await httpsRequest({
+        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+        path: '/rest/v1/awa_resumes',
+        method: 'POST',
+        headers: {
+          'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY,
+          'Authorization': 'Bearer ' + (process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY),
+          'Content-Type': 'application/json',
+          'Prefer': 'return=representation'
+        }
+      }, JSON.stringify(resumeData));
+      
+      const created = JSON.parse(result.data || '[]');
+      return jsonResponse(res, 201, { resume: created[0], message: 'Resume saved' });
+    } catch (e) {
+      return jsonResponse(res, 500, { error: e.message });
+    }
+  }
+
+  // AWA COVER LETTERS - Generate with JOBA
+  if (path === '/api/awa/cover-letters' && method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      const userId = req.headers?.get?.('x-user-id') || body.user_id || 'brandon_t10';
+      
+      // Get job details
+      let jobDetails = body.job_description || '';
+      if (body.job_id && !jobDetails) {
+        const jobResult = await httpsRequest({
+          hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+          path: '/rest/v1/awa_jobs?id=eq.' + body.job_id + '&select=*',
+          method: 'GET',
+          headers: {
+            'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY,
+            'Authorization': 'Bearer ' + (process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY)
+          }
+        });
+        const jobs = JSON.parse(jobResult.data || '[]');
+        if (jobs[0]) {
+          jobDetails = jobs[0].job_description || '';
+        }
+      }
+
+      // Generate cover letter via Claude
+      const prompt = `Generate a professional cover letter for this job:
+Company: ${body.company_name || 'the company'}
+Position: ${body.job_title || 'the position'}
+Job Description: ${jobDetails}
+Tone: ${body.tone || 'professional'}
+
+Write a compelling cover letter that highlights relevant experience. Keep it concise (3 paragraphs max).`;
+
+      const claudeResult = await httpsRequest({
+        hostname: 'api.anthropic.com',
+        path: '/v1/messages',
+        method: 'POST',
+        headers: {
+          'x-api-key': process.env.ANTHROPIC_API_KEY,
+          'anthropic-version': '2023-06-01',
+          'Content-Type': 'application/json'
+        }
+      }, JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1000,
+        messages: [{ role: 'user', content: prompt }]
+      }));
+
+      const claudeData = JSON.parse(claudeResult.data || '{}');
+      const coverLetterContent = claudeData.content?.[0]?.text || 'Failed to generate';
+
+      // Store cover letter
+      const coverData = {
+        user_id: userId,
+        job_id: body.job_id,
+        resume_id: body.resume_id,
+        content: coverLetterContent,
+        tone: body.tone || 'professional',
+        generated_by: 'JOBA',
+        prompt_used: prompt,
+        status: 'draft'
+      };
+
+      const result = await httpsRequest({
+        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+        path: '/rest/v1/awa_cover_letters',
+        method: 'POST',
+        headers: {
+          'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY,
+          'Authorization': 'Bearer ' + (process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY),
+          'Content-Type': 'application/json',
+          'Prefer': 'return=representation'
+        }
+      }, JSON.stringify(coverData));
+      
+      const created = JSON.parse(result.data || '[]');
+      return jsonResponse(res, 201, { 
+        cover_letter: created[0], 
+        content: coverLetterContent,
+        generated_by: 'JOBA (Job Application Agent)',
+        message: 'Cover letter generated' 
+      });
+    } catch (e) {
+      return jsonResponse(res, 500, { error: e.message });
+    }
+  }
+
+  // AWA COVER LETTERS - List
+  if (path === '/api/awa/cover-letters' && method === 'GET') {
+    try {
+      const userId = req.headers?.get?.('x-user-id') || 'brandon_t10';
+      const result = await httpsRequest({
+        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+        path: '/rest/v1/awa_cover_letters?user_id=eq.' + encodeURIComponent(userId) + '&order=created_at.desc',
+        method: 'GET',
+        headers: {
+          'apikey': process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY,
+          'Authorization': 'Bearer ' + (process.env.SUPABASE_KEY_ROLE_KEY || process.env.SUPABASE_KEY)
+        }
+      });
+      const letters = JSON.parse(result.data || '[]');
+      return jsonResponse(res, 200, { cover_letters: letters, count: letters.length });
+    } catch (e) {
+      return jsonResponse(res, 500, { error: e.message });
+    }
+  }
+
   // ⬡B:AIR:REACH.API.NOTFOUND:CODE:infrastructure.error.404:USER→REACH→ERROR:T10:v1.5.0:20260213:n1f2d⬡ CATCH-ALL
   // ═══════════════════════════════════════════════════════════════════════
   jsonResponse(res, 404, { 
     error: 'Route not found: ' + method + ' ' + path,
-    available: ['/api/escalate', '/api/escalate/twiml', '/api/escalate/confirm', '/api/call/dial', '/api/call/twiml', '/api/call/status', '/api/call/record', '/api/air/trigger/email', '/api/air/trigger/omi', '/api/air/trigger/calendar', '/api/air/trigger/job', '/api/air/trigger/system', '/api/air/think-tank', '/api/air/caca', '/api/air/erica', '/api/air/grit', '/api/github/push', '/api/sage/search', '/api/sage/index', '/api/iman/draft', '/api/iman/send', '/api/iman/drafts', '/api/devices/register', '/api/devices', '/api/pulse/status', '/api/pulse/trigger', '/api/router', '/api/models/claude', '/api/voice/deepgram-token', '/api/voice/tts', '/api/voice/tts-stream', '/api/omi/manifest', '/api/omi/webhook', '/api/sms/send', '/api/brain/search', '/api/brain/store', '/api/brain/code-patch', '/api/brain/code-patches', '/api/brain/store-patch', '/api/brain/apply-patch', '/ws:command-center'],
+    available: ['/api/escalate', '/api/escalate/twiml', '/api/escalate/confirm', '/api/call/dial', '/api/call/twiml', '/api/call/status', '/api/call/record', '/api/air/trigger/email', '/api/air/trigger/omi', '/api/air/trigger/calendar', '/api/air/trigger/job', '/api/air/trigger/system', '/api/air/think-tank', '/api/air/caca', '/api/air/erica', '/api/air/grit', '/api/github/push', '/api/sage/search', '/api/sage/index', '/api/iman/draft', '/api/iman/send', '/api/iman/drafts', '/api/devices/register', '/api/devices', '/api/pulse/status', '/api/pulse/trigger', '/api/router', '/api/models/claude', '/api/voice/deepgram-token', '/api/voice/tts', '/api/voice/tts-stream', '/api/omi/manifest', '/api/omi/webhook', '/api/sms/send', '/api/brain/search', '/api/brain/store', '/api/brain/code-patch', '/api/brain/code-patches', '/api/brain/store-patch', '/api/brain/apply-patch', '/api/awa/jobs', '/api/awa/applications', '/api/awa/resumes', '/api/awa/cover-letters', '/ws:command-center'],
     hint: 'We are all ABA'
   });
 });
