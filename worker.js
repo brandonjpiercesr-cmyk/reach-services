@@ -679,6 +679,18 @@ const TEAM_PROFILES = {
     education: '',
     personalHook: '',
     closingStyle: ''
+  },
+  gmg: {
+    id: 'gmg', name: 'Global Majority Group', 
+    title: 'BIPOC-Led Nonprofit Fundraising Consultancy',
+    email: 'info@globalmajoritygroup.com', phone: '336-549-9608',
+    location: 'Remote (Greensboro, NC headquarters)',
+    experience: 'GMG combines insider grantmaking knowledge with proven nonprofit leadership to deliver 25-30% grant success rates (2-3x industry averages). With $260M+ in philanthropic capital influenced across 65+ organizations in 15+ geographic markets.',
+    skills: ['Grant Writing', 'Development Strategy', 'Fractional VP/Director Leadership', 'Capital Campaigns', 'Major Gift Solicitation', 'Board Development', 'Feasibility Studies', 'Donor Cultivation'],
+    achievements: ['$260M+ total capital raised', '65+ organizations served', '15+ geographic markets', '25-30% grant success rate', 'Sectors: Housing, Education, Youth, Sports, Faith-based, International'],
+    education: 'Combined: Ed.D. USC (Eric Lane), BA UNC Charlotte (Brandon Pierce)',
+    personalHook: 'We are not traditional consultants. We are practitioners who have raised hundreds of millions ourselves. When you work with GMG, you get the people who have been in your shoes.',
+    closingStyle: 'Partnership-focused, emphasizing shared mission and proven results'
   }
 };
 
@@ -9055,19 +9067,20 @@ async function checkEmails(pulseId) {
                   const matchPrompt = `You are JOBA (Job Opportunity Bot Assistant). Given a job title, determine which team member it fits best.
 
 TEAM MATCHING RULES (from your JD):
-${jobaRules || 'Brandon = Executive Director, CDO, VP Development, Chief roles. Eric = Athletics, Education, University roles. BJ = Director of Development, Grant Writer roles. CJ = Development Manager, Coordinator, Community roles. Vante = Development Manager, Coordinator roles. Dwayne = Operations, Finance, Administrative roles.'}
+${jobaRules || 'BRANDON & ERIC (shared): Executive Director, CDO, VP, part-time dev over $50/hr - MUST BE REMOTE. GMG: Consultant, Contractor roles. BJ: ALL Director of Development roles, Marketing, Communications. CJ & VANTE (shared): Development Manager, Coordinator, Grant Writer. DWAYNE: Finance, Accounting, Dev Ops, Admin roles.'}
 
 AVAILABLE TEAM:
-- brandon (Executive level, CDO, VP Development, Foundation leadership)
-- eric (Athletics, Education, University, College)
-- bj (Director of Development, Grant Writer, DOD)
-- cj (Development Manager, Coordinator, Community)
-- vante (Development Manager, Coordinator - same tier as CJ)
-- dwayne (Operations, Finance, Administrative, Budget)
+- brandon (Executive Director, CDO, VP - shares list with Eric, REMOTE ONLY)
+- eric (Executive Director, CDO, VP - shares list with Brandon, REMOTE ONLY)
+- gmg (Consultant, Contractor, Fractional leadership)
+- bj (ALL Director of Development roles, Marketing, Communications)
+- cj (Development Manager, Coordinator, Grant Writer - shares with Vante)
+- vante (Development Manager, Coordinator, Grant Writer - shares with CJ)
+- dwayne (Finance, Accounting, Dev Ops, Admin)
 
 JOB TITLE: ${titleClean}
 
-Respond with ONLY the lowercase team member id that fits best (brandon, eric, bj, cj, vante, or dwayne). Nothing else.`;
+Respond with ONLY the lowercase team member id that fits best (brandon, eric, gmg, bj, cj, vante, or dwayne). For Executive/CDO/VP roles respond with brandon. Nothing else.`;
 
                   const matchResult = await httpsRequest({
                     hostname: 'api.anthropic.com',
