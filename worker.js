@@ -20989,6 +20989,128 @@ Write the full cover letter now:`;
     }
   }
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // VARA REAL-TIME INTELLIGENCE ENDPOINT
+  // ⬡B:REACH.VARA.STATUS:ROUTE:vara.realtime:20260228⬡
+  // Frontend calls this instead of hardcoded garbage
+  // ═══════════════════════════════════════════════════════════════════════════
+  if (path === '/api/vara/status' && method === 'GET') {
+    try {
+      const userId = req.headers?.get?.('x-user-id') || 'brandon';
+      
+      // Get recent activity from brain
+      const activityResult = await httpsRequest({
+        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+        path: '/rest/v1/aba_memory?order=created_at.desc&limit=5&select=content,source,created_at',
+        method: 'GET',
+        headers: {
+          'apikey': SUPABASE_KEY,
+          'Authorization': 'Bearer ' + SUPABASE_KEY
+        }
+      });
+      
+      const recentMemories = JSON.parse(activityResult.data || '[]');
+      const recentActivity = recentMemories.map(m => m.content?.substring(0, 100)).filter(Boolean);
+      
+      // Get pending jobs count
+      const jobsResult = await httpsRequest({
+        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+        path: '/rest/v1/awa_jobs?status=eq.saved&select=count',
+        method: 'GET',
+        headers: {
+          'apikey': SUPABASE_KEY,
+          'Authorization': 'Bearer ' + SUPABASE_KEY,
+          'Prefer': 'count=exact'
+        }
+      });
+      
+      const pendingJobs = parseInt(jobsResult.headers?.['content-range']?.split('/')[1] || '0');
+      
+      // Build REAL status based on actual data
+      const hour = new Date().getHours();
+      const timeOfDay = hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : 'evening';
+      
+      const statusItems = [];
+      if (pendingJobs > 0) statusItems.push(pendingJobs + ' jobs saved');
+      if (recentActivity.length > 0) statusItems.push('Recent activity logged');
+      
+      return jsonResponse(res, 200, {
+        greeting: 'Good ' + timeOfDay,
+        user: userId,
+        status: statusItems.length > 0 ? statusItems.join(', ') : 'Standing by',
+        pending_jobs: pendingJobs,
+        recent_activity: recentActivity,
+        timestamp: new Date().toISOString()
+      });
+    } catch (e) {
+      return jsonResponse(res, 500, { error: e.message });
+    }
+  }
+
+  // VARA SPEAK - Generate real-time narration from AIR
+  // ⬡B:REACH.VARA.SPEAK:ROUTE:vara.narrate:20260228⬡
+  if (path === '/api/vara/speak' && method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      const context = body.context || 'general';
+      const userId = body.user_id || 'brandon';
+      
+      // Get relevant context from brain
+      const contextResult = await httpsRequest({
+        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+        path: '/rest/v1/aba_memory?order=importance.desc,created_at.desc&limit=3&select=content',
+        method: 'GET',
+        headers: {
+          'apikey': SUPABASE_KEY,
+          'Authorization': 'Bearer ' + SUPABASE_KEY
+        }
+      });
+      
+      const memories = JSON.parse(contextResult.data || '[]');
+      const contextInfo = memories.map(m => m.content?.substring(0, 150)).filter(Boolean).join('\n');
+      
+      // Generate VARA speech via Claude
+      const hour = new Date().getHours();
+      const timeGreeting = hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : 'evening';
+      
+      const prompt = `You are VARA (Vocal Authorized Representative of ABA), Brandon's AI assistant. 
+Time: ${timeGreeting}
+Context requested: ${context}
+Recent activity: ${contextInfo || 'Nothing pressing'}
+
+Generate a NATURAL, WARM, BUTLER-LIKE message for Brandon. NOT robotic. NOT corporate. NOT servile.
+Like JARVIS - confident, helpful, personal.
+Keep under 3 sentences. Be specific if there's real activity to mention.`;
+
+      const varaResult = await httpsRequest({
+        hostname: 'api.anthropic.com',
+        path: '/v1/messages',
+        method: 'POST',
+        headers: {
+          'x-api-key': process.env.ANTHROPIC_API_KEY,
+          'anthropic-version': '2023-06-01',
+          'Content-Type': 'application/json'
+        }
+      }, JSON.stringify({
+        model: 'claude-3-haiku-20240307',
+        max_tokens: 200,
+        messages: [{ role: 'user', content: prompt }]
+      }));
+
+      const varaData = JSON.parse(varaResult.data || '{}');
+      const speech = varaData.content?.[0]?.text || 'Standing by.';
+      
+      return jsonResponse(res, 200, { 
+        speech: speech,
+        context: context,
+        generated_by: 'VARA',
+        timestamp: new Date().toISOString()
+      });
+    } catch (e) {
+      return jsonResponse(res, 500, { error: e.message });
+    }
+  }
+
   // ⬡B:AIR:REACH.API.NOTFOUND:CODE:infrastructure.error.404:USER→REACH→ERROR:T10:v1.5.0:20260213:n1f2d⬡ CATCH-ALL
   // ═══════════════════════════════════════════════════════════════════════
   jsonResponse(res, 404, { 
