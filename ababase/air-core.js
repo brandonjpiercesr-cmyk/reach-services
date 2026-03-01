@@ -98,6 +98,9 @@ function detectAgents(message) {
   if (lower.includes('remember') || lower.includes('memory') || lower.includes('note') || lower.includes('save')) {
     agents.push('MEMO');
   }
+  if (lower.includes('job') || lower.includes('cover letter') || lower.includes('resume') || lower.includes('interview') || lower.includes('application') || lower.includes('awa')) {
+    agents.push('JOBA');
+  }
   
   return [...new Set(agents)];
 }

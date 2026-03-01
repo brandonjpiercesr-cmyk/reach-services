@@ -206,6 +206,115 @@ const TOOL_DEFINITIONS = [
       required: ['query']
     }
   }
+,
+
+  {
+    name: 'awa_load_jobs',
+    description: 'Load all AWA jobs from brain (aba_memory where memory_type=awa_job). Returns jobs assigned to team members.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        assignee: {
+          type: 'string',
+          description: 'Filter by assignee (brandon, eric, bj, cj, vante, dwayne, gmg) or omit for all'
+        }
+      },
+      required: []
+    }
+  },
+  {
+    name: 'awa_update_job',
+    description: 'Update an AWA job record in brain. Can update status, notes, cover_letter, resume_version, interview_prep.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        job_id: {
+          type: 'string',
+          description: 'The job ID (from aba_memory.id)'
+        },
+        updates: {
+          type: 'object',
+          description: 'Fields to update (status, notes, cover_letter, resume_version, interview_prep)'
+        }
+      },
+      required: ['job_id', 'updates']
+    }
+  },
+  {
+    name: 'awa_generate_cover_letter',
+    description: 'Generate a cover letter for a job using JOBA agent. Uses team member profile and job details.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        job_title: {
+          type: 'string',
+          description: 'Job title'
+        },
+        organization: {
+          type: 'string',
+          description: 'Organization/company name'
+        },
+        assignee: {
+          type: 'string',
+          description: 'Team member ID (brandon, eric, bj, cj, vante, dwayne)'
+        },
+        job_url: {
+          type: 'string',
+          description: 'URL to job posting for additional context'
+        }
+      },
+      required: ['job_title', 'organization', 'assignee']
+    }
+  },
+  {
+    name: 'awa_generate_resume',
+    description: 'Generate a tailored resume for a job using JOBA agent. Highlights relevant experience for the role.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        job_title: {
+          type: 'string',
+          description: 'Target job title'
+        },
+        organization: {
+          type: 'string',
+          description: 'Organization/company name'
+        },
+        assignee: {
+          type: 'string',
+          description: 'Team member ID'
+        },
+        key_requirements: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Key requirements to emphasize'
+        }
+      },
+      required: ['job_title', 'organization', 'assignee']
+    }
+  },
+  {
+    name: 'awa_interview_prep',
+    description: 'Generate interview prep questions and answers for a job. Includes behavioral, technical, and role-specific questions.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        job_title: {
+          type: 'string',
+          description: 'Job title'
+        },
+        organization: {
+          type: 'string',
+          description: 'Organization/company name'
+        },
+        assignee: {
+          type: 'string',
+          description: 'Team member ID'
+        }
+      },
+      required: ['job_title', 'organization', 'assignee']
+    }
+  }
 ];
 
 // Tool execution function
@@ -668,6 +777,132 @@ async function executeToolCall(toolName, input, context) {
         return { error: e.message, status: 'error' };
       }
     }
+    // ═══════════════════════════════════════════════════════════════════
+    // AWA HANDLERS - Apply With ABA
+    // ═══════════════════════════════════════════════════════════════════
+    
+    case 'awa_load_jobs': {
+      try {
+        const assignee = input.assignee;
+        let url = `https://htlxjkbrstpwwtzsbyvb.supabase.co/rest/v1/aba_memory?memory_type=eq.awa_job&select=id,content,created_at&order=created_at.desc`;
+        
+        const response = await fetch(url, {
+          headers: {
+            'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0bHhqa2Jyc3Rwd3d0enNieXZiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA1MzI4MjEsImV4cCI6MjA4NjEwODgyMX0.MOgNYkezWpgxTO3ZHd0omZ0WLJOOR-tL7hONXWG9eBw'
+          }
+        });
+        
+        if (!response.ok) {
+          return { status: 'error', error: 'Failed to load jobs' };
+        }
+        
+        let jobs = await response.json();
+        jobs = jobs.map(j => {
+          const content = typeof j.content === 'string' ? JSON.parse(j.content) : j.content;
+          return { id: j.id, ...content };
+        });
+        
+        // Filter by assignee if specified
+        if (assignee) {
+          jobs = jobs.filter(j => j.assignees && j.assignees.includes(assignee));
+        }
+        
+        return {
+          status: 'success',
+          count: jobs.length,
+          jobs: jobs
+        };
+      } catch (e) {
+        console.error('[awa_load_jobs] Error:', e.message);
+        return { status: 'error', error: e.message };
+      }
+    }
+    
+    case 'awa_update_job': {
+      try {
+        const { job_id, updates } = input;
+        
+        // Get current job
+        const getRes = await fetch(
+          `https://htlxjkbrstpwwtzsbyvb.supabase.co/rest/v1/aba_memory?id=eq.${job_id}&select=content`,
+          {
+            headers: {
+              'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0bHhqa2Jyc3Rwd3d0enNieXZiIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MDUzMjgyMSwiZXhwIjoyMDg2MTA4ODIxfQ.G55zXnfanoUxRAoaYz-tD9FDJ53xHH-pRgDrKss_Iqo',
+              'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0bHhqa2Jyc3Rwd3d0enNieXZiIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MDUzMjgyMSwiZXhwIjoyMDg2MTA4ODIxfQ.G55zXnfanoUxRAoaYz-tD9FDJ53xHH-pRgDrKss_Iqo'
+            }
+          }
+        );
+        
+        const [item] = await getRes.json();
+        if (!item) {
+          return { status: 'error', error: 'Job not found' };
+        }
+        
+        const content = typeof item.content === 'string' ? JSON.parse(item.content) : item.content;
+        const newContent = { ...content, ...updates, updated_at: new Date().toISOString() };
+        
+        // Update
+        const updateRes = await fetch(
+          `https://htlxjkbrstpwwtzsbyvb.supabase.co/rest/v1/aba_memory?id=eq.${job_id}`,
+          {
+            method: 'PATCH',
+            headers: {
+              'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0bHhqa2Jyc3Rwd3d0enNieXZiIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MDUzMjgyMSwiZXhwIjoyMDg2MTA4ODIxfQ.G55zXnfanoUxRAoaYz-tD9FDJ53xHH-pRgDrKss_Iqo',
+              'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0bHhqa2Jyc3Rwd3d0enNieXZiIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MDUzMjgyMSwiZXhwIjoyMDg2MTA4ODIxfQ.G55zXnfanoUxRAoaYz-tD9FDJ53xHH-pRgDrKss_Iqo',
+              'Content-Type': 'application/json',
+              'Prefer': 'return=minimal'
+            },
+            body: JSON.stringify({ content: JSON.stringify(newContent) })
+          }
+        );
+        
+        return {
+          status: updateRes.ok ? 'success' : 'error',
+          job_id: job_id,
+          updated: Object.keys(updates)
+        };
+      } catch (e) {
+        console.error('[awa_update_job] Error:', e.message);
+        return { status: 'error', error: e.message };
+      }
+    }
+    
+    case 'awa_generate_cover_letter': {
+      // This will be handled by the FCW with JOBA agent context
+      // The tool just returns the request - actual generation happens in AIR loop
+      return {
+        status: 'generate',
+        type: 'cover_letter',
+        job_title: input.job_title,
+        organization: input.organization,
+        assignee: input.assignee,
+        message: `Generate a professional cover letter for ${input.assignee} applying to ${input.job_title} at ${input.organization}. Use the team member profile from brain.`
+      };
+    }
+    
+    case 'awa_generate_resume': {
+      return {
+        status: 'generate',
+        type: 'resume',
+        job_title: input.job_title,
+        organization: input.organization,
+        assignee: input.assignee,
+        message: `Generate a tailored resume for ${input.assignee} targeting ${input.job_title} at ${input.organization}. Emphasize relevant experience.`
+      };
+    }
+    
+    case 'awa_interview_prep': {
+      return {
+        status: 'generate',
+        type: 'interview_prep',
+        job_title: input.job_title,
+        organization: input.organization,
+        assignee: input.assignee,
+        message: `Generate interview prep for ${input.assignee} for ${input.job_title} at ${input.organization}. Include likely questions and strong answers.`
+      };
+    }
+
+
     
     default:
       return {

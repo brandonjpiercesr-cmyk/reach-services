@@ -264,3 +264,185 @@ app.listen(PORT, () => {
 });
 
 module.exports = { app };
+
+// ═══════════════════════════════════════════════════════════════════
+// AWA ENDPOINTS - Apply With ABA
+// Job pipeline: Load, Update, Cover Letters, Resumes, Interview Prep
+// ═══════════════════════════════════════════════════════════════════
+
+// GET /api/awa/jobs - Load all jobs
+app.get('/api/awa/jobs', async (req, res) => {
+  try {
+    const assignee = req.query.assignee;
+    let url = `https://htlxjkbrstpwwtzsbyvb.supabase.co/rest/v1/aba_memory?memory_type=eq.awa_job&select=id,content,created_at&order=created_at.desc`;
+    
+    const response = await fetch(url, {
+      headers: { 'apikey': process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0bHhqa2Jyc3Rwd3d0enNieXZiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA1MzI4MjEsImV4cCI6MjA4NjEwODgyMX0.MOgNYkezWpgxTO3ZHd0omZ0WLJOOR-tL7hONXWG9eBw' }
+    });
+    
+    let jobs = await response.json();
+    jobs = jobs.map(j => {
+      const content = typeof j.content === 'string' ? JSON.parse(j.content) : j.content;
+      return { id: j.id, ...content };
+    });
+    
+    if (assignee) {
+      jobs = jobs.filter(j => j.assignees && j.assignees.includes(assignee));
+    }
+    
+    res.json({ success: true, count: jobs.length, jobs });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// PATCH /api/awa/jobs/:id - Update a job
+app.patch('/api/awa/jobs/:id', async (req, res) => {
+  try {
+    const jobId = req.params.id;
+    const updates = req.body;
+    
+    // Get current
+    const getRes = await fetch(
+      `https://htlxjkbrstpwwtzsbyvb.supabase.co/rest/v1/aba_memory?id=eq.${jobId}&select=content`,
+      { headers: { 'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY } }
+    );
+    const [item] = await getRes.json();
+    if (!item) return res.status(404).json({ error: 'Job not found' });
+    
+    const content = typeof item.content === 'string' ? JSON.parse(item.content) : item.content;
+    const newContent = { ...content, ...updates, updated_at: new Date().toISOString() };
+    
+    await fetch(
+      `https://htlxjkbrstpwwtzsbyvb.supabase.co/rest/v1/aba_memory?id=eq.${jobId}`,
+      {
+        method: 'PATCH',
+        headers: {
+          'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=minimal'
+        },
+        body: JSON.stringify({ content: JSON.stringify(newContent) })
+      }
+    );
+    
+    res.json({ success: true, job_id: jobId, updated: Object.keys(updates) });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// POST /api/awa/cover-letter - Generate cover letter via FCW
+app.post('/api/awa/cover-letter',
+  authenticateUser,
+  async (req, res) => {
+    const { job_title, organization, assignee, job_url } = req.body;
+    
+    try {
+      const result = await airProcess({
+        supabaseClient: req.supabaseUser,
+        userId: req.userId,
+        message: `Generate a professional cover letter for ${assignee} applying to ${job_title} at ${organization}. 
+                  Use the team member profile from brain (search for HAM profile or team_profiles).
+                  Make it compelling, specific to the role, and highlight relevant experience.
+                  ${job_url ? `Job posting: ${job_url}` : ''}`,
+        channel: 'awa'
+      });
+      
+      res.json({
+        success: true,
+        content: result.response,
+        metadata: result.metadata
+      });
+    } catch (e) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  }
+);
+
+// POST /api/awa/resume - Generate tailored resume via FCW
+app.post('/api/awa/resume',
+  authenticateUser,
+  async (req, res) => {
+    const { job_title, organization, assignee, key_requirements } = req.body;
+    
+    try {
+      const result = await airProcess({
+        supabaseClient: req.supabaseUser,
+        userId: req.userId,
+        message: `Generate a tailored resume for ${assignee} targeting ${job_title} at ${organization}.
+                  Use the team member profile from brain.
+                  Emphasize relevant experience and skills.
+                  ${key_requirements ? `Key requirements to highlight: ${key_requirements.join(', ')}` : ''}
+                  Format as professional resume text.`,
+        channel: 'awa'
+      });
+      
+      res.json({
+        success: true,
+        content: result.response,
+        metadata: result.metadata
+      });
+    } catch (e) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  }
+);
+
+// POST /api/awa/interview-prep - Generate interview prep via FCW
+app.post('/api/awa/interview-prep',
+  authenticateUser,
+  async (req, res) => {
+    const { job_title, organization, assignee } = req.body;
+    
+    try {
+      const result = await airProcess({
+        supabaseClient: req.supabaseUser,
+        userId: req.userId,
+        message: `Generate comprehensive interview preparation for ${assignee} interviewing for ${job_title} at ${organization}.
+                  Include:
+                  1. Likely behavioral questions with strong STAR-format answers
+                  2. Technical/role-specific questions
+                  3. Questions to ask the interviewer
+                  4. Key talking points about their background
+                  Use the team member profile from brain.`,
+        channel: 'awa'
+      });
+      
+      res.json({
+        success: true,
+        content: result.response,
+        metadata: result.metadata
+      });
+    } catch (e) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  }
+);
+
+// POST /api/awa/chat - Chat about a job via FCW
+app.post('/api/awa/chat',
+  authenticateUser,
+  async (req, res) => {
+    const { message, job } = req.body;
+    
+    try {
+      const jobContext = job ? `Context: Discussing ${job.job_title} at ${job.organization}. Assignees: ${job.assignees?.join(', ')}. Status: ${job.status}.` : '';
+      
+      const result = await airProcess({
+        supabaseClient: req.supabaseUser,
+        userId: req.userId,
+        message: `${jobContext}\n\nUser question: ${message}`,
+        channel: 'awa'
+      });
+      
+      res.json({
+        success: true,
+        response: result.response,
+        metadata: result.metadata
+      });
+    } catch (e) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  }
+);
