@@ -21014,263 +21014,162 @@ We Are All ABA.`;
 
   // AWA RESUMES - Generate tailored resume with JOBA
   // ⬡B:REACH.AWA.RESUME_GEN:ROUTE:joba.generate_resume:20260228⬡
+  // AWA RESUMES - Generate tailored resume with FCW
+  // ⬡B:REACH.AWA.RESUME_GEN:FCW:air.process:20260301⬡
+  // ROUTING: Request → REACH → ABABASE /api/air/process → FCW (87 agents) → Response
   if (path === '/api/awa/resumes/generate' && method === 'POST') {
     try {
       const body = await parseBody(req);
-      const userId = req.headers?.get?.('x-user-id') || body.user_id || 'brandon';
-      
-      // Get team member profile
-      const profileKey = userId.toLowerCase().replace('_t10', '').replace('_t9', '').replace('_t8', '').replace('_t7', '');
-      const profile = TEAM_PROFILES[profileKey] || TEAM_PROFILES.brandon;
-      
-      // If profile is blank, return error
-      if (!profile.experience || profile.experience.length < 10) {
-        return jsonResponse(res, 400, { 
-          error: 'Profile not set up for ' + profile.name,
-          message: 'Please add experience and skills for this team member before generating resumes.'
-        });
-      }
-
-      const targetRole = body.target_role || body.job_title || 'Development Professional';
+      const userId = body.user_id || 'brandon';
+      const targetRole = body.target_role || body.job_title || '';
       const jobDescription = body.job_description || '';
-
-      // Build personalized resume prompt
-      const prompt = `You are JOBA (Job Application Agent) generating a tailored resume for ${profile.name}.
-
-CANDIDATE PROFILE:
-Name: ${profile.name}
-Current Title: ${profile.title}
-Location: ${profile.location}
-Email: ${profile.email}
-Phone: ${profile.phone}
-Experience: ${profile.experience}
-Skills: ${profile.skills.join(', ')}
-Achievements: ${profile.achievements.join('; ')}
-Education: ${profile.education}
-
-TARGET ROLE: ${targetRole}
-${jobDescription ? 'JOB DESCRIPTION: ' + jobDescription : ''}
-
-WRITING STANDARDS (MANDATORY):
-- NO em dashes ever
-- Use action verbs: Led, Managed, Developed, Increased, Achieved
-- Quantify achievements with numbers and percentages
-- Keep to ONE PAGE
-- Professional but warm tone
-- ATS-friendly formatting (clean sections)
-
-Generate a tailored resume in this format:
-
-${profile.name.toUpperCase()}
-${profile.email} | ${profile.phone} | ${profile.location}
-
-PROFESSIONAL SUMMARY
-[2-3 sentences highlighting most relevant experience for the target role]
-
-EXPERIENCE
-[List 2-3 most relevant positions with bullet points of achievements]
-
-EDUCATION
-${profile.education}
-
-SKILLS
-[Most relevant skills for the role, comma-separated]
-
-Write the full tailored resume now:`;
-
-      const claudeResult = await httpsRequest({
-        hostname: 'api.anthropic.com',
-        path: '/v1/messages',
+      const jobId = body.job_id || null;
+      
+      // Route through ABABASE FCW - NOT direct Claude call
+      const fcwResult = await httpsRequest({
+        hostname: 'abacia-services.onrender.com',
+        path: '/api/air/process',
         method: 'POST',
         headers: {
-          'x-api-key': process.env.ANTHROPIC_API_KEY,
-          'anthropic-version': '2023-06-01',
           'Content-Type': 'application/json'
         }
       }, JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 2000,
-        messages: [{ role: 'user', content: prompt }]
+        message: `Generate a tailored resume for ${userId} targeting the role: ${targetRole}. Job description: ${jobDescription || 'Not provided'}. Use the team profile from brain for ${userId}. Follow ALL writing standards from brain. Format as a clean, ATS-friendly resume.`,
+        type: 'awa_resume',
+        userId: userId,
+        channel: 'awa',
+        context: {
+          action: 'generate_resume',
+          job_id: jobId,
+          target_role: targetRole,
+          job_description: jobDescription,
+          team_member: userId
+        }
       }));
-
-      const claudeData = JSON.parse(claudeResult.data || '{}');
-      const resumeContent = claudeData.content?.[0]?.text || 'Failed to generate';
-
-      // Store resume
+      
+      const fcwData = JSON.parse(fcwResult.data || '{}');
+      const resumeContent = fcwData.response || 'Failed to generate via FCW';
+      const agentsRan = fcwData.agents || [];
+      
+      // Store resume in brain
       const resumeData = {
         user_id: userId,
-        name: 'Resume for ' + targetRole + ' - ' + new Date().toISOString().split('T')[0],
+        name: 'Resume - ' + targetRole + ' - ' + new Date().toISOString().split('T')[0],
         content: resumeContent,
         target_role: targetRole,
-        keywords: profile.skills,
+        generated_by: 'JOBA via FCW',
+        fcw_agents: agentsRan.length,
         is_master: false
       };
-
-      const result = await httpsRequest({
+      
+      await httpsRequest({
         hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
         path: '/rest/v1/awa_resumes',
         method: 'POST',
         headers: {
           'apikey': SUPABASE_KEY,
-          'Authorization': 'Bearer ' + (SUPABASE_KEY),
+          'Authorization': 'Bearer ' + SUPABASE_KEY,
           'Content-Type': 'application/json',
-          'Prefer': 'return=representation'
+          'Prefer': 'return=minimal'
         }
       }, JSON.stringify(resumeData));
       
-      const created = JSON.parse(result.data || '[]');
-      return jsonResponse(res, 201, { 
-        resume: created[0], 
+      return jsonResponse(res, 201, {
         content: resumeContent,
-        profile_used: profile.name,
+        generated_by: 'JOBA via FCW',
+        fcw_agents_ran: agentsRan.length,
+        agents: agentsRan.map(a => a.agent || a.name || 'unknown'),
+        profile_used: userId,
         target_role: targetRole,
-        generated_by: 'JOBA (Job Application Agent)',
-        message: 'Resume generated for ' + profile.name
+        message: 'Resume generated via FCW (not micro-task)'
       });
     } catch (e) {
-      return jsonResponse(res, 500, { error: e.message });
+      console.error('[AWA] FCW Resume Error:', e.message);
+      return jsonResponse(res, 500, { error: e.message, note: 'FCW route failed' });
     }
   }
 
-  // AWA COVER LETTERS - Generate with JOBA
-  // ⬡B:REACH.AWA.COVER_LETTER_GEN:ROUTE:joba.generate:20260228⬡
+  // AWA COVER LETTERS - Generate with FCW (NOT micro-task)
+  // ⬡B:REACH.AWA.COVER_LETTER:FCW:air.process:20260301⬡
+  // ROUTING: Request → REACH → ABABASE /api/air/process → FCW (87 agents) → Response
   if (path === '/api/awa/cover-letters' && method === 'POST') {
     try {
       const body = await parseBody(req);
-      const userId = req.headers?.get?.('x-user-id') || body.user_id || 'brandon';
+      const userId = body.user_id || 'brandon';
+      const jobTitle = body.job_title || '';
+      const companyName = body.company_name || '';
+      const jobDescription = body.job_description || '';
+      const jobId = body.job_id || null;
+      const tone = body.tone || 'professional';
       
-      // Get team member profile - map user_id to profile key
-      const profileKey = userId.toLowerCase().replace('_t10', '').replace('_t9', '').replace('_t8', '').replace('_t7', '');
-      const profile = TEAM_PROFILES[profileKey] || TEAM_PROFILES.brandon;
-      
-      // If profile is blank (Vante, Dwayne), return error
-      if (!profile.experience || profile.experience.length < 10) {
-        return jsonResponse(res, 400, { 
-          error: 'Profile not set up for ' + profile.name,
-          message: 'Please add experience and skills for this team member before generating cover letters.'
-        });
-      }
-      
-      // Get job details
-      let jobTitle = body.job_title || '';
-      let companyName = body.company_name || '';
-      let jobDetails = body.job_description || '';
-      
-      if (body.job_id && !jobDetails) {
-        const jobResult = await httpsRequest({
-          hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-          path: '/rest/v1/awa_jobs?id=eq.' + body.job_id + '&select=*',
-          method: 'GET',
-          headers: {
-            'apikey': SUPABASE_KEY,
-            'Authorization': 'Bearer ' + (SUPABASE_KEY)
-          }
-        });
-        const jobs = JSON.parse(jobResult.data || '[]');
-        if (jobs[0]) {
-          jobDetails = jobs[0].job_description || '';
-          jobTitle = jobs[0].job_title || jobTitle;
-          companyName = jobs[0].company_name || companyName;
-        }
-      }
-
-      // Build personalized cover letter prompt using real profile data
-      const prompt = `You are JOBA (Job Application Agent) generating a cover letter for ${profile.name}.
-
-CANDIDATE PROFILE:
-Name: ${profile.name}
-Title: ${profile.title}
-Location: ${profile.location}
-Experience: ${profile.experience}
-Skills: ${profile.skills.join(', ')}
-Key Achievements: ${profile.achievements.join('; ')}
-Education: ${profile.education}
-Personal Hook: ${profile.personalHook}
-Closing Style: ${profile.closingStyle}
-
-COMPANY: ${companyName || 'the organization'}
-
-JOB:
-Position: ${jobTitle || 'the position'}
-Description: ${jobDetails || 'Not provided'}
-
-WRITING STANDARDS (MANDATORY):
-- NO em dashes (—) ever
-- NO choppy tech bro sentences
-- NO "I would be happy to" or "I am excited to apply"
-- NO corporate jargon
-- Write like a warm, confident professional - not a robot
-- Use natural contractions (I'm, I've, we're)
-- Be specific about achievements with numbers
-- Keep it to ONE PAGE (3 paragraphs max)
-- End with confidence, not begging
-
-TONE: ${body.tone || 'professional'}
-
-Generate a compelling, personalized cover letter that:
-1. Opens with a specific hook relevant to the company's mission
-2. Connects ${profile.name.split(' ')[0]}'s experience directly to the job requirements
-3. Weaves in the personal hook naturally (not forced)
-4. Closes with confidence using their closing style
-
-Write the full cover letter now:`;
-
-      const claudeResult = await httpsRequest({
-        hostname: 'api.anthropic.com',
-        path: '/v1/messages',
+      // Route through ABABASE FCW - NOT direct Claude call
+      // This ensures AIR loads: JOBA agent, team profiles, writing standards from brain
+      const fcwResult = await httpsRequest({
+        hostname: 'abacia-services.onrender.com',
+        path: '/api/air/process',
         method: 'POST',
         headers: {
-          'x-api-key': process.env.ANTHROPIC_API_KEY,
-          'anthropic-version': '2023-06-01',
           'Content-Type': 'application/json'
         }
       }, JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 1500,
-        messages: [{ role: 'user', content: prompt }]
+        message: `Generate a cover letter for ${userId} applying to ${jobTitle} at ${companyName}. Job description: ${jobDescription || 'Not provided'}. Tone: ${tone}. Use the team profile from brain for ${userId}. Follow ALL writing standards from brain.`,
+        type: 'awa_cover_letter',
+        userId: userId,
+        channel: 'awa',
+        context: {
+          action: 'generate_cover_letter',
+          job_id: jobId,
+          job_title: jobTitle,
+          company_name: companyName,
+          job_description: jobDescription,
+          tone: tone,
+          team_member: userId
+        }
       }));
-
-      const claudeData = JSON.parse(claudeResult.data || '{}');
-      const coverLetterContent = claudeData.content?.[0]?.text || 'Failed to generate';
-
-      // Store cover letter
+      
+      const fcwData = JSON.parse(fcwResult.data || '{}');
+      
+      // FCW response includes agents array - proof it ran through AIR
+      const coverLetterContent = fcwData.response || 'Failed to generate via FCW';
+      const agentsRan = fcwData.agents || [];
+      
+      // Store cover letter in brain
       const coverData = {
         user_id: userId,
-        job_id: body.job_id,
-        resume_id: body.resume_id,
+        job_id: jobId,
         content: coverLetterContent,
-        tone: body.tone || 'professional',
-        generated_by: 'JOBA',
-        prompt_used: prompt.substring(0, 500) + '...',
+        tone: tone,
+        generated_by: 'JOBA via FCW',
+        fcw_agents: agentsRan.length,
         status: 'draft'
       };
-
-      const result = await httpsRequest({
+      
+      await httpsRequest({
         hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
         path: '/rest/v1/awa_cover_letters',
         method: 'POST',
         headers: {
           'apikey': SUPABASE_KEY,
-          'Authorization': 'Bearer ' + (SUPABASE_KEY),
+          'Authorization': 'Bearer ' + SUPABASE_KEY,
           'Content-Type': 'application/json',
-          'Prefer': 'return=representation'
+          'Prefer': 'return=minimal'
         }
       }, JSON.stringify(coverData));
       
-      const created = JSON.parse(result.data || '[]');
-      return jsonResponse(res, 201, { 
-        cover_letter: created[0], 
+      return jsonResponse(res, 201, {
         content: coverLetterContent,
-        profile_used: profile.name,
-        generated_by: 'JOBA (Job Application Agent)',
-        message: 'Cover letter generated for ' + profile.name
+        generated_by: 'JOBA via FCW',
+        fcw_agents_ran: agentsRan.length,
+        agents: agentsRan.map(a => a.agent || a.name || 'unknown'),
+        profile_used: userId,
+        message: 'Cover letter generated via FCW (not micro-task)'
       });
     } catch (e) {
-      return jsonResponse(res, 500, { error: e.message });
+      console.error('[AWA] FCW Cover Letter Error:', e.message);
+      return jsonResponse(res, 500, { error: e.message, note: 'FCW route failed' });
     }
   }
 
-  // AWA COVER LETTERS - List
   if (path === '/api/awa/cover-letters' && method === 'GET') {
     try {
       const userId = req.headers?.get?.('x-user-id') || 'brandon_t10';
