@@ -20839,7 +20839,7 @@ We Are All ABA.`;
   if (path === '/api/awa/jobs' && method === 'GET') {
     // ⬡B:awa.jobs:FIX:aba_memory:20260301⬡ - Query aba_memory where memory_type=awa_job (143 GMG tracker jobs)
     try {
-      const assignee = parsedUrl.searchParams?.get?.('assignee') || req.query?.assignee;
+      const assignee = url.searchParams?.get?.('assignee') || req.query?.assignee;
       const result = await httpsRequest({
         hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
         path: '/rest/v1/aba_memory?memory_type=eq.awa_job&select=id,content,created_at&order=created_at.desc&limit=200',
