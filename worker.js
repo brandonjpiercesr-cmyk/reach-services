@@ -20837,18 +20837,26 @@ We Are All ABA.`;
 
   // AWA JOBS - List all tracked jobs
   if (path === '/api/awa/jobs' && method === 'GET') {
+    // ⬡B:awa.jobs:FIX:aba_memory:20260301⬡ - Query aba_memory where memory_type=awa_job (143 GMG tracker jobs)
     try {
-      const userId = req.headers?.get?.('x-user-id') || 'brandon_t10';
+      const assignee = parsedUrl.searchParams?.get?.('assignee') || req.query?.assignee;
       const result = await httpsRequest({
         hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-        path: '/rest/v1/awa_jobs?user_id=eq.' + encodeURIComponent(userId) + '&order=created_at.desc&limit=50',
+        path: '/rest/v1/aba_memory?memory_type=eq.awa_job&select=id,content,created_at&order=created_at.desc&limit=200',
         method: 'GET',
         headers: {
           'apikey': SUPABASE_KEY,
           'Authorization': 'Bearer ' + (SUPABASE_KEY)
         }
       });
-      const jobs = JSON.parse(result.data || '[]');
+      let rawJobs = JSON.parse(result.data || '[]');
+      let jobs = rawJobs.map(item => {
+        const c = typeof item.content === 'string' ? JSON.parse(item.content) : item.content;
+        return { id: item.id, ...c };
+      });
+      if (assignee) {
+        jobs = jobs.filter(j => j.assignees && j.assignees.includes(assignee));
+      }
       return jsonResponse(res, 200, { jobs, count: jobs.length });
     } catch (e) {
       return jsonResponse(res, 500, { error: e.message });
