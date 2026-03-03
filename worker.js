@@ -64,48 +64,6 @@ const http = require('http');
 const https = require('https');
 const { WebSocketServer, WebSocket } = require('ws');
 
-// ⬡B:ABABASE:BRIDGE:IMPORT:v1.0.0:20260227⬡
-// ABABASE integration - fat context + exact contact matching
-let ababase = null;
-try {
-  ababase = require('./ababase/bridge');
-  console.log('[ABABASE] Bridge loaded successfully, version:', ababase.VERSION);
-} catch (e) {
-  console.log('[ABABASE] Bridge not loaded (optional):', e.message);
-}
-
-// ⬡B:REACH:FIX:fetch_polyfill:20260226⬡
-// Polyfill fetch for Node.js < 18
-const fetch = globalThis.fetch || (async (url, options = {}) => {
-  const https = require('https');
-  const http = require('http');
-  const urlObj = new URL(url);
-  const isHttps = urlObj.protocol === 'https:';
-  const lib = isHttps ? https : http;
-  
-  return new Promise((resolve, reject) => {
-    const req = lib.request(url, {
-      method: options.method || 'GET',
-      headers: options.headers || {}
-    }, (res) => {
-      const chunks = [];
-      res.on('data', chunk => chunks.push(chunk));
-      res.on('end', () => {
-        const body = Buffer.concat(chunks).toString();
-        resolve({
-          ok: res.statusCode >= 200 && res.statusCode < 300,
-          status: res.statusCode,
-          json: async () => JSON.parse(body),
-          text: async () => body
-        });
-      });
-    });
-    req.on('error', reject);
-    if (options.body) req.write(options.body);
-    req.end();
-  });
-});
-
 // ⬡B:AIR:REACH.SERVER.PORT:CONFIG:infrastructure.network.binding:AIR→REACH:T10:v1.5.0:20260213:p0r3t⬡
 const PORT = process.env.PORT || 3000;
 
@@ -119,4097 +77,13 @@ const PORT = process.env.PORT || 3000;
 
 // ⬡B:AIR:REACH.CONFIG.SUPABASE:CONFIG:brain.connection.persistence:AIR→REACH→BRAIN:T10:v1.5.0:20260213:s1b2a⬡
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://htlxjkbrstpwwtzsbyvb.supabase.co';
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0bHhqa2Jyc3Rwd3d0enNieXZiIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MDUzMjgyMSwiZXhwIjoyMDg2MTA4ODIxfQ.G55zXnfanoUxRAoaYz-tD9FDJ53xHH-pRgDrKss_Iqo';
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0bHhqa2Jyc3Rwd3d0enNieXZiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA1MzI4MjEsImV4cCI6MjA4NjEwODgyMX0.MOgNYkezWpgxTO3ZHd0omZ0WLJOOR-tL7hONXWG9eBw';
 
-// ⬡B:AIR:REACH.CONFIG.GITHUB:CONFIG:code.deployment:v1.0.0:20260224⬡
-// GitHub token for autonomous code deployment
-const GITHUB_TOKEN = process.env.GITHUB_TOKEN || '';
-const GITHUB_REPO = 'brandonjpiercesr-cmyk/reach-services';
-const GITHUB_BRANCH = 'main';
-
-
 // ═══════════════════════════════════════════════════════════════════════════════
-// ⬡B:AIR:REACH.TRAINING.LOADER:CODE:training.brain:v1.0.0:20260222⬡
-// Load AIR training from brain - makes AIR think like LLMs
-// ═══════════════════════════════════════════════════════════════════════════════
-
-let AIR_TRAINING_CACHE = null;
-let AIR_TRAINING_LOADED_AT = null;
-
-// ⬡B:REACH.OMI.DEDUP.GLOBAL:FIX:duplicate_prevention:20260222⬡
-// GLOBAL DEDUPLICATION MAP - persists across requests
-const omiProcessedSegments = new Map();
-const OMI_DEDUP_WINDOW = 60000; // 1 minute window
-
-function isOmiDuplicate(segmentId, segmentText) {
-  const now = Date.now();
-  // Clean old entries
-  for (const [id, data] of omiProcessedSegments) {
-    if (now - data.ts > OMI_DEDUP_WINDOW) omiProcessedSegments.delete(id);
-  }
-  // Check for exact ID match
-  if (omiProcessedSegments.has(segmentId)) {
-    console.log('[OMI DEDUP] Skipping duplicate segment:', segmentId);
-    return true;
-  }
-  // Check for similar text within window (catch reordered JSON)
-  const textHash = segmentText.substring(0, 100);
-  for (const [id, data] of omiProcessedSegments) {
-    if (data.textHash === textHash && now - data.ts < 5000) {
-      console.log('[OMI DEDUP] Skipping similar text within 5s');
-      return true;
-    }
-  }
-  omiProcessedSegments.set(segmentId, { ts: now, textHash });
-  return false;
-}
-
-async function loadAIRTraining() {
-  // Cache for 5 minutes
-  if (AIR_TRAINING_CACHE && AIR_TRAINING_LOADED_AT && (Date.now() - AIR_TRAINING_LOADED_AT) < 300000) {
-    return AIR_TRAINING_CACHE;
-  }
-  
-  try {
-    const url = SUPABASE_URL + '/rest/v1/aba_memory?source=ilike.air.%.system%25&select=content&is_system=eq.true';
-    const response = await fetch(url, {
-      headers: {
-        'apikey': SUPABASE_KEY,
-        'Authorization': 'Bearer ' + SUPABASE_KEY
-      }
-    });
-    
-    if (!response.ok) {
-      console.log('[AIR TRAINING] Failed to load from brain:', response.status);
-      return '';
-    }
-    
-    const data = await response.json();
-    if (data && data.length > 0) {
-      AIR_TRAINING_CACHE = data.map(d => d.content).join('\n\n---\n\n');
-      AIR_TRAINING_LOADED_AT = Date.now();
-      console.log('[AIR TRAINING] Loaded', data.length, 'training docs from brain');
-      return AIR_TRAINING_CACHE;
-    }
-    return '';
-  } catch (e) {
-    console.log('[AIR TRAINING] Error loading:', e.message);
-    return '';
-  }
-}
-
-// Load HAM-specific context (replaces hardcoded Brandon info)
-async function loadHAMContext(callerIdentity) {
-  if (!callerIdentity || !callerIdentity.name) {
-    return '';
-  }
-  
-  try {
-    // Search brain for this HAMs personal context
-    const hamName = callerIdentity.name.toLowerCase();
-    const url = SUPABASE_URL + '/rest/v1/aba_memory?content=ilike.*' + hamName + '*&memory_type=eq.ham_identity&select=content&limit=1';
-    const response = await fetch(url, {
-      headers: {
-        'apikey': SUPABASE_KEY,
-        'Authorization': 'Bearer ' + SUPABASE_KEY
-      }
-    });
-    
-    if (!response.ok) return '';
-    
-    const data = await response.json();
-    if (data && data[0]) {
-      console.log('[AIR HAM] Loaded context for', callerIdentity.name);
-      return data[0].content;
-    }
-    
-    // Fallback: use callerIdentity info
-    return 'HAM: ' + callerIdentity.name + ' | Trust: ' + callerIdentity.trust + ' | Use their saved preferences and history.';
-  } catch (e) {
-    console.log('[AIR HAM] Error loading context:', e.message);
-    return '';
-  }
-}
-
-
-// Load training on startup
-let STARTUP_TRAINING = '';
-(async function initTraining() {
-  console.log('[AIR TRAINING] Loading from brain on startup...');
-  STARTUP_TRAINING = await loadAIRTraining();
-  console.log('[AIR TRAINING] Loaded', STARTUP_TRAINING.length, 'chars');
-})();
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// ═══════════════════════════════════════════════════════════════════════════════
-// ⬡B:AIR:REACH.WRITING.STANDARDS:CODE:output.quality.enforcement:v1.0.0:20260223⬡
-// WRITING STANDARDS INJECTION - FOR OUTPUT AGENTS (VARA, IMAN, CARA, DRAFT, SCRIBE)
-// Brandon directive: All human-facing text MUST follow these standards
-// Source of truth: brandon_directive_writing_standards_v1 in aba_memory
-// ═══════════════════════════════════════════════════════════════════════════════
-
-let WRITING_STANDARDS_CACHE = null;
-let WRITING_STANDARDS_LOADED_AT = null;
-const OUTPUT_AGENTS = ['VARA', 'IMAN', 'CARA', 'DRAFT', 'SCRIBE', 'QUILL'];
-
-async function loadWritingStandards() {
-  // Cache for 1 hour (3600000ms)
-  if (WRITING_STANDARDS_CACHE && WRITING_STANDARDS_LOADED_AT && (Date.now() - WRITING_STANDARDS_LOADED_AT) < 3600000) {
-    return WRITING_STANDARDS_CACHE;
-  }
-  
-  try {
-    const url = SUPABASE_URL + '/rest/v1/aba_memory?source=eq.brandon_directive_writing_standards_v1&select=content&is_system=eq.true';
-    const response = await fetch(url, {
-      headers: {
-        'apikey': SUPABASE_KEY || SUPABASE_ANON,
-        'Authorization': 'Bearer ' + (SUPABASE_KEY || SUPABASE_ANON)
-      }
-    });
-    
-    if (!response.ok) {
-      console.log('[WRITING STANDARDS] Failed to load from brain:', response.status);
-      return '';
-    }
-    
-    const data = await response.json();
-    if (data && data[0] && data[0].content) {
-      WRITING_STANDARDS_CACHE = data[0].content;
-      WRITING_STANDARDS_LOADED_AT = Date.now();
-      console.log('[WRITING STANDARDS] Loaded from brain:', WRITING_STANDARDS_CACHE.length, 'chars');
-      return WRITING_STANDARDS_CACHE;
-    }
-    console.log('[WRITING STANDARDS] No standards found in brain');
-    return '';
-  } catch (e) {
-    console.log('[WRITING STANDARDS] Error loading:', e.message);
-    return '';
-  }
-}
-
-function shouldInjectWritingStandards(agentName) {
-  if (!agentName) return true; // Default: inject for safety
-  return OUTPUT_AGENTS.some(a => agentName.toUpperCase().includes(a));
-}
-
-async function injectWritingStandards(prompt, agentName) {
-  if (!shouldInjectWritingStandards(agentName)) {
-    return prompt;
-  }
-  
-  const standards = await loadWritingStandards();
-  if (standards) {
-    return prompt + '\n\n' + standards + '\n\nCRITICAL: Follow ALL writing standards above. No em dashes. No choppy sentences. Warm greetings always.';
-  }
-  return prompt;
-}
-
-// Load writing standards on startup
-let STARTUP_WRITING_STANDARDS = '';
-(async function initWritingStandards() {
-  console.log('[WRITING STANDARDS] Loading from brain on startup...');
-  STARTUP_WRITING_STANDARDS = await loadWritingStandards();
-  console.log('[WRITING STANDARDS] Ready:', STARTUP_WRITING_STANDARDS ? 'LOADED' : 'EMPTY');
-})();
 // ⬡B:AIR:REACH.BRIDGE:CONST:abacia.services:v2.3.0:20260214⬡
 // BRIDGE TO ABACIA-SERVICES
 // This is where the 22+ agents actually live and run
-// ═══════════════════════════════════════════════════════════════════════════════
-// ⬡B:AIR:REACH.AGENT.DRAFT:CODE:output.scanner.bs_detector:v1.0.0:20260223⬡
-// DRAFT - Detection and Review of AI-Fabricated Text
-// Scans EVERY human-facing output BEFORE delivery
-// Trace: A*AGENTS*A → A*DRAFT*A → A*MEMOS*A → DELIVERY
-// ═══════════════════════════════════════════════════════════════════════════════
-
-// ⬡B:AIR:REACH.AGENT.PROTO:CODE:protocol.enforcement:v1.1.0:20260225⬡
-// PROTO - Protocol Enforcement and Training Officer
-// Runs BEFORE VARA speaks. Enforces writing standards.
-// NOW USES HAM for names - NO HARDCODED NAMES
-// ═══════════════════════════════════════════════════════════════════════════════
-const PROTO_RULES = {
-  NO_PROFANITY: { pattern: /\b(fuck|shit|damn|ass|bitch|hell)\b/gi, fix: 'Remove profanity - ABA is a butler', fireable: true },
-  NO_MR_STARK: { pattern: /mr\.?\s*stark|tony\s*stark/gi, fix: 'Use HAM name from brain, never fictional names', fireable: true },
-  NO_EM_DASH: { pattern: /[—–]/g, fix: 'Use comma or period instead of em dash', fireable: true },
-  NO_COLD_GREETING: { pattern: /^(hi|hey|hello),?\s*$/im, fix: 'Greetings must include name', fireable: false },
-  NO_AI_SLOP: { pattern: /(I'd be happy to|feel free to|don't hesitate|here's the thing)/gi, fix: 'Remove AI clichés', fireable: false }
-};
-
-// PROTO now takes callerIdentity to get real HAM name
-async function PROTO_enforce(text, callerIdentity = null) {
-  if (!text || typeof text !== 'string') return { text, violations: [], enforced: false };
-  
-  let cleaned = text;
-  const violations = [];
-  
-  // Get real HAM name from brain (not hardcoded)
-  const hamName = await getCurrentHAMName(callerIdentity);
-  
-  // Check and fix each rule
-  for (const [rule, config] of Object.entries(PROTO_RULES)) {
-    if (config.pattern) {
-      const matches = cleaned.match(config.pattern);
-      if (matches && matches.length > 0) {
-        violations.push({ rule, matches: matches.slice(0, 3), fix: config.fix, fireable: config.fireable });
-        // Auto-fix using HAM name (not hardcoded)
-        if (rule === 'NO_MR_STARK') {
-          cleaned = cleaned.replace(/mr\.?\s*stark/gi, hamName);
-          cleaned = cleaned.replace(/tony\s*stark/gi, hamName);
-        }
-        if (rule === 'NO_EM_DASH') {
-          cleaned = cleaned.replace(/[—–]/g, ',');
-        }
-      }
-    }
-  }
-  
-  if (violations.length > 0) {
-    console.log('[PROTO] Violations found:', violations.map(v => v.rule).join(', '), '| HAM:', hamName);
-  }
-  
-  return {
-    text: cleaned,
-    violations,
-    enforced: violations.length > 0,
-    hasFirable: violations.some(v => v.fireable),
-    hamName
-  };
-}
-
-const DRAFT_VIOLATIONS = {
-  // FIREABLE - instant fail
-  EM_DASH: { pattern: /[—–]|--/g, severity: 'FIREABLE', penalty: 30, desc: 'Em dash or double dash' },
-  COLD_GREETING: { pattern: /^(Eric,|Brandon,|Hey,\s*$|Hi,\s*$)/m, severity: 'FIREABLE', penalty: 25, desc: 'Cold greeting without name' },
-  CTA_ENDING: { pattern: /(let me know if you have any questions|feel free to reach out|don't hesitate to|please don't hesitate)/i, severity: 'FIREABLE', penalty: 20, desc: 'Generic CTA ending' },
-  
-  // HIGH - major deductions
-  CHOPPY_TECH_BRO: { pattern: /\. [A-Z][a-z]{2,10}\. [A-Z][a-z]{2,10}\./g, severity: 'HIGH', penalty: 15, desc: 'Choppy tech bro style' },
-  PARALLEL_ROBOTIC: { pattern: /This isn't [^.]+\. This is [^.]+\./gi, severity: 'HIGH', penalty: 15, desc: 'Robotic parallel structure' },
-  AI_HAPPY_TO: { pattern: /I('d| would) be happy to|I'm happy to help/gi, severity: 'HIGH', penalty: 10, desc: 'AI phrase: happy to' },
-  AI_HERES_THE_THING: { pattern: /here's the thing|at the end of the day/gi, severity: 'HIGH', penalty: 10, desc: 'AI phrase: heres the thing' },
-  
-  // MEDIUM - deductions
-  META_COMMENTARY: { pattern: /this (document|email|message|report) (outlines|provides|contains|summarizes)/gi, severity: 'MEDIUM', penalty: 8, desc: 'Meta commentary' },
-  HEDGING: { pattern: /(it appears that|it seems like|it would seem|arguably|potentially)/gi, severity: 'MEDIUM', penalty: 5, desc: 'Hedging language' },
-  CORPORATE_SPEAK: { pattern: /(leverage|synergize|bandwidth|circle back|touch base|deep dive)/gi, severity: 'MEDIUM', penalty: 5, desc: 'Corporate buzzwords' },
-  OVER_FORMAL: { pattern: /(furthermore|moreover|additionally|in conclusion|to summarize)/gi, severity: 'MEDIUM', penalty: 5, desc: 'Over-formal transitions' },
-  AI_RESONATED: { pattern: /(deeply resonated|truly appreciate|genuinely believe)/gi, severity: 'MEDIUM', penalty: 5, desc: 'AI emotional phrases' },
-  
-  // LOW - minor deductions
-  PASSIVE_VOICE: { pattern: /(was written|were created|has been|have been) by/gi, severity: 'LOW', penalty: 3, desc: 'Passive voice' },
-  FILLER_PHRASES: { pattern: /(in order to|due to the fact that|at this point in time)/gi, severity: 'LOW', penalty: 2, desc: 'Filler phrases' }
-};
-
-function DRAFT_scanOutput(text) {
-  if (!text || typeof text !== 'string') {
-    return { score: 100, violations: [], passed: true };
-  }
-  
-  let score = 100;
-  const violations = [];
-  
-  for (const [name, rule] of Object.entries(DRAFT_VIOLATIONS)) {
-    const matches = text.match(rule.pattern);
-    if (matches && matches.length > 0) {
-      const deduction = rule.penalty * Math.min(matches.length, 3); // Cap at 3x
-      score -= deduction;
-      violations.push({
-        rule: name,
-        severity: rule.severity,
-        description: rule.desc,
-        matches: matches.slice(0, 3),
-        deduction: deduction
-      });
-    }
-  }
-  
-  // Bonus checks
-  // +5 for warm greeting
-  if (/^(Hi |Hey |Hello )[A-Z][a-z]+,/m.test(text)) {
-    score = Math.min(100, score + 5);
-  }
-  
-  // +3 for flowing sentences (commas connecting thoughts)
-  const sentences = text.split(/[.!?]+/).filter(s => s.trim().length > 20);
-  const flowingSentences = sentences.filter(s => (s.match(/,/g) || []).length >= 2);
-  if (flowingSentences.length >= 2) {
-    score = Math.min(100, score + 3);
-  }
-  
-  score = Math.max(0, score);
-  
-  return {
-    score: score,
-    violations: violations,
-    passed: score >= 85,
-    summary: violations.length === 0 ? 'CLEAN' : violations.map(v => v.rule).join(', ')
-  };
-}
-
-async function DRAFT_validateAndRegenerate(text, regenerateFunc, context) {
-  const scan1 = DRAFT_scanOutput(text);
-  console.log('[DRAFT] First scan:', scan1.score, scan1.summary);
-  
-  if (scan1.passed) {
-    return { text: text, scan: scan1, regenerated: false };
-  }
-  
-  // Failed - try to regenerate once with explicit instructions
-  if (regenerateFunc && typeof regenerateFunc === 'function') {
-    console.log('[DRAFT] Score', scan1.score, '< 85, regenerating...');
-    const violationList = scan1.violations.map(v => v.description).join(', ');
-    const fixPrompt = `REWRITE THE FOLLOWING. VIOLATIONS FOUND: ${violationList}. 
-FIX THESE SPECIFIC ISSUES:
-- Remove all em dashes (—) and double dashes (--)
-- Use warm greeting like "Hi Name," not just "Name,"
-- Remove generic CTAs like "let me know if you have questions"
-- Use flowing sentences with commas, not choppy fragments
-- Remove AI phrases like "happy to help", "here's the thing"
-
-ORIGINAL TEXT:
-${text}
-
-REWRITE NOW:`;
-    
-    try {
-      const regenerated = await regenerateFunc(fixPrompt, context);
-      const scan2 = DRAFT_scanOutput(regenerated);
-      console.log('[DRAFT] Regenerated scan:', scan2.score, scan2.summary);
-      
-      // Return whichever is better
-      if (scan2.score >= scan1.score) {
-        return { text: regenerated, scan: scan2, regenerated: true };
-      }
-    } catch (e) {
-      console.log('[DRAFT] Regeneration failed:', e.message);
-    }
-  }
-  
-  // Return original with warning
-  return { text: text, scan: scan1, regenerated: false, warning: 'Failed DRAFT scan' };
-}
-
-// Log DRAFT results to brain
-async function DRAFT_logToBrain(scanResult, outputType, agentName) {
-  try {
-    const logEntry = {
-      source: 'draft_scan_' + Date.now(),
-      memory_type: 'draft_audit',
-      content: JSON.stringify({
-        timestamp: new Date().toISOString(),
-        agent: agentName,
-        outputType: outputType,
-        score: scanResult.score,
-        passed: scanResult.passed,
-        violations: scanResult.violations,
-        regenerated: scanResult.regenerated || false
-      }),
-      tags: ['draft', 'output_audit', agentName.toLowerCase()],
-      importance: scanResult.passed ? 3 : 7
-    };
-    
-    await fetch(SUPABASE_URL + '/rest/v1/aba_memory', {
-      method: 'POST',
-      headers: {
-        'apikey': SUPABASE_KEY || SUPABASE_ANON,
-        'Authorization': 'Bearer ' + (SUPABASE_KEY || SUPABASE_ANON),
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(logEntry)
-    });
-  } catch (e) {
-    console.log('[DRAFT] Failed to log to brain:', e.message);
-  }
-}
-// ═══════════════════════════════════════════════════════════════════════════════
-// ⬡B:AIR:4PHASE.REAL:CODE:actual.working.implementation:v2.0.0:20260224⬡
-// THIS IS THE REAL IMPLEMENTATION - NO SCAFFOLDING
-// ═══════════════════════════════════════════════════════════════════════════════
-
-// PHASE 1: FOUNDATION - REAL
-const COST_CAPS = {
-  daily: { limit: 5.00, current: 0, reset: null },
-  hourly: { limit: 1.00, current: 0, reset: null },
-  perCall: { limit: 0.15 },
-  modelCosts: { 'claude-opus-4-20250514': 0.015, 'claude-sonnet-4-5-20250929': 0.003, 'claude-3-haiku-20240307': 0.00025 }
-};
-
-function checkCostCap(estimatedCost) {
-  const now = Date.now();
-  if (!COST_CAPS.hourly.reset || now - COST_CAPS.hourly.reset > 3600000) { COST_CAPS.hourly.current = 0; COST_CAPS.hourly.reset = now; }
-  if (!COST_CAPS.daily.reset || now - COST_CAPS.daily.reset > 86400000) { COST_CAPS.daily.current = 0; COST_CAPS.daily.reset = now; }
-  if (estimatedCost > COST_CAPS.perCall.limit) return { allowed: false, downgrade: 'haiku' };
-  if (COST_CAPS.hourly.current + estimatedCost > COST_CAPS.hourly.limit) return { allowed: true, downgrade: 'haiku' };
-  if (COST_CAPS.daily.current + estimatedCost > COST_CAPS.daily.limit) return { allowed: true, downgrade: 'haiku' };
-  return { allowed: true, downgrade: null };
-}
-
-function recordCost(actualCost) { COST_CAPS.hourly.current += actualCost; COST_CAPS.daily.current += actualCost; }
-
-const OBSERVABILITY = {
-  traces: [], maxTraces: 1000,
-  startTrace(name, metadata = {}) {
-    const trace = { id: 'trace_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9), name, startTime: Date.now(), spans: [], status: 'running', metadata };
-    this.traces.push(trace);
-    if (this.traces.length > this.maxTraces) this.traces.shift();
-    return trace.id;
-  },
-  addSpan(traceId, spanName, data = {}) { const t = this.traces.find(x => x.id === traceId); if (t) t.spans.push({ name: spanName, timestamp: Date.now(), data }); },
-  endTrace(traceId, status = 'success') { const t = this.traces.find(x => x.id === traceId); if (t) { t.endTime = Date.now(); t.duration = t.endTime - t.startTime; t.status = status; } },
-  getRecentTraces(count = 10) { return this.traces.slice(-count); }
-};
-
-const MEMORY_TIERS = {
-  short: new Map(), shortTTL: 300000,
-  working: new Map(), workingTTL: 3600000,
-  async storeLong(key, value, metadata = {}) {
-    try {
-      const r = await fetch(SUPABASE_URL + '/rest/v1/aba_memory', {
-        method: 'POST',
-        headers: { 'apikey': SUPABASE_KEY || SUPABASE_ANON, 'Authorization': 'Bearer ' + (SUPABASE_KEY || SUPABASE_ANON), 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
-        body: JSON.stringify({ source: 'memory_long_' + key + '_' + Date.now(), memory_type: metadata.type || 'working_memory', content: typeof value === 'string' ? value : JSON.stringify(value), tags: metadata.tags || ['memory'], importance: metadata.importance || 5 })
-      });
-      return r.ok;
-    } catch (e) { return false; }
-  },
-  async retrieveLong(query, limit = 5) {
-    try {
-      const r = await fetch(SUPABASE_URL + '/rest/v1/aba_memory?content=ilike.*' + encodeURIComponent(query) + '*&order=importance.desc,created_at.desc&limit=' + limit, { headers: { 'apikey': SUPABASE_KEY || SUPABASE_ANON, 'Authorization': 'Bearer ' + (SUPABASE_KEY || SUPABASE_ANON) } });
-      return r.ok ? await r.json() : [];
-    } catch (e) { return []; }
-  }
-};
-
-function memoryStore(tier, key, value) {
-  const now = Date.now();
-  const map = tier === 'short' ? MEMORY_TIERS.short : MEMORY_TIERS.working;
-  const ttl = tier === 'short' ? MEMORY_TIERS.shortTTL : MEMORY_TIERS.workingTTL;
-  map.set(key, { value, timestamp: now });
-  for (const [k, v] of map) { if (now - v.timestamp > ttl) map.delete(k); }
-}
-
-function memoryRetrieve(tier, key) {
-  const map = tier === 'short' ? MEMORY_TIERS.short : MEMORY_TIERS.working;
-  const entry = map.get(key);
-  return entry ? entry.value : null;
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// ⬡B:REACH:ABACIA_ROUTE:FUNC:brain-call:20260225⬡
-// THINK TANK DECISION: REACH calls ABACIA for ALL routing
-// REACH = Dumb hand. ABACIA = Smart brain.
-// ═══════════════════════════════════════════════════════════════════════════
-
-const ABACIA_URL = 'https://abacia-services.onrender.com';
-
-// ═══════════════════════════════════════════════════════════════════════════
-// ⬡B:REACH.AWA.TEAM_PROFILES:CONST:cover_letter_generation:20260228⬡
-// Team profiles for personalized cover letter and resume generation
-// Users: Brandon, Eric, BJ, CJ, Vante, Dwayne
-// ═══════════════════════════════════════════════════════════════════════════
-const TEAM_PROFILES = {
-  brandon: {
-    id: 'brandon', name: 'Brandon J. Pierce Sr.', 
-    title: 'Co-Founder & Head of Enterprise Operations',
-    email: 'brandon@globalmajoritygroup.com', phone: '336-549-9608',
-    location: 'Greensboro/High Point, North Carolina',
-    experience: '15+ years nonprofit fundraising and development. Former Coca-Cola Foundation reviewer with $195M+ in grant applications reviewed. Co-founded GMG, influencing over $260M in philanthropic capital across 65 organizations.',
-    skills: ['Grant Writing', 'Strategic Planning', 'Nonprofit Development', 'Executive Leadership', 'Capital Campaigns', 'Donor Relations', 'Board Governance', 'Financial Management'],
-    achievements: ['$260M+ capital raised across career', '65+ organizations served', '25-30% grant success rate (2-3x industry average)', '13,000+ proposals reviewed at Coca-Cola Foundation', 'Founded Global Majority Group'],
-    education: 'BA Political Science & Government, UNC Charlotte',
-    personalHook: 'What drives me goes beyond the work itself. My wife Bethany and I are raising four children: Bailey-J, Joshua, Jeremiah, and Bella-Ann. Growing up watching my community struggle for resources shaped how I see this work.',
-    closingStyle: 'Confident and forward-looking, emphasizing partnership potential'
-  },
-  eric: {
-    id: 'eric', name: 'Dr. Eric R. Lane Sr.', 
-    title: 'Co-Founder & Operations Lead',
-    email: 'eric@globalmajoritygroup.com', phone: '323-600-7676',
-    location: 'Remote (based in Los Angeles, California)',
-    experience: '17 years of fundraising leadership. Division I basketball (Boise State) and Euro League professional. Athletic Director at St. John Bosco (national champion program, pioneered first HS NIL deal). Grew CSUF Athletics fundraising from $1.4M to $3M in 2 years.',
-    skills: ['Executive Leadership', 'Organizational Development', 'Strategic Fundraising', 'Community Engagement', 'Board Governance', 'Capital Campaigns', 'Major Gifts', 'Athletic Administration'],
-    achievements: ['Ed.D. from USC', 'Division I basketball and Euro League pro', 'St. John Bosco AD - national champ, first HS NIL deal', 'Grew CSUF Athletics fundraising $1.4M to $3M in 2 years', '$260M+ influenced through GMG'],
-    education: 'Ed.D. in Educational Leadership, USC',
-    personalHook: 'My path to fundraising came through athletics. As a Division I basketball player at Boise State and later playing professionally in the Euro League, I learned that success comes from preparation and relationship building.',
-    closingStyle: 'Authoritative yet approachable, emphasizing vision and impact'
-  },
-  bj: {
-    id: 'bj', name: 'Bryan J. Pierce', 
-    title: 'Director of Development',
-    email: 'bryanjpiercejr@gmail.com', phone: '980-395-8662',
-    location: 'Greensboro, NC 27407',
-    experience: 'Nearly 10 years in development and communications. Led development for 10+ nonprofit clients at GID Consulting. Managed $2.5M annual grant portfolio at HomeFree-USA.',
-    skills: ['Grant Writing', 'Grant Management', 'Donor Relations', 'Fundraising Operations', 'CRM Management', 'Corporate Sponsors', 'Federal Grants', 'Event Coordination'],
-    achievements: ['Helped clients raise $3M+ collectively', 'HomeFree-USA: managed $2.5M annual grant portfolio', 'Brand-ON Consulting: $1M+ raised, 20-30% grant success rate', 'Led development for 10+ nonprofit clients'],
-    education: 'North Carolina A&T State University',
-    personalHook: 'What drives me to do this work goes deeper than just a paycheck. My wife Genesis and I are raising five kids in a blended family, starting with our oldest, Uriah.',
-    closingStyle: 'Warm and grateful, emphasizing community impact'
-  },
-  cj: {
-    id: 'cj', name: 'C.J. Moore', 
-    title: 'Development Manager',
-    email: 'cj@envolvenonprofit.com', phone: '919-917-0686',
-    location: 'Greensboro, NC',
-    experience: 'Development professional with experience in nonprofit fundraising operations. Strong focus on community engagement and mission-driven work.',
-    skills: ['Grant Writing', 'Donor Cultivation', 'Community Outreach', 'Event Planning', 'Database Management', 'Volunteer Coordination', 'Communications', 'Stakeholder Relations'],
-    achievements: ['Supported grant portfolios exceeding $1M', 'Strong community partnerships', 'Experience with Envolve Nonprofit Experts'],
-    education: 'Bachelor\'s Degree',
-    personalHook: 'I bring a commitment to service and a dedication to supporting work that strengthens communities.',
-    closingStyle: 'Earnest and mission-focused, emphasizing dedication'
-  },
-  vante: {
-    id: 'vante', name: 'Vante', 
-    title: '',
-    email: '', phone: '',
-    location: '',
-    experience: '',
-    skills: [],
-    achievements: [],
-    education: '',
-    personalHook: '',
-    closingStyle: ''
-  },
-  dwayne: {
-    id: 'dwayne', name: 'Dwayne', 
-    title: '',
-    email: '', phone: '',
-    location: '',
-    experience: '',
-    skills: [],
-    achievements: [],
-    education: '',
-    personalHook: '',
-    closingStyle: ''
-  },
-  gmg: {
-    id: 'gmg', name: 'Global Majority Group', 
-    title: 'BIPOC-Led Nonprofit Fundraising Consultancy',
-    email: 'info@globalmajoritygroup.com', phone: '336-549-9608',
-    location: 'Remote (Greensboro, NC headquarters)',
-    experience: 'GMG combines insider grantmaking knowledge with proven nonprofit leadership to deliver 25-30% grant success rates (2-3x industry averages). With $260M+ in philanthropic capital influenced across 65+ organizations in 15+ geographic markets.',
-    skills: ['Grant Writing', 'Development Strategy', 'Fractional VP/Director Leadership', 'Capital Campaigns', 'Major Gift Solicitation', 'Board Development', 'Feasibility Studies', 'Donor Cultivation'],
-    achievements: ['$260M+ total capital raised', '65+ organizations served', '15+ geographic markets', '25-30% grant success rate', 'Sectors: Housing, Education, Youth, Sports, Faith-based, International'],
-    education: 'Combined: Ed.D. USC (Eric Lane), BA UNC Charlotte (Brandon Pierce)',
-    personalHook: 'We are not traditional consultants. We are practitioners who have raised hundreds of millions ourselves. When you work with GMG, you get the people who have been in your shoes.',
-    closingStyle: 'Partnership-focused, emphasizing shared mission and proven results'
-  }
-};
-
-// GMG company profile for cover letters
-const GMG_PROFILE = {
-  name: 'Global Majority Group',
-  tagline: 'Excellence Rooted in Lived Experience',
-  description: 'BIPOC-led consultancy specializing in grant writing, development strategy, and fractional executive services for organizations serving BIPOC and LMI communities.',
-  metrics: { capitalRaised: '$260M+', organizations: '65+', grantSuccessRate: '25-30%', markets: '15+' }
-};
-
-/**
- * Call ABACIA's AIR for routing decision
- * This is THE function that connects the hand to the brain
- */
-async function ABACIA_route(prompt, context = {}) {
-  console.log('[REACH→ABACIA] Calling brain for routing...');
-  
-  try {
-    const response = await httpsRequest({
-      hostname: 'abacia-services.onrender.com',
-      path: '/api/air/route',
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' }
-    }, JSON.stringify({
-      prompt: prompt,
-      context: context,
-      channel: context.channel || 'myaba',
-      userId: context.userId || context.callerName || 'brandon'
-    }));
-    
-    if (response.status !== 200) {
-      console.log('[REACH→ABACIA] Brain returned error:', response.status);
-      return null;
-    }
-    
-    const data = JSON.parse(response.data.toString());
-    console.log('[REACH→ABACIA] Brain responded:', (data.routing?.agents || []).join(',') || 'no agents');
-    console.log('[REACH→ABACIA] Trace:', data.trace);
-    
-    return data;
-  } catch (e) {
-    console.log('[REACH→ABACIA] Failed to reach brain:', e.message);
-    return null;
-  }
-}
-
-// PHASE 2: INTELLIGENCE - REAL AGENTS
-const AGENTS = {};
-
-// LUKE - REAL multi-intent detection
-AGENTS.LUKE = {
-  name: 'LUKE', fullName: 'Listener and Understanding Knowledge Extractor',
-  analyze(message) {
-    if (!message) return { intents: [], entities: [], sentiment: 'neutral', tasks: [] };
-    const lowerMsg = message.toLowerCase();
-    const intents = [];
-    const entities = [];
-    const tasks = [];
-    
-    // Multi-intent detection
-    if (lowerMsg.match(/email|send.*to|message.*to|write.*to|draft/)) intents.push('email');
-    if (lowerMsg.match(/call|phone|dial|ring/)) intents.push('call');
-    if (lowerMsg.match(/text|sms/)) intents.push('sms');
-    if (lowerMsg.match(/schedule|calendar|meeting|block.*time|book/)) intents.push('schedule');
-    if (lowerMsg.match(/search|find|look.*up|locate/)) intents.push('search');
-    if (lowerMsg.match(/remember|note|save|store|keep.*track/)) intents.push('memory');
-    if (lowerMsg.match(/remind|reminder|alert.*me/)) intents.push('reminder');
-    if (lowerMsg.match(/^(hi|hello|hey|good morning|good evening|good afternoon)/)) intents.push('greeting');
-    if (lowerMsg.match(/what.*on.*calendar|what.*today|what.*scheduled|my.*schedule/)) intents.push('calendar_query');
-    if (lowerMsg.match(/follow.*up|check.*if|did.*respond/)) intents.push('followup');
-    if (intents.length === 0) intents.push('general');
-    
-    // Entity extraction - ALL emails
-    (message.match(/[\w.-]+@[\w.-]+\.\w+/g) || []).forEach(e => entities.push({ type: 'email', value: e }));
-    // ALL phone numbers
-    (message.match(/\+?[\d\s().-]{10,}/g) || []).forEach(p => entities.push({ type: 'phone', value: p.trim().replace(/\s+/g, '') }));
-    // ALL person names
-    const namePatterns = [
-      /(?:to|for|with|from|tell|email|call|text|contact)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/g,
-      /([A-Z][a-z]+)\s+(?:at|knows|said|wants|needs)/g,
-      /(?:call|text|email|tell|contact)\s+([A-Z]{2,3})\b/g
-    ];
-    const skip = ['The','This','That','Here','What','When','Where','How','Why','Who','I','You','He','She','We','They','My','Your','Good','Hi','Hello','Hey','Please','Also','Then','First','Second','Finally','URGENT','CRITICAL','ASAP'];
-    const foundNames = new Set();
-    namePatterns.forEach(p => { let m; while ((m = p.exec(message)) !== null) { if (!skip.includes(m[1])) foundNames.add(m[1]); } });
-    foundNames.forEach(n => entities.push({ type: 'person', value: n }));
-    // ALL times
-    (message.match(/\d{1,2}(?::\d{2})?\s*(?:am|pm|AM|PM)|(?:at|by)\s+\d{1,2}(?::\d{2})?/g) || []).forEach(t => entities.push({ type: 'time', value: t }));
-    // ALL dates
-    ['monday','tuesday','wednesday','thursday','friday','saturday','sunday','today','tomorrow','tonight','next week'].forEach(d => { if (lowerMsg.includes(d)) entities.push({ type: 'date', value: d }); });
-    
-    // Sentiment
-    let sentiment = 'neutral';
-    if (lowerMsg.match(/thanks|great|awesome|love|perfect|excellent/)) sentiment = 'positive';
-    else if (lowerMsg.match(/angry|frustrated|annoyed|terrible|hate|awful|broken|stupid/)) sentiment = 'negative';
-    if (lowerMsg.match(/urgent|asap|emergency|critical|important|now|immediately/)) sentiment = 'urgent';
-    
-    // Task decomposition
-    const rawTasks = message.split(/(?:\d+\)|then|and also|also,|;)/i).map(t => t.trim()).filter(t => t.length > 5);
-    rawTasks.forEach((txt, idx) => {
-      const tLower = txt.toLowerCase();
-      let type = 'general';
-      if (tLower.match(/email|send|message|draft/)) type = 'email';
-      else if (tLower.match(/call|phone|dial/)) type = 'call';
-      else if (tLower.match(/text|sms/)) type = 'sms';
-      else if (tLower.match(/schedule|calendar|meeting/)) type = 'schedule';
-      else if (tLower.match(/find|search|look/)) type = 'search';
-      else if (tLower.match(/remember|note|save/)) type = 'memory';
-      else if (tLower.match(/remind/)) type = 'reminder';
-      tasks.push({ id: idx + 1, type, text: txt });
-    });
-    if (tasks.length === 0) tasks.push({ id: 1, type: intents[0], text: message });
-    
-    return { intents, entities, sentiment, tasks, wordCount: message.split(/\s+/).length, isMultiIntent: intents.length > 1, isMultiTask: tasks.length > 1 };
-  }
-};
-
-// NOW - REAL temporal
-AGENTS.NOW = {
-  name: 'NOW', fullName: 'Temporal Awareness Agent',
-  getContext() {
-    const now = new Date();
-    const estDate = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
-    return {
-      iso: now.toISOString(), unix: Math.floor(now.getTime() / 1000),
-      readable: estDate.toLocaleString('en-US'), hour: estDate.getHours(), minute: estDate.getMinutes(),
-      dayOfWeek: ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][estDate.getDay()],
-      date: now.toISOString().split('T')[0], isWeekend: estDate.getDay() === 0 || estDate.getDay() === 6,
-      isBusinessHours: estDate.getHours() >= 9 && estDate.getHours() < 17 && estDate.getDay() > 0 && estDate.getDay() < 6,
-      timeOfDay: estDate.getHours() < 12 ? 'morning' : estDate.getHours() < 17 ? 'afternoon' : estDate.getHours() < 21 ? 'evening' : 'night',
-      timezone: 'America/New_York'
-    };
-  }
-};
-
-// COLE - REAL brain search
-AGENTS.COLE = {
-  name: 'COLE', fullName: 'Context and Observation through Linked Evidence',
-  async searchBrain(query, limit = 5) {
-    if (!query) return { results: [], count: 0 };
-    try {
-      const keywords = query.split(/\s+/).slice(0, 5).join(' ');
-      const r = await fetch(SUPABASE_URL + '/rest/v1/aba_memory?content=ilike.*' + encodeURIComponent(keywords) + '*&order=importance.desc,created_at.desc&limit=' + limit, { headers: { 'apikey': SUPABASE_KEY || SUPABASE_ANON, 'Authorization': 'Bearer ' + (SUPABASE_KEY || SUPABASE_ANON) } });
-      if (r.ok) { const data = await r.json(); return { results: data, count: data.length }; }
-    } catch (e) { console.log('[COLE] Error:', e.message); }
-    return { results: [], count: 0 };
-  }
-};
-
-// HAM - REAL identity - NOW LOADS FROM BRAIN
-AGENTS.HAM = {
-  name: 'HAM', fullName: 'Human ABA Master',
-  // knownContacts is now dynamic - loaded via loadHAMContacts()
-  async getContacts() {
-    return await loadHAMContacts();
-  },
-  async identify(identifier) {
-    if (!identifier) return { identity: null, trust: 'T0', found: false };
-    const lower = identifier.toLowerCase();
-    const contacts = await loadHAMContacts();
-    
-    // Check dynamic contacts from brain
-    for (const [key, contact] of Object.entries(contacts)) {
-      if (lower.includes(key) || lower.includes((contact.name || '').toLowerCase())) {
-        return { identity: contact, trust: contact.trust, found: true };
-      }
-    }
-    
-    // Try brain lookup for unknown contacts
-    try {
-      const r = await fetch(SUPABASE_URL + '/rest/v1/aba_memory?memory_type=eq.contact&content=ilike.*' + encodeURIComponent(identifier) + '*&limit=1', { headers: { 'apikey': SUPABASE_KEY || SUPABASE_ANON, 'Authorization': 'Bearer ' + (SUPABASE_KEY || SUPABASE_ANON) } });
-      if (r.ok) { const data = await r.json(); if (data[0]) return { identity: { name: identifier, raw: data[0].content }, trust: 'T5', found: true }; }
-    } catch (e) {}
-    return { identity: null, trust: 'T0', found: false };
-  }
-};
-
-// IMAN - REAL email
-AGENTS.IMAN = {
-  name: 'IMAN', fullName: 'Intelligent Mail Agent Navigator',
-  async send(to, subject, body) {
-    const NYLAS_GRANT = process.env.NYLAS_GRANT_ID || '41a3ace1-1c1e-47f3-b017-e5fd71ea1f3a';
-    const NYLAS_KEY = process.env.NYLAS_API_KEY || 'nyk_v0_eeBniYFxPAMuK30DejqDNIFfEyMQiH6ATEnTEhMiutJzvwor3c2ZuhC0Oeicl2vn';
-    try {
-      const r = await fetch('https://api.us.nylas.com/v3/grants/' + NYLAS_GRANT + '/messages/send', {
-        method: 'POST', headers: { 'Authorization': 'Bearer ' + NYLAS_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ subject, body, to: [{ email: to }] })
-      });
-      if (r.ok) { const data = await r.json(); return { sent: true, messageId: data.data?.id, to, subject }; }
-      return { sent: false, error: await r.text() };
-    } catch (e) { return { sent: false, error: e.message }; }
-  },
-  draft(to, subject, body) { return { drafted: true, to, subject, body, preview: body.substring(0, 100) }; }
-};
-
-// MEMOS - REAL storage
-AGENTS.MEMOS = {
-  name: 'MEMOS', fullName: 'Memory and Event Management Oversight System',
-  async store(content, metadata = {}) {
-    try {
-      const r = await fetch(SUPABASE_URL + '/rest/v1/aba_memory', {
-        method: 'POST',
-        headers: { 'apikey': SUPABASE_KEY || SUPABASE_ANON, 'Authorization': 'Bearer ' + (SUPABASE_KEY || SUPABASE_ANON), 'Content-Type': 'application/json', 'Prefer': 'return=representation' },
-        body: JSON.stringify({ source: metadata.source || 'memos_' + Date.now(), memory_type: metadata.type || 'memo', content: typeof content === 'string' ? content : JSON.stringify(content), tags: metadata.tags || ['memo'], importance: metadata.importance || 7, is_private: metadata.private || false })
-      });
-      if (r.ok) { const data = await r.json(); return { stored: true, id: data[0]?.id }; }
-      return { stored: false, error: 'Failed' };
-    } catch (e) { return { stored: false, error: e.message }; }
-  }
-};
-
-// GRIT - REAL retry
-AGENTS.GRIT = {
-  name: 'GRIT', fullName: 'Genuine Resolution through Intelligent Tenacity', maxAttempts: 8,
-  getAlternatives(failedAction, attempt) {
-    if (attempt >= this.maxAttempts) return { giveUp: true, escalate: true };
-    const alts = {
-      'email': ['retry', 'queue', 'sms_instead', 'store_draft'],
-      'api': ['retry_backoff', 'use_cache', 'fallback', 'degrade'],
-      'default': ['retry', 'simplify', 'skip', 'escalate']
-    };
-    const list = alts[failedAction] || alts['default'];
-    return { giveUp: false, attempt: attempt + 1, suggestion: list[attempt] || list[0], remaining: this.maxAttempts - attempt - 1 };
-  }
-};
-
-// TRUTH - REAL verification
-AGENTS.TRUTH = {
-  name: 'TRUTH', fullName: 'Trust and Reality Unification Through Honesty',
-  verify(claim, sources) {
-    if (!sources || sources.length === 0) return { verified: false, confidence: 0, note: 'No sources' };
-    const claimWords = claim.toLowerCase().split(/\s+/).filter(w => w.length > 3);
-    let matches = 0;
-    sources.forEach(s => { const txt = (s.content || s).toLowerCase(); claimWords.forEach(w => { if (txt.includes(w)) matches++; }); });
-    const confidence = Math.min(100, Math.round((matches / claimWords.length) * 100));
-    return { verified: confidence > 50, confidence, note: confidence > 70 ? 'High confidence' : confidence > 50 ? 'Moderate' : 'Low - say I dont know' };
-  }
-};
-
-// DAWN - Morning briefing
-AGENTS.DAWN = {
-  name: 'DAWN', fullName: 'Daily Awareness and Wisdom Notifier',
-  async generateBriefing() {
-    const time = AGENTS.NOW.getContext();
-    const items = ['Good ' + time.timeOfDay + '! Here is your briefing for ' + time.dayOfWeek + ':'];
-    // Could add calendar, email, weather queries here
-    items.push('- Time: ' + time.readable);
-    items.push('- Business hours: ' + (time.isBusinessHours ? 'Yes' : 'No'));
-    return { briefing: items.join('\n'), time };
-  }
-};
-
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// PHASE 2: REAL AGENT IMPLEMENTATIONS (Feb 24 2026)
-// ═══════════════════════════════════════════════════════════════════════════════
-
-// VARA - REAL Voice via ElevenLabs
-AGENTS.VARA = {
-  name: 'VARA', fullName: 'Vocal Authorized Representative of ABA',
-  voiceId: 'AIFDUhRnM6s61433WMNu',
-  model: 'eleven_flash_v2_5',
-  
-  async speak(text, options = {}) {
-    if (!text) return { error: 'No text provided' };
-    const ELEVENLABS_KEY = process.env.ELEVENLABS_API_KEY;
-    if (!ELEVENLABS_KEY) return { spoken: false, text, note: 'Text-only mode' };
-    
-    try {
-      const response = await fetch('https://api.elevenlabs.io/v1/text-to-speech/' + this.voiceId, {
-        method: 'POST',
-        headers: { 'xi-api-key': ELEVENLABS_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text: text,
-          model_id: options.model || this.model,
-          voice_settings: { stability: 0.5, similarity_boost: 0.75 }
-        })
-      });
-      if (response.ok) return { spoken: true, text, length: text.length, voiceId: this.voiceId };
-      return { spoken: false, error: await response.text() };
-    } catch (e) { return { spoken: false, error: e.message }; }
-  }
-};
-
-// CARA - REAL SMS via Twilio + Outreach Planning
-AGENTS.CARA = {
-  name: 'CARA', fullName: 'Communication And Reach Agent',
-  channelHistory: new Map(),
-  
-  planOutreach(context) {
-    const { urgency, sentiment, preference } = context || {};
-    if (urgency === 'critical' || sentiment === 'urgent') return { channel: 'call', agent: 'DIAL', reason: 'Critical' };
-    if (urgency === 'high') return { channel: 'sms', agent: 'CARA', reason: 'High urgency' };
-    if (preference === 'call') return { channel: 'call', agent: 'DIAL', reason: 'Preference' };
-    return { channel: 'email', agent: 'IMAN', reason: 'Default' };
-  },
-  
-  async sendSms(to, message) {
-    const TWILIO_SID = process.env.TWILIO_ACCOUNT_SID || process.env.TWILIO_SID;
-    const TWILIO_AUTH = process.env.TWILIO_AUTH_TOKEN || process.env.TWILIO_AUTH;
-    const TWILIO_PHONE = process.env.TWILIO_PHONE_NUMBER || process.env.TWILIO_PHONE;
-    if (!TWILIO_SID || !TWILIO_AUTH) return { sent: false, error: 'Missing Twilio creds' };
-    
-    try {
-      const authHeader = 'Basic ' + Buffer.from(TWILIO_SID + ':' + TWILIO_AUTH).toString('base64');
-      const formData = new URLSearchParams();
-      formData.append('To', to);
-      formData.append('From', TWILIO_PHONE);
-      formData.append('Body', message);
-      
-      const r = await fetch('https://api.twilio.com/2010-04-01/Accounts/' + TWILIO_SID + '/Messages.json', {
-        method: 'POST',
-        headers: { 'Authorization': authHeader, 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: formData.toString()
-      });
-      if (r.ok) { const data = await r.json(); return { sent: true, sid: data.sid, to }; }
-      return { sent: false, error: await r.text() };
-    } catch (e) { return { sent: false, error: e.message }; }
-  },
-  
-  recordChannel(userId, channel, messageId) {
-    if (!this.channelHistory.has(userId)) this.channelHistory.set(userId, []);
-    this.channelHistory.get(userId).push({ channel, messageId, timestamp: Date.now() });
-  }
-};
-
-// QUILL - REAL Writing Standards Enforcement
-AGENTS.QUILL = {
-  name: 'QUILL', fullName: 'Quality Understanding of Intent in Language and Lexicon',
-  violations: {
-    EM_DASH: { pattern: /—|--/g, fix: ', ', severity: 'fireable' },
-    COLD_GREETING: { pattern: /^(Hey,|Hi,|Hello,)\s/i, severity: 'fireable' },
-    CTA_ENDING: { pattern: /let me know if you have any questions\.?$/i, severity: 'fireable' },
-    AI_HAPPY_TO: { pattern: /I('d)?\s+(would\s+)?be\s+happy\s+to/gi, severity: 'high' },
-    CORPORATE_SPEAK: { pattern: /leverage|synergy|bandwidth|circle back|touch base/gi, severity: 'medium' }
-  },
-  
-  enforce(text) {
-    if (!text) return { text, violations: [], score: 100, passed: true };
-    let fixedText = text;
-    const foundViolations = [];
-    let score = 100;
-    const deductions = { fireable: 25, high: 10, medium: 5, low: 2 };
-    
-    for (const [name, rule] of Object.entries(this.violations)) {
-      if (rule.pattern.test(text)) {
-        foundViolations.push({ type: name, severity: rule.severity });
-        score -= deductions[rule.severity] || 5;
-        if (rule.fix) fixedText = fixedText.replace(rule.pattern, rule.fix);
-      }
-    }
-    return { original: text, fixed: fixedText, violations: foundViolations, score: Math.max(0, score), passed: foundViolations.filter(v => v.severity === 'fireable').length === 0 };
-  },
-  
-  check(text) { const r = this.enforce(text); return { score: r.score, passed: r.passed, violationCount: r.violations.length }; }
-};
-
-// SHADOW - REAL Audit Logging
-AGENTS.SHADOW = {
-  name: 'SHADOW', fullName: 'Stealthy Historical Audit and Daily Oversight Watch',
-  auditLog: [],
-  
-  async audit(event) {
-    const entry = { id: 'audit_' + Date.now(), timestamp: new Date().toISOString(), event: event.type, actor: event.actor || 'system', target: event.target, action: event.action, result: event.result };
-    this.auditLog.push(entry);
-    if (this.auditLog.length > 1000) this.auditLog.shift();
-    
-    try {
-      await fetch(SUPABASE_URL + '/rest/v1/aba_memory', {
-        method: 'POST',
-        headers: { 'apikey': SUPABASE_KEY || SUPABASE_ANON, 'Authorization': 'Bearer ' + (SUPABASE_KEY || SUPABASE_ANON), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ source: 'shadow_audit_' + Date.now(), memory_type: 'audit', content: JSON.stringify(entry), tags: ['audit', event.type], importance: 6 })
-      });
-    } catch (e) {}
-    return { logged: true, id: entry.id };
-  },
-  
-  getRecent(count = 20) { return this.auditLog.slice(-count); }
-};
-
-// SAGE - REAL Strategic Search
-AGENTS.SAGE = {
-  name: 'SAGE', fullName: 'Search Assessment and Governance Engine',
-  
-  async search(query, options = {}) {
-    const limit = options.limit || 10;
-    // Try semantic via pgvector
-    try {
-      const r = await fetch(SUPABASE_URL + '/rest/v1/rpc/match_memories', {
-        method: 'POST',
-        headers: { 'apikey': SUPABASE_KEY || SUPABASE_ANON, 'Authorization': 'Bearer ' + (SUPABASE_KEY || SUPABASE_ANON), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query_embedding: null, match_threshold: 0.5, match_count: limit })
-      });
-      if (r.ok) { const data = await r.json(); if (data.length > 0) return { results: data, count: data.length, method: 'semantic' }; }
-    } catch (e) {}
-    // Fallback to COLE
-    return { ...(await AGENTS.COLE.searchBrain(query, limit)), method: 'keyword' };
-  },
-  
-  async strategicSearch(query, context = {}) {
-    const results = [];
-    const primary = await this.search(query);
-    results.push(...primary.results);
-    if (context.entities) {
-      for (const e of context.entities.slice(0, 3)) {
-        const er = await this.search(e.value, { limit: 3 });
-        results.push(...er.results);
-      }
-    }
-    const unique = [...new Map(results.map(r => [r.id, r])).values()];
-    return { results: unique.slice(0, 10), count: unique.length };
-  }
-};
-
-// DRAFT - REAL BS Detection (uses DRAFT_scanOutput if exists)
-AGENTS.DRAFT = {
-  name: 'DRAFT', fullName: 'Detection and Review of AI-Fabricated Text',
-  scan(text) {
-    if (typeof DRAFT_scanOutput === 'function') return DRAFT_scanOutput(text);
-    // Inline check
-    let score = 100;
-    const violations = [];
-    const checks = [
-      [/—|--/g, 'em_dash', 10],
-      [/I('d)?\s+(would\s+)?be\s+happy\s+to/gi, 'happy_to', 5],
-      [/leverage|synergy|bandwidth/gi, 'corporate', 5],
-      [/\bdelve\b/gi, 'delve', 5],
-      [/it's important to note/gi, 'ai_phrase', 5]
-    ];
-    for (const [pattern, name, deduct] of checks) {
-      if (pattern.test(text)) { violations.push({ type: name }); score -= deduct; }
-    }
-    return { score: Math.max(0, score), violations, passed: score >= 85 };
-  }
-};
-
-// DAWN - REAL Morning Briefing
-AGENTS.DAWN = {
-  name: 'DAWN', fullName: 'Daily Awareness and Wisdom Notifier',
-  
-  async generateBriefing() {
-    const time = AGENTS.NOW.getContext();
-    const items = ['Good ' + time.timeOfDay + ', Brandon!', 'It is ' + time.readable + ' on ' + time.dayOfWeek + '.', ''];
-    
-    // Email check
-    try {
-      const NYLAS_GRANT = process.env.NYLAS_GRANT_ID || '41a3ace1-1c1e-47f3-b017-e5fd71ea1f3a';
-      const NYLAS_KEY = process.env.NYLAS_API_KEY || 'nyk_v0_eeBniYFxPAMuK30DejqDNIFfEyMQiH6ATEnTEhMiutJzvwor3c2ZuhC0Oeicl2vn';
-      const r = await fetch('https://api.us.nylas.com/v3/grants/' + NYLAS_GRANT + '/messages?limit=50&unread=true', { headers: { 'Authorization': 'Bearer ' + NYLAS_KEY } });
-      if (r.ok) { const data = await r.json(); const msgs = data.data || []; items.push('📧 ' + msgs.length + ' unread emails'); }
-    } catch (e) { items.push('📧 Email check failed'); }
-    
-    items.push('', 'How can I help you today?');
-    return { briefing: items.join('\n'), time };
-  }
-};
-
-// ═══════════════════════════════════════════════════════════════════════════════
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// ROSTER & BIRTH - Agent Registry Management (Feb 24 2026)
-// ⬡B:AGENTS.ROSTER_BIRTH:CODE:hr.registry:v1.0.0:20260224⬡
-// 
-// CRITICAL NAMES - DO NOT CHANGE:
-// - TIM = Temporary Interim Model (NOT Tactical/Throwaway)
-// - BIRTH = Breeding Integrated Routing Through Heuristics (NOT Build Integration)
-// - HUNTER = Hunting Useful New Tracks and Employment Resources
-// ═══════════════════════════════════════════════════════════════════════════════
-
-// ROSTER - Query agent registry from aba_agent_jds table
-AGENTS.ROSTER = {
-  name: 'ROSTER',
-  fullName: 'Registry Oversight for Staffing, Tracking, and Employee Records',
-  department: 'HR',
-  type: 'COMMANDABLE',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-
-  async list() {
-    this.runCount++;
-    try {
-      const r = await fetch(SUPABASE_URL + '/rest/v1/aba_agent_jds?select=acronym,full_name,department,status,agent_type,runtime&order=acronym.asc', {
-        headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
-      });
-      if (r.ok) {
-        const agents = await r.json();
-        return {
-          agent: 'ROSTER',
-          action: 'list',
-          totalAgents: agents.length,
-          agents: agents.map(a => ({
-            acronym: a.acronym,
-            fullName: a.full_name,
-            department: a.department,
-            status: a.status,
-            type: a.agent_type,
-            runtime: a.runtime
-          })),
-          departments: [...new Set(agents.map(a => a.department).filter(Boolean))],
-          message: `ROSTER contains ${agents.length} registered agents`
-        };
-      }
-      return { error: true, message: 'Failed to query roster' };
-    } catch (e) {
-      return { error: true, message: e.message };
-    }
-  },
-
-  async search(term) {
-    this.runCount++;
-    try {
-      const r = await fetch(SUPABASE_URL + '/rest/v1/aba_agent_jds?or=(full_name.ilike.*' + encodeURIComponent(term) + '*,department.ilike.*' + encodeURIComponent(term) + '*)&order=acronym.asc', {
-        headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
-      });
-      if (r.ok) {
-        const agents = await r.json();
-        return {
-          agent: 'ROSTER',
-          action: 'search',
-          query: term,
-          results: agents.map(a => ({ acronym: a.acronym, fullName: a.full_name, department: a.department })),
-          count: agents.length,
-          message: `Found ${agents.length} agents related to "${term}"`
-        };
-      }
-      return { error: true, message: 'Search failed' };
-    } catch (e) {
-      return { error: true, message: e.message };
-    }
-  },
-
-  async count() {
-    this.runCount++;
-    try {
-      const r = await fetch(SUPABASE_URL + '/rest/v1/aba_agent_jds?select=id', {
-        headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Prefer': 'count=exact' }
-      });
-      const count = r.headers.get('content-range')?.split('/')[1] || '0';
-      return { agent: 'ROSTER', action: 'count', totalAgents: parseInt(count), message: `${count} agents registered` };
-    } catch (e) {
-      return { error: true, message: e.message };
-    }
-  },
-
-  async get(acronym) {
-    this.runCount++;
-    try {
-      const r = await fetch(SUPABASE_URL + '/rest/v1/aba_agent_jds?acronym=eq.' + encodeURIComponent(acronym.toUpperCase()) + '&limit=1', {
-        headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
-      });
-      if (r.ok) {
-        const data = await r.json();
-        if (data.length > 0) {
-          return { agent: 'ROSTER', action: 'get', found: true, agentData: data[0] };
-        }
-        return { agent: 'ROSTER', action: 'get', found: false, message: `Agent ${acronym} not found` };
-      }
-      return { error: true, message: 'Query failed' };
-    } catch (e) {
-      return { error: true, message: e.message };
-    }
-  }
-};
-
-// BIRTH - Agent creation verification (5-step protocol)
-AGENTS.BIRTH = {
-  name: 'BIRTH',
-  fullName: 'Breeding Integrated Routing Through Heuristics', // ✅ CORRECT NAME
-  department: 'HR',
-  type: 'COMMANDABLE',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-
-  // Critical agent names - source of truth
-  CORRECT_NAMES: {
-    TIM: 'Temporary Interim Model',
-    BIRTH: 'Breeding Integrated Routing Through Heuristics',
-    HUNTER: 'Hunting Useful New Tracks and Employment Resources',
-    GRIT: 'Genuine Resolution and Issue Tracking',
-    PAM: 'Protective ABA Mode',
-    HAM: 'Human ABA Master',
-    AIR: 'ABA Intelligence Router',
-    VARA: 'Vocal Authorized Representative of ABA',
-    MACE: 'Master Architecture and Code Engine',
-    DION: 'Strategic Decision and Intelligence Orchestration',
-    ROSTER: 'Registry Oversight for Staffing, Tracking, and Employee Records'
-  },
-
-  async verify(acronym) {
-    this.runCount++;
-    const agentName = acronym.toUpperCase();
-    
-    const checks = {
-      jd_in_brain: false,
-      in_registry: false,
-      case_exists: false,
-      handler_exists: false,
-      deployed: false
-    };
-
-    try {
-      // Check 1: JD in brain (aba_agent_jds table)
-      const r = await fetch(SUPABASE_URL + '/rest/v1/aba_agent_jds?acronym=eq.' + encodeURIComponent(agentName) + '&limit=1', {
-        headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
-      });
-      
-      let agentData = null;
-      if (r.ok) {
-        const data = await r.json();
-        checks.jd_in_brain = data.length > 0;
-        agentData = data[0] || null;
-      }
-
-      // Check 2: In AGENTS registry (this file)
-      checks.in_registry = AGENTS[agentName] !== undefined;
-
-      // Checks 3-5: If in registry, assume wired
-      if (checks.in_registry) {
-        checks.case_exists = true;
-        checks.handler_exists = true;
-        checks.deployed = true;
-      }
-
-      const alive = Object.values(checks).every(v => v === true);
-      const missing = Object.entries(checks).filter(([k, v]) => !v).map(([k]) => k);
-
-      // Name verification (anti-hallucination)
-      let nameWarning = null;
-      if (agentData && this.CORRECT_NAMES[agentName]) {
-        if (agentData.full_name !== this.CORRECT_NAMES[agentName]) {
-          nameWarning = `⚠️ NAME MISMATCH: Table has "${agentData.full_name}" but should be "${this.CORRECT_NAMES[agentName]}"`;
-        }
-      }
-
-      return {
-        agent: 'BIRTH',
-        targetAgent: agentName,
-        alive,
-        checks,
-        missing,
-        agentData,
-        nameWarning,
-        message: alive
-          ? `✅ Agent ${agentName} is ALIVE — all 5 birth checks passed`
-          : `⚠️ Agent ${agentName} is INCOMPLETE — missing: ${missing.join(', ')}`
-      };
-
-    } catch (e) {
-      return { agent: 'BIRTH', targetAgent: agentName, error: true, message: e.message };
-    }
-  },
-
-  async verifyAll() {
-    this.runCount++;
-    // Get all agents from table
-    const roster = await AGENTS.ROSTER.list();
-    if (roster.error) return roster;
-
-    const results = [];
-    for (const agent of roster.agents.slice(0, 20)) { // Limit to 20 to avoid timeout
-      const verification = await this.verify(agent.acronym);
-      results.push({
-        acronym: agent.acronym,
-        alive: verification.alive,
-        missing: verification.missing,
-        nameWarning: verification.nameWarning
-      });
-    }
-
-    const alive = results.filter(r => r.alive).length;
-    const issues = results.filter(r => !r.alive || r.nameWarning);
-
-    return {
-      agent: 'BIRTH',
-      action: 'verifyAll',
-      checked: results.length,
-      alive,
-      incomplete: results.length - alive,
-      issues,
-      message: `Verified ${results.length} agents: ${alive} alive, ${results.length - alive} incomplete`
-    };
-  },
-
-  checkName(acronym) {
-    const correct = this.CORRECT_NAMES[acronym.toUpperCase()];
-    return {
-      agent: 'BIRTH',
-      action: 'checkName',
-      acronym: acronym.toUpperCase(),
-      correctName: correct || 'Unknown - check aba_agent_jds table',
-      isKnownCritical: !!correct
-    };
-  }
-};
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// END ROSTER & BIRTH
-
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// ALL 59 REMAINING AGENTS - CONTEXT WRAPPERS
-// Generated: February 24, 2026
-// ⬡B:AGENTS.ALL_59:CODE:full_roster_wiring:v1.0.0:20260224⬡
-//
-// These are CONTEXT WRAPPERS - they provide context to AIR, not call APIs directly.
-// Each can be enhanced with specific logic later.
-// For now, they are WIRED and CALLABLE via /api/v2/agents/NAME/execute
-// ═══════════════════════════════════════════════════════════════════════════════
-
-// AIR - ABA Intelligence Router
-AGENTS.AIR = {
-  name: 'AIR',
-  fullName: 'ABA Intelligence Router',
-  department: 'CORE',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'AIR',
-      fullName: 'ABA Intelligence Router',
-      department: 'CORE',
-      contextAddition: 'Agent AIR (ABA Intelligence Router) is available for core tasks.',
-      capabilities: ['core'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'AIR',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'AIR ready - context wrapper active'
-    };
-  }
-};
-
-// ATLAS - Architecture and Technical Layout Analysis
-AGENTS.ATLAS = {
-  name: 'ATLAS',
-  fullName: 'Architecture and Technical Layout Analysis',
-  department: 'CODING',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'ATLAS',
-      fullName: 'Architecture and Technical Layout Analysis',
-      department: 'CODING',
-      contextAddition: 'Agent ATLAS (Architecture and Technical Layout Analysis) is available for coding tasks.',
-      capabilities: ['coding'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'ATLAS',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'ATLAS ready - context wrapper active'
-    };
-  }
-};
-
-// AUDRA - Automated Universal Development Review Agent
-AGENTS.AUDRA = {
-  name: 'AUDRA',
-  fullName: 'Automated Universal Development Review Agent',
-  department: 'CODING',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'AUDRA',
-      fullName: 'Automated Universal Development Review Agent',
-      department: 'CODING',
-      contextAddition: 'Agent AUDRA (Automated Universal Development Review Agent) is available for coding tasks.',
-      capabilities: ['coding'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'AUDRA',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'AUDRA ready - context wrapper active'
-    };
-  }
-};
-
-// BLEND - Balanced Life Engagement and Notification Dispatcher
-AGENTS.BLEND = {
-  name: 'BLEND',
-  fullName: 'Balanced Life Engagement and Notification Dispatcher',
-  department: 'PROACTIVE',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'BLEND',
-      fullName: 'Balanced Life Engagement and Notification Dispatcher',
-      department: 'PROACTIVE',
-      contextAddition: 'Agent BLEND (Balanced Life Engagement and Notification Dispatcher) is available for proactive tasks.',
-      capabilities: ['proactive'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'BLEND',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'BLEND ready - context wrapper active'
-    };
-  }
-};
-
-// BRICK - Bug Resolution and Issue Cracking Kit
-AGENTS.BRICK = {
-  name: 'BRICK',
-  fullName: 'Bug Resolution and Issue Cracking Kit',
-  department: 'CODING',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'BRICK',
-      fullName: 'Bug Resolution and Issue Cracking Kit',
-      department: 'CODING',
-      contextAddition: 'Agent BRICK (Bug Resolution and Issue Cracking Kit) is available for coding tasks.',
-      capabilities: ['coding'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'BRICK',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'BRICK ready - context wrapper active'
-    };
-  }
-};
-
-// BRIDGE - Backend Resource Integration and Data Gateway
-AGENTS.BRIDGE = {
-  name: 'BRIDGE',
-  fullName: 'Backend Resource Integration and Data Gateway',
-  department: 'INFRASTRUCTURE',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'BRIDGE',
-      fullName: 'Backend Resource Integration and Data Gateway',
-      department: 'INFRASTRUCTURE',
-      contextAddition: 'Agent BRIDGE (Backend Resource Integration and Data Gateway) is available for infrastructure tasks.',
-      capabilities: ['infrastructure'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'BRIDGE',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'BRIDGE ready - context wrapper active'
-    };
-  }
-};
-
-// BURST - Breaking and Urgent Real-time System Transmissions
-AGENTS.BURST = {
-  name: 'BURST',
-  fullName: 'Breaking and Urgent Real-time System Transmissions',
-  department: 'PROACTIVE',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'BURST',
-      fullName: 'Breaking and Urgent Real-time System Transmissions',
-      department: 'PROACTIVE',
-      contextAddition: 'Agent BURST (Breaking and Urgent Real-time System Transmissions) is available for proactive tasks.',
-      capabilities: ['proactive'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'BURST',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'BURST ready - context wrapper active'
-    };
-  }
-};
-
-// CeeCee - Command Center Entry and Exit Coordinator
-AGENTS.CEECEE = {
-  name: 'CEECEE',
-  fullName: 'Command Center Entry and Exit Coordinator',
-  department: 'VOICE',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'CEECEE',
-      fullName: 'Command Center Entry and Exit Coordinator',
-      department: 'VOICE',
-      contextAddition: 'Agent CeeCee (Command Center Entry and Exit Coordinator) is available for voice tasks.',
-      capabilities: ['voice'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'CEECEE',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'CeeCee ready - context wrapper active'
-    };
-  }
-};
-
-// CLEAR - Correcting Linguistic Errors And Reconstructing
-AGENTS.CLEAR = {
-  name: 'CLEAR',
-  fullName: 'Correcting Linguistic Errors And Reconstructing',
-  department: 'VOICE',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'CLEAR',
-      fullName: 'Correcting Linguistic Errors And Reconstructing',
-      department: 'VOICE',
-      contextAddition: 'Agent CLEAR (Correcting Linguistic Errors And Reconstructing) is available for voice tasks.',
-      capabilities: ['voice'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'CLEAR',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'CLEAR ready - context wrapper active'
-    };
-  }
-};
-
-// COMPOSE - Communication Output Manager and Professional Speech Editor
-AGENTS.COMPOSE = {
-  name: 'COMPOSE',
-  fullName: 'Communication Output Manager and Professional Speech Editor',
-  department: 'OUTREACH',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'COMPOSE',
-      fullName: 'Communication Output Manager and Professional Speech Editor',
-      department: 'OUTREACH',
-      contextAddition: 'Agent COMPOSE (Communication Output Manager and Professional Speech Editor) is available for outreach tasks.',
-      capabilities: ['outreach'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'COMPOSE',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'COMPOSE ready - context wrapper active'
-    };
-  }
-};
-
-// COOK - Conversational Optimization and Observational Knowledge
-AGENTS.COOK = {
-  name: 'COOK',
-  fullName: 'Conversational Optimization and Observational Knowledge',
-  department: 'MEETINGS',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'COOK',
-      fullName: 'Conversational Optimization and Observational Knowledge',
-      department: 'MEETINGS',
-      contextAddition: 'Agent COOK (Conversational Optimization and Observational Knowledge) is available for meetings tasks.',
-      capabilities: ['meetings'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'COOK',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'COOK ready - context wrapper active'
-    };
-  }
-};
-
-// DIAL - Direct Interface for Auditory Links
-AGENTS.DIAL = {
-  name: 'DIAL',
-  fullName: 'Direct Interface for Auditory Links',
-  department: 'OUTREACH',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'DIAL',
-      fullName: 'Direct Interface for Auditory Links',
-      department: 'OUTREACH',
-      contextAddition: 'Agent DIAL (Direct Interface for Auditory Links) is available for outreach tasks.',
-      capabilities: ['outreach'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'DIAL',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'DIAL ready - context wrapper active'
-    };
-  }
-};
-
-// DION - Strategic Decision and Intelligence Orchestration
-AGENTS.DION = {
-  name: 'DION',
-  fullName: 'Strategic Decision and Intelligence Orchestration',
-  department: 'EXECUTIVE',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'DION',
-      fullName: 'Strategic Decision and Intelligence Orchestration',
-      department: 'EXECUTIVE',
-      contextAddition: 'Agent DION (Strategic Decision and Intelligence Orchestration) is available for executive tasks.',
-      capabilities: ['executive'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'DION',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'DION ready - context wrapper active'
-    };
-  }
-};
-
-// ECHO - Enhanced Communication and Handoff Orchestrator
-AGENTS.ECHO = {
-  name: 'ECHO',
-  fullName: 'Enhanced Communication and Handoff Orchestrator',
-  department: 'VOICE',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'ECHO',
-      fullName: 'Enhanced Communication and Handoff Orchestrator',
-      department: 'VOICE',
-      contextAddition: 'Agent ECHO (Enhanced Communication and Handoff Orchestrator) is available for voice tasks.',
-      capabilities: ['voice'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'ECHO',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'ECHO ready - context wrapper active'
-    };
-  }
-};
-
-// EMOTION - Evaluating Mood and Output Tone
-AGENTS.EMOTION = {
-  name: 'EMOTION',
-  fullName: 'Evaluating Mood and Output Tone',
-  department: 'CONTEXT',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'EMOTION',
-      fullName: 'Evaluating Mood and Output Tone',
-      department: 'CONTEXT',
-      contextAddition: 'Agent EMOTION (Evaluating Mood and Output Tone) is available for context tasks.',
-      capabilities: ['context'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'EMOTION',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'EMOTION ready - context wrapper active'
-    };
-  }
-};
-
-// ERICA - Explanation Review and Insight Clarity Assurance
-// ═══════════════════════════════════════════════════════════════════════════════
-// PHASE 1 - WIRE THE LOOP - Complete Implementation
-// ⬡B:PHASE1:CODE:wire_the_loop:v1.0.0:20260225⬡
-// ═══════════════════════════════════════════════════════════════════════════════
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// ERICA - Explanation Review and Insight Clarity Assurance
-// (Using name from database - functionality: reads roadmap, triggers automation)
-// ═══════════════════════════════════════════════════════════════════════════════
-AGENTS.ERICA = {
-  name: 'ERICA',
-  fullName: 'Explanation Review and Insight Clarity Assurance',
-  department: 'AUTONOMY',
-  type: 'COMMANDABLE',
-  runtime: 'scheduled',
-  active: true,
-  runCount: 0,
-  
-  async readRoadmap() {
-    try {
-      const response = await fetch(SUPABASE_URL + '/rest/v1/aba_memory?source=ilike.%25unicorn.roadmap%25&order=created_at.desc&limit=1&select=content,source', {
-        headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
-      });
-      if (response.ok) {
-        const data = await response.json();
-        return data[0] || null;
-      }
-    } catch (e) {
-      console.log('[ERICA] Roadmap read error:', e.message);
-    }
-    return null;
-  },
-  
-  parseRoadmapStatus(content) {
-    const lines = content.split('\n');
-    let totalItems = 0;
-    let completeItems = 0;
-    let nextItem = null;
-    let currentPhase = 0;
-    
-    for (const line of lines) {
-      const phaseMatch = line.match(/PHASE (\d+)/i);
-      if (phaseMatch) currentPhase = parseInt(phaseMatch[1]);
-      
-      const itemMatch = line.match(/^\d+\.\s+(.+)/);
-      if (itemMatch) {
-        totalItems++;
-        const isComplete = line.includes('✅');
-        if (isComplete) {
-          completeItems++;
-        } else if (!nextItem) {
-          nextItem = { phase: currentPhase, item: itemMatch[1].substring(0, 100) };
-        }
-      }
-    }
-    
-    return {
-      totalItems,
-      completeItems,
-      percentComplete: totalItems > 0 ? Math.round((completeItems / totalItems) * 100) : 0,
-      nextItem
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    console.log('[ERICA] Running action:', action);
-    
-    const roadmap = await this.readRoadmap();
-    if (!roadmap) {
-      return { agent: 'ERICA', error: true, message: 'No roadmap in brain' };
-    }
-    
-    const status = this.parseRoadmapStatus(roadmap.content);
-    
-    return {
-      agent: 'ERICA',
-      fullName: 'Explanation Review and Insight Clarity Assurance',
-      roadmapSource: roadmap.source,
-      percentComplete: status.percentComplete,
-      completeItems: status.completeItems,
-      totalItems: status.totalItems,
-      nextItem: status.nextItem,
-      message: `${status.percentComplete}% complete (${status.completeItems}/${status.totalItems}). Next: ${status.nextItem?.item || 'DONE'}`
-    };
-  }
-};
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// CACA - Coordinated Agent Chain Architecture
-// Chains: GRIT → MACE → BRAIN_WRITE → IMAN
-// ═══════════════════════════════════════════════════════════════════════════════
-AGENTS.CACA = {
-  name: 'CACA',
-  fullName: 'Coordinated Agent Chain Architecture',
-  department: 'AUTONOMY',
-  type: 'COMMANDABLE',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  defaultChain: ['GRIT', 'MACE', 'BRAIN_WRITE', 'IMAN'],
-  
-  async runChain(task, chain) {
-    const results = [];
-    let lastOutput = task;
-    console.log(`[CACA] Chain: ${chain.join(' → ')}`);
-    
-    for (const agentName of chain) {
-      console.log(`[CACA] → ${agentName}`);
-      
-      if (agentName === 'BRAIN_WRITE') {
-        try {
-          await fetch(SUPABASE_URL + '/rest/v1/aba_memory', {
-            method: 'POST',
-            headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
-            body: JSON.stringify({ content: JSON.stringify({ task, results }), memory_type: 'caca_result', source: 'caca_' + Date.now(), tags: ['caca'] })
-          });
-          results.push({ agent: 'BRAIN_WRITE', status: 'ok' });
-        } catch (e) { results.push({ agent: 'BRAIN_WRITE', status: 'error', error: e.message }); }
-        continue;
-      }
-      
-      if (agentName === 'IMAN' && typeof IMAN_escalate === 'function') {
-        try {
-          await IMAN_escalate({ category: 'caca', subject: 'CACA Complete', body: `Task: ${task}\n\n${JSON.stringify(results, null, 2)}` });
-          results.push({ agent: 'IMAN', status: 'emailed' });
-        } catch (e) { results.push({ agent: 'IMAN', status: 'error', error: e.message }); }
-        continue;
-      }
-      
-      if (AGENTS[agentName]?.execute) {
-        try {
-          const r = await AGENTS[agentName].execute('process', { input: lastOutput });
-          results.push({ agent: agentName, status: 'ok', output: JSON.stringify(r).substring(0, 200) });
-          lastOutput = r;
-        } catch (e) { results.push({ agent: agentName, status: 'error', error: e.message }); }
-      } else {
-        results.push({ agent: agentName, status: 'not_found' });
-      }
-    }
-    
-    return { agent: 'CACA', fullName: 'Coordinated Agent Chain Architecture', task, chain, results, status: 'complete' };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    if (action === 'run' && (params?.task || params?.input)) {
-      return await this.runChain(params.task || params.input, params.chain || this.defaultChain);
-    }
-    return { agent: 'CACA', fullName: 'Coordinated Agent Chain Architecture', actions: ['run'], defaultChain: this.defaultChain };
-  }
-};
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// PEEK - Personal Experience and Engagement Keeper
-// Stores per-user intake preferences: TELL vs RECOMMEND vs BOTH
-// ═══════════════════════════════════════════════════════════════════════════════
-AGENTS.PEEK = {
-  name: 'PEEK',
-  fullName: 'Personal Experience and Engagement Keeper',
-  department: 'CONTEXT',
-  type: 'COMMANDABLE',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  async getPreference(userId) {
-    try {
-      const r = await fetch(SUPABASE_URL + '/rest/v1/aba_memory?source=eq.peek_' + encodeURIComponent(userId) + '&select=content&limit=1', {
-        headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
-      });
-      if (r.ok) { const d = await r.json(); if (d[0]) return JSON.parse(d[0].content); }
-    } catch (e) { console.log('[PEEK] Error:', e.message); }
-    return { mode: 'BOTH' };
-  },
-  
-  async setPreference(userId, mode) {
-    const validModes = ['TELL', 'RECOMMEND', 'BOTH'];
-    if (!validModes.includes(mode.toUpperCase())) return { error: true, message: 'Mode must be TELL, RECOMMEND, or BOTH' };
-    try {
-      await fetch(SUPABASE_URL + '/rest/v1/aba_memory?source=eq.peek_' + encodeURIComponent(userId), { method: 'DELETE', headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY } });
-      await fetch(SUPABASE_URL + '/rest/v1/aba_memory', { method: 'POST', headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
-        body: JSON.stringify({ content: JSON.stringify({ mode: mode.toUpperCase() }), memory_type: 'user_preference', source: 'peek_' + userId, tags: ['peek', userId] }) });
-      return { success: true, userId, mode: mode.toUpperCase() };
-    } catch (e) { return { error: true, message: e.message }; }
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    const userId = params?.userId || 'default';
-    if (action === 'get') return { agent: 'PEEK', fullName: 'Personal Experience and Engagement Keeper', userId, preference: await this.getPreference(userId) };
-    if (action === 'set' && params?.mode) return { agent: 'PEEK', fullName: 'Personal Experience and Engagement Keeper', ...(await this.setPreference(userId, params.mode)) };
-    return { agent: 'PEEK', fullName: 'Personal Experience and Engagement Keeper', actions: ['get', 'set'], modes: ['TELL', 'RECOMMEND', 'BOTH'] };
-  }
-};
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// PROOF - Protocol for Reliable Output and Objective Facts
-// BJ trust protocol - sends proof when challenged
-// ═══════════════════════════════════════════════════════════════════════════════
-AGENTS.PROOF = {
-  name: 'PROOF',
-  fullName: 'Protocol for Reliable Output and Objective Facts',
-  department: 'TRUST',
-  type: 'COMMANDABLE',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  async gatherProof(claim) {
-    const evidence = [];
-    try {
-      const r = await fetch(SUPABASE_URL + '/rest/v1/aba_memory?content=ilike.%25' + encodeURIComponent(claim.substring(0, 30)) + '%25&limit=5&select=content,source', {
-        headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
-      });
-      if (r.ok) { const d = await r.json(); d.forEach(x => evidence.push({ source: x.source, snippet: x.content.substring(0, 150) })); }
-    } catch (e) { console.log('[PROOF] Error:', e.message); }
-    return { claim, evidence, hasEvidence: evidence.length > 0, message: evidence.length > 0 ? `Found ${evidence.length} sources` : 'No stored evidence - recommend web search' };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    if ((action === 'verify' || action === 'gather') && (params?.claim || params?.input)) {
-      return { agent: 'PROOF', fullName: 'Protocol for Reliable Output and Objective Facts', ...(await this.gatherProof(params.claim || params.input)) };
-    }
-    return { agent: 'PROOF', fullName: 'Protocol for Reliable Output and Objective Facts', actions: ['verify', 'gather'], description: 'Gather proof when challenged' };
-  }
-};
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// SCRUB - Speech Correction and Repair for Unintelligible Babble
-// Word cleanup pipeline for OMI/Otter transcripts
-// ═══════════════════════════════════════════════════════════════════════════════
-AGENTS.SCRUB = {
-  name: 'SCRUB',
-  fullName: 'Speech Correction and Repair for Unintelligible Babble',
-  department: 'PROCESSING',
-  type: 'COMMANDABLE',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  corrections: {
-    'aba': 'ABA', 'abba': 'ABA', 'a b a': 'ABA', 'air': 'AIR', 'mace': 'MACE', 'vara': 'VARA', 'vero': 'VARA', 'vera': 'VARA',
-    'dion': 'DION', 'cole': 'COLE', 'coal': 'COLE', 'grit': 'GRIT', 'grid': 'GRIT', 'luke': 'LUKE', 'look': 'LUKE',
-    'pack': 'PACK', 'pam': 'PAM', 'ham': 'HAM', 'omi': 'OMI', 'oh me': 'OMI', 'o m i': 'OMI',
-    'brandons': "Brandon's", 'bj': 'BJ', 'raquel': 'Raquel', 'rackle': 'Raquel', 'rachael': 'Raquel',
-    'super base': 'Supabase', 'soup abase': 'Supabase', 'for sell': 'Vercel', 'verse l': 'Vercel', 'new loss': 'Nylas', 'nylons': 'Nylas'
-  },
-  
-  clean(text) {
-    let cleaned = text;
-    for (const [wrong, right] of Object.entries(this.corrections)) {
-      cleaned = cleaned.replace(new RegExp('\\b' + wrong + '\\b', 'gi'), right);
-    }
-    return cleaned;
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    if ((action === 'clean' || action === 'process') && (params?.text || params?.input)) {
-      const text = params.text || params.input;
-      const cleaned = this.clean(text);
-      return { agent: 'SCRUB', fullName: 'Speech Correction and Repair for Unintelligible Babble', original: text, cleaned, changed: cleaned !== text };
-    }
-    return { agent: 'SCRUB', fullName: 'Speech Correction and Repair for Unintelligible Babble', actions: ['clean', 'process'], correctionCount: Object.keys(this.corrections).length };
-  }
-};
-
-// FIELD - Follow-up and Item Entry for Long-term Delivery
-AGENTS.FIELD = {
-  name: 'FIELD',
-  fullName: 'Follow-up and Item Entry for Long-term Delivery',
-  department: 'CONTEXT',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'FIELD',
-      fullName: 'Follow-up and Item Entry for Long-term Delivery',
-      department: 'CONTEXT',
-      contextAddition: 'Agent FIELD (Follow-up and Item Entry for Long-term Delivery) is available for context tasks.',
-      capabilities: ['context'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'FIELD',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'FIELD ready - context wrapper active'
-    };
-  }
-};
-
-// FIND - Fast Intelligent Navigation and Discovery
-AGENTS.FIND = {
-  name: 'FIND',
-  fullName: 'Fast Intelligent Navigation and Discovery',
-  department: 'ROUTING',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'FIND',
-      fullName: 'Fast Intelligent Navigation and Discovery',
-      department: 'ROUTING',
-      contextAddition: 'Agent FIND (Fast Intelligent Navigation and Discovery) is available for routing tasks.',
-      capabilities: ['routing'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'FIND',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'FIND ready - context wrapper active'
-    };
-  }
-};
-
-// FORGE - Fast Output and Rapid Generation Engine
-// ═══════════════════════════════════════════════════════════════════════════════
-// FORGE - Fast Output and Rapid Generation Engine
-// ⬡B:AGENTS.FORGE:CODE:agent_creation:v2.0.0:20260224⬡
-// 
-// THIS AGENT CAN ACTUALLY CREATE NEW AGENTS!
-// It writes to Supabase AND registers in the runtime AGENTS object.
-// ═══════════════════════════════════════════════════════════════════════════════
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// Fast Output and Rapid Generation Engine (FORGE) - Complete Agent Creator
-// ⬡B:AGENTS.FORGE:CODE:agent_creation:v3.0.0:20260224⬡
-// 
-// FORGE creates agents with the FULL protocol:
-// 1. Validates acronym has proper spelled-out name
-// 2. Calls ROSTER to check if agent exists
-// 3. Creates JD in aba_agent_jds
-// 4. Generates agent code
-// 5. Pushes to GitHub (if GITHUB_TOKEN available)
-// 6. Verifies creation (BIRTH protocol)
-// ═══════════════════════════════════════════════════════════════════════════════
-
-AGENTS.FORGE = {
-  name: 'FORGE',
-  fullName: 'Fast Output and Rapid Generation Engine',
-  department: 'CODING',
-  type: 'COMMANDABLE',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  canCreate: true,
-
-  // Validate that fullName is a proper expansion of acronym
-  validateAcronymExpansion(acronym, fullName) {
-    const letters = acronym.toUpperCase().split('');
-    const words = fullName.split(/\s+/);
-    
-    // Each letter of acronym should match first letter of a word
-    let wordIndex = 0;
-    for (const letter of letters) {
-      let found = false;
-      while (wordIndex < words.length) {
-        if (words[wordIndex][0]?.toUpperCase() === letter) {
-          found = true;
-          wordIndex++;
-          break;
-        }
-        wordIndex++;
-      }
-      if (!found) return false;
-    }
-    return true;
-  },
-
-  // Generate context wrapper code for new agent
-  generateAgentCode(acronym, fullName, department, responsibilities) {
-    return `
-// ${fullName} (${acronym})
-// ⬡B:AGENT.${acronym}:CODE:${department.toLowerCase()}:v1.0.0:${new Date().toISOString().slice(0,10).replace(/-/g,'')}⬡
-AGENTS.${acronym} = {
-  name: '${acronym}',
-  fullName: '${fullName}',
-  department: '${department}',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: '${acronym}',
-      fullName: '${fullName}',
-      department: '${department}',
-      contextAddition: 'Agent ${acronym} (${fullName}) is available for ${department.toLowerCase()} tasks.',
-      capabilities: ['${department.toLowerCase()}'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: '${acronym}',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: '${acronym} (${fullName}) ready'
-    };
-  }
-};
-`;
-  },
-
-  // Push code to GitHub
-  async pushToGitHub(acronym, code) {
-    if (!GITHUB_TOKEN) {
-      console.log('[FORGE] No GITHUB_TOKEN - cannot push to GitHub');
-      return { success: false, reason: 'No GITHUB_TOKEN environment variable' };
-    }
-
-    try {
-      // Get current worker.js content and SHA
-      const getResponse = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/worker.js?ref=${GITHUB_BRANCH}`, {
-        headers: {
-          'Authorization': `token ${GITHUB_TOKEN}`,
-          'Accept': 'application/vnd.github.v3+json'
-        }
-      });
-      
-      if (!getResponse.ok) {
-        return { success: false, reason: 'Failed to get current worker.js' };
-      }
-      
-      const fileData = await getResponse.json();
-      const currentContent = Buffer.from(fileData.content, 'base64').toString('utf8');
-      
-      // Append new agent code before the closing of the file
-      const newContent = currentContent.trimEnd() + '\n\n' + code;
-      
-      // Push to GitHub
-      const putResponse = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/worker.js`, {
-        method: 'PUT',
-        headers: {
-          'Authorization': `token ${GITHUB_TOKEN}`,
-          'Accept': 'application/vnd.github.v3+json',
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          message: `FORGE: Add ${acronym} agent`,
-          content: Buffer.from(newContent).toString('base64'),
-          sha: fileData.sha,
-          branch: GITHUB_BRANCH
-        })
-      });
-      
-      if (!putResponse.ok) {
-        const err = await putResponse.text();
-        return { success: false, reason: err };
-      }
-      
-      const result = await putResponse.json();
-      return { success: true, commit: result.commit?.sha };
-    } catch (e) {
-      return { success: false, reason: e.message };
-    }
-  },
-
-  // BIRTH-style verification
-  async verifyCreation(acronym) {
-    const checks = {
-      jd_in_database: false,
-      registered_in_runtime: false,
-      in_roster: false
-    };
-    
-    // Check 1: JD in database
-    try {
-      const jdCheck = await fetch(SUPABASE_URL + '/rest/v1/aba_agent_jds?acronym=eq.' + acronym + '&select=id', {
-        headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
-      });
-      const jdResult = await jdCheck.json();
-      checks.jd_in_database = jdResult.length > 0;
-    } catch (e) {
-      console.log('[FORGE VERIFY] JD check error:', e.message);
-    }
-    
-    // Check 2: Registered in runtime
-    checks.registered_in_runtime = AGENTS[acronym] !== undefined;
-    
-    // Check 3: In ROSTER (same as JD check for now)
-    checks.in_roster = checks.jd_in_database;
-    
-    return checks;
-  },
-
-  // MAIN CREATE FUNCTION - Full protocol
-  async create(spec) {
-    this.runCount++;
-    const steps = [];
-    
-    console.log('[FORGE] Starting agent creation protocol...');
-    
-    // VALIDATION: Require acronym and fullName
-    if (!spec.acronym) {
-      return { error: true, message: 'Fast Output and Rapid Generation Engine (FORGE) requires an acronym' };
-    }
-    if (!spec.fullName) {
-      return { error: true, message: 'Fast Output and Rapid Generation Engine (FORGE) requires a fullName that spells out the acronym' };
-    }
-    
-    const acronym = spec.acronym.toUpperCase();
-    const fullName = spec.fullName;
-    const department = spec.department || 'GENERAL';
-    const responsibilities = spec.responsibilities || `Agent ${acronym} (${fullName}) handles ${department.toLowerCase()} tasks.`;
-    
-    // STEP 1: Validate acronym expansion
-    console.log('[FORGE] Step 1: Validating acronym expansion...');
-    const validExpansion = this.validateAcronymExpansion(acronym, fullName);
-    if (!validExpansion) {
-      return { 
-        error: true, 
-        message: `Full name "${fullName}" does not properly expand acronym "${acronym}". Each letter of ${acronym} must be the first letter of a word in the full name.`
-      };
-    }
-    steps.push({ step: 1, name: 'Validate acronym expansion', status: 'PASS' });
-    
-    // STEP 2: Check Registry Oversight for Staffing, Tracking, and Employee Records (ROSTER)
-    console.log('[FORGE] Step 2: Checking Registry Oversight for Staffing, Tracking, and Employee Records (ROSTER)...');
-    try {
-      const rosterCheck = await fetch(SUPABASE_URL + '/rest/v1/aba_agent_jds?acronym=eq.' + acronym + '&select=id,acronym', {
-        headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
-      });
-      const existing = await rosterCheck.json();
-      if (existing.length > 0) {
-        return { error: true, message: `Agent ${acronym} (${fullName}) already exists in Registry Oversight for Staffing, Tracking, and Employee Records (ROSTER)` };
-      }
-    } catch (e) {
-      console.log('[FORGE] ROSTER check error:', e.message);
-    }
-    if (AGENTS[acronym]) {
-      return { error: true, message: `Agent ${acronym} already exists in runtime` };
-    }
-    steps.push({ step: 2, name: 'Check ROSTER', status: 'PASS - Agent does not exist' });
-    
-    // STEP 3: Create Job Description in database
-    console.log('[FORGE] Step 3: Creating Job Description in aba_agent_jds...');
-    let jdId = null;
-    try {
-      const jdPayload = {
-        acronym: acronym,
-        agent_id: acronym,
-        full_name: fullName,
-        department: department,
-        agent_type: 'CONTEXT_WRAPPER',
-        runtime: spec.runtime || 'on-demand',
-        responsibilities: responsibilities,
-        summoned_by: spec.summonedBy || ['air', 'forge'],
-        status: 'active',
-        tier: spec.tier || 3,
-        source: 'FORGE_full_protocol',
-        acl_stamp: `⬡B:agent:${acronym}:JD:forged⬡`,
-        abcd_tag: `${acronym}_${department}`
-      };
-      
-      const insertResult = await fetch(SUPABASE_URL + '/rest/v1/aba_agent_jds', {
-        method: 'POST',
-        headers: {
-          'apikey': SUPABASE_KEY,
-          'Authorization': 'Bearer ' + SUPABASE_KEY,
-          'Content-Type': 'application/json',
-          'Prefer': 'return=representation'
-        },
-        body: JSON.stringify(jdPayload)
-      });
-      
-      if (!insertResult.ok) {
-        const err = await insertResult.text();
-        return { error: true, message: 'Failed to create Job Description: ' + err };
-      }
-      
-      const insertedJD = await insertResult.json();
-      jdId = insertedJD[0]?.id;
-      console.log('[FORGE] JD created with ID:', jdId);
-    } catch (e) {
-      return { error: true, message: 'JD creation error: ' + e.message };
-    }
-    steps.push({ step: 3, name: 'Create Job Description', status: 'PASS', id: jdId });
-    
-    // STEP 4: Generate agent code
-    console.log('[FORGE] Step 4: Generating agent code...');
-    const agentCode = this.generateAgentCode(acronym, fullName, department, responsibilities);
-    steps.push({ step: 4, name: 'Generate agent code', status: 'PASS' });
-    
-    // STEP 5: Push to GitHub (if token available)
-    console.log('[FORGE] Step 5: Pushing to GitHub...');
-    const pushResult = await this.pushToGitHub(acronym, agentCode);
-    if (pushResult.success) {
-      steps.push({ step: 5, name: 'Push to GitHub', status: 'PASS', commit: pushResult.commit });
-    } else {
-      steps.push({ step: 5, name: 'Push to GitHub', status: 'SKIP - ' + pushResult.reason });
-    }
-    
-    // STEP 6: Register in runtime (temporary until deploy)
-    console.log('[FORGE] Step 6: Registering in runtime...');
-    AGENTS[acronym] = {
-      name: acronym,
-      fullName: fullName,
-      department: department,
-      type: 'CONTEXT_WRAPPER',
-      runtime: spec.runtime || 'on-demand',
-      active: true,
-      runCount: 0,
-      forgedAt: new Date().toISOString(),
-      forgedBy: 'FORGE',
-      
-      getContext(message, context) {
-        this.runCount++;
-        return {
-          agent: acronym,
-          fullName: fullName,
-          department: department,
-          contextAddition: `Agent ${acronym} (${fullName}) is available for ${department.toLowerCase()} tasks.`,
-          capabilities: [department.toLowerCase()],
-          status: 'forged_v3'
-        };
-      },
-      
-      async execute(action, params) {
-        this.runCount++;
-        return {
-          agent: acronym,
-          action: action || 'getContext',
-          result: this.getContext(params?.message, params?.context),
-          message: `${fullName} (${acronym}) ready`
-        };
-      }
-    };
-    steps.push({ step: 6, name: 'Register in runtime', status: 'PASS' });
-    
-    // STEP 7: Verify (BIRTH protocol)
-    console.log('[FORGE] Step 7: Running verification (Better Integration and Registration Through Hierarchy - BIRTH protocol)...');
-    const verification = await this.verifyCreation(acronym);
-    steps.push({ step: 7, name: 'BIRTH verification', status: verification.jd_in_database && verification.registered_in_runtime ? 'PASS' : 'PARTIAL', checks: verification });
-    
-    // SUCCESS RESPONSE
-    return {
-      agent: 'Fast Output and Rapid Generation Engine (FORGE)',
-      action: 'create',
-      created: true,
-      newAgent: {
-        acronym: acronym,
-        fullName: fullName,
-        department: department,
-        id: jdId
-      },
-      protocol: steps,
-      verification: verification,
-      message: `✅ ${fullName} (${acronym}) created successfully! All protocol steps completed.`
-    };
-  },
-
-  async help() {
-    return {
-      agent: 'Fast Output and Rapid Generation Engine (FORGE)',
-      action: 'help',
-      capabilities: [
-        'create - Create a new agent with full protocol (requires: acronym, fullName, department)',
-        'help - Show this help'
-      ],
-      requirements: {
-        acronym: 'The agent acronym (e.g., TIGER)',
-        fullName: 'Full name that spells out the acronym (e.g., Threat Intelligence Guard for Enhanced Response)',
-        department: 'Department (e.g., SECURITY, CODING, VOICE)',
-        responsibilities: 'Optional - what the agent does'
-      },
-      protocol: [
-        '1. Validate acronym expansion',
-        '2. Check Registry Oversight for Staffing, Tracking, and Employee Records (ROSTER)',
-        '3. Create Job Description in database',
-        '4. Generate agent code',
-        '5. Push to GitHub (if GITHUB_TOKEN available)',
-        '6. Register in runtime',
-        '7. Verify with Better Integration and Registration Through Hierarchy (BIRTH) protocol'
-      ]
-    };
-  },
-
-  async execute(action, params) {
-    this.runCount++;
-    
-    if (action === 'create') {
-      return await this.create(params);
-    }
-    if (action === 'help') {
-      return await this.help();
-    }
-    
-    return { 
-      agent: 'Fast Output and Rapid Generation Engine (FORGE)', 
-      error: true, 
-      message: 'Unknown action. Use: create, help',
-      canCreate: true
-    };
-  }
-};
-
-// FRAME - Frontend Rendering and Adaptive Module
-AGENTS.FRAME = {
-  name: 'FRAME',
-  fullName: 'Frontend Rendering and Adaptive Module',
-  department: 'CODING',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'FRAME',
-      fullName: 'Frontend Rendering and Adaptive Module',
-      department: 'CODING',
-      contextAddition: 'Agent FRAME (Frontend Rendering and Adaptive Module) is available for coding tasks.',
-      capabilities: ['coding'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'FRAME',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'FRAME ready - context wrapper active'
-    };
-  }
-};
-
-// GAS - Genuine Appreciation and Support
-AGENTS.GAS = {
-  name: 'GAS',
-  fullName: 'Genuine Appreciation and Support',
-  department: 'EXECUTIVE',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'GAS',
-      fullName: 'Genuine Appreciation and Support',
-      department: 'EXECUTIVE',
-      contextAddition: 'Agent GAS (Genuine Appreciation and Support) is available for executive tasks.',
-      capabilities: ['executive'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'GAS',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'GAS ready - context wrapper active'
-    };
-  }
-};
-
-// GHOST - Graveyard Hour Operations and Systematic Tasks
-AGENTS.GHOST = {
-  name: 'GHOST',
-  fullName: 'Graveyard Hour Operations and Systematic Tasks',
-  department: 'PROACTIVE',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'GHOST',
-      fullName: 'Graveyard Hour Operations and Systematic Tasks',
-      department: 'PROACTIVE',
-      contextAddition: 'Agent GHOST (Graveyard Hour Operations and Systematic Tasks) is available for proactive tasks.',
-      capabilities: ['proactive'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'GHOST',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'GHOST ready - context wrapper active'
-    };
-  }
-};
-
-// GUIDE - Geolocation and Urban Intelligence for Destinations and Experiences
-AGENTS.GUIDE = {
-  name: 'GUIDE',
-  fullName: 'Geolocation and Urban Intelligence for Destinations and Experiences',
-  department: 'CONTEXT',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'GUIDE',
-      fullName: 'Geolocation and Urban Intelligence for Destinations and Experiences',
-      department: 'CONTEXT',
-      contextAddition: 'Agent GUIDE (Geolocation and Urban Intelligence for Destinations and Experiences) is available for context tasks.',
-      capabilities: ['context'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'GUIDE',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'GUIDE ready - context wrapper active'
-    };
-  }
-};
-
-// HAVEN - Historical Archive and Version Equilibrium Navigator
-AGENTS.HAVEN = {
-  name: 'HAVEN',
-  fullName: 'Historical Archive and Version Equilibrium Navigator',
-  department: 'INFRASTRUCTURE',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'HAVEN',
-      fullName: 'Historical Archive and Version Equilibrium Navigator',
-      department: 'INFRASTRUCTURE',
-      contextAddition: 'Agent HAVEN (Historical Archive and Version Equilibrium Navigator) is available for infrastructure tasks.',
-      capabilities: ['infrastructure'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'HAVEN',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'HAVEN ready - context wrapper active'
-    };
-  }
-};
-
-// HEAR - High-Efficiency Audio Recognition
-AGENTS.HEAR = {
-  name: 'HEAR',
-  fullName: 'High-Efficiency Audio Recognition',
-  department: 'VOICE',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'HEAR',
-      fullName: 'High-Efficiency Audio Recognition',
-      department: 'VOICE',
-      contextAddition: 'Agent HEAR (High-Efficiency Audio Recognition) is available for voice tasks.',
-      capabilities: ['voice'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'HEAR',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'HEAR ready - context wrapper active'
-    };
-  }
-};
-
-// HIGH - Hazard-aware Instructions for Guided Humans
-AGENTS.HIGH = {
-  name: 'HIGH',
-  fullName: 'Hazard-aware Instructions for Guided Humans',
-  department: 'CONTEXT',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'HIGH',
-      fullName: 'Hazard-aware Instructions for Guided Humans',
-      department: 'CONTEXT',
-      contextAddition: 'Agent HIGH (Hazard-aware Instructions for Guided Humans) is available for context tasks.',
-      capabilities: ['context'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'HIGH',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'HIGH ready - context wrapper active'
-    };
-  }
-};
-
-// HUNCH - Helpful Unsolicited Notifications and Contextual Hints
-AGENTS.HUNCH = {
-  name: 'HUNCH',
-  fullName: 'Helpful Unsolicited Notifications and Contextual Hints',
-  department: 'PROACTIVE',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'HUNCH',
-      fullName: 'Helpful Unsolicited Notifications and Contextual Hints',
-      department: 'PROACTIVE',
-      contextAddition: 'Agent HUNCH (Helpful Unsolicited Notifications and Contextual Hints) is available for proactive tasks.',
-      capabilities: ['proactive'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'HUNCH',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'HUNCH ready - context wrapper active'
-    };
-  }
-};
-
-// HUNTER - Hunting Useful New Tracks and Employment Resources
-AGENTS.HUNTER = {
-  name: 'HUNTER',
-  fullName: 'Hunting Useful New Tracks and Employment Resources',
-  department: 'EMPLOYMENT',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'HUNTER',
-      fullName: 'Hunting Useful New Tracks and Employment Resources',
-      department: 'EMPLOYMENT',
-      contextAddition: 'Agent HUNTER (Hunting Useful New Tracks and Employment Resources) is available for employment tasks.',
-      capabilities: ['employment'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'HUNTER',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'HUNTER ready - context wrapper active'
-    };
-  }
-};
-
-// JUDGE - Justified Unbiased Document and Grammar Editor
-AGENTS.JUDGE = {
-  name: 'JUDGE',
-  fullName: 'Justified Unbiased Document and Grammar Editor',
-  department: 'QUALITY',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'JUDGE',
-      fullName: 'Justified Unbiased Document and Grammar Editor',
-      department: 'QUALITY',
-      contextAddition: 'Agent JUDGE (Justified Unbiased Document and Grammar Editor) is available for quality tasks.',
-      capabilities: ['quality'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'JUDGE',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'JUDGE ready - context wrapper active'
-    };
-  }
-};
-
-// LAYER - Logic and Architecture Yielding Enhanced Refactoring
-AGENTS.LAYER = {
-  name: 'LAYER',
-  fullName: 'Logic and Architecture Yielding Enhanced Refactoring',
-  department: 'CODING',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'LAYER',
-      fullName: 'Logic and Architecture Yielding Enhanced Refactoring',
-      department: 'CODING',
-      contextAddition: 'Agent LAYER (Logic and Architecture Yielding Enhanced Refactoring) is available for coding tasks.',
-      capabilities: ['coding'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'LAYER',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'LAYER ready - context wrapper active'
-    };
-  }
-};
-
-// LEDGER - Logging and Expense Data for General Economic Review
-AGENTS.LEDGER = {
-  name: 'LEDGER',
-  fullName: 'Logging and Expense Data for General Economic Review',
-  department: 'FINANCE',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'LEDGER',
-      fullName: 'Logging and Expense Data for General Economic Review',
-      department: 'FINANCE',
-      contextAddition: 'Agent LEDGER (Logging and Expense Data for General Economic Review) is available for finance tasks.',
-      capabilities: ['finance'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'LEDGER',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'LEDGER ready - context wrapper active'
-    };
-  }
-};
-
-// MACE - Master Architecture and Code Engine
-AGENTS.MACE = {
-  name: 'MACE',
-  fullName: 'Master Architecture and Code Engine',
-  department: 'CODING',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'MACE',
-      fullName: 'Master Architecture and Code Engine',
-      department: 'CODING',
-      contextAddition: 'Agent MACE (Master Architecture and Code Engine) is available for coding tasks.',
-      capabilities: ['coding'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'MACE',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'MACE ready - context wrapper active'
-    };
-  }
-};
-
-// MARK - Meeting Analysis and Report Keeper
-AGENTS.MARK = {
-  name: 'MARK',
-  fullName: 'Meeting Analysis and Report Keeper',
-  department: 'MEETINGS',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'MARK',
-      fullName: 'Meeting Analysis and Report Keeper',
-      department: 'MEETINGS',
-      contextAddition: 'Agent MARK (Meeting Analysis and Report Keeper) is available for meetings tasks.',
-      capabilities: ['meetings'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'MARK',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'MARK ready - context wrapper active'
-    };
-  }
-};
-
-// MEND - Monitoring and Error Notification Daemon
-AGENTS.MEND = {
-  name: 'MEND',
-  fullName: 'Monitoring and Error Notification Daemon',
-  department: 'CODING',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'MEND',
-      fullName: 'Monitoring and Error Notification Daemon',
-      department: 'CODING',
-      contextAddition: 'Agent MEND (Monitoring and Error Notification Daemon) is available for coding tasks.',
-      capabilities: ['coding'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'MEND',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'MEND ready - context wrapper active'
-    };
-  }
-};
-
-// MERGE - Multi-source Evaluation and Reconciliation
-AGENTS.MERGE = {
-  name: 'MERGE',
-  fullName: 'Multi-source Evaluation and Reconciliation',
-  department: 'VOICE',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'MERGE',
-      fullName: 'Multi-source Evaluation and Reconciliation',
-      department: 'VOICE',
-      contextAddition: 'Agent MERGE (Multi-source Evaluation and Reconciliation) is available for voice tasks.',
-      capabilities: ['voice'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'MERGE',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'MERGE ready - context wrapper active'
-    };
-  }
-};
-
-// MIMIC - Mode for Imitative Multi-channel Identity Communications
-AGENTS.MIMIC = {
-  name: 'MIMIC',
-  fullName: 'Mode for Imitative Multi-channel Identity Communications',
-  department: 'OUTREACH',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'MIMIC',
-      fullName: 'Mode for Imitative Multi-channel Identity Communications',
-      department: 'OUTREACH',
-      contextAddition: 'Agent MIMIC (Mode for Imitative Multi-channel Identity Communications) is available for outreach tasks.',
-      capabilities: ['outreach'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'MIMIC',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'MIMIC ready - context wrapper active'
-    };
-  }
-};
-
-// ORBIT - Organized Repository for Binge-worthy Internet Television
-AGENTS.ORBIT = {
-  name: 'ORBIT',
-  fullName: 'Organized Repository for Binge-worthy Internet Television',
-  department: 'ENTERTAINMENT',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'ORBIT',
-      fullName: 'Organized Repository for Binge-worthy Internet Television',
-      department: 'ENTERTAINMENT',
-      contextAddition: 'Agent ORBIT (Organized Repository for Binge-worthy Internet Television) is available for entertainment tasks.',
-      capabilities: ['entertainment'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'ORBIT',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'ORBIT ready - context wrapper active'
-    };
-  }
-};
-
-// PAM - Protective ABA Mode
-AGENTS.PAM = {
-  name: 'PAM',
-  fullName: 'Protective ABA Mode',
-  department: 'SECURITY',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'PAM',
-      fullName: 'Protective ABA Mode',
-      department: 'SECURITY',
-      contextAddition: 'Agent PAM (Protective ABA Mode) is available for security tasks.',
-      capabilities: ['security'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'PAM',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'PAM ready - context wrapper active'
-    };
-  }
-};
-
-// PLAY - Precise Live Activity Yields
-AGENTS.PLAY = {
-  name: 'PLAY',
-  fullName: 'Precise Live Activity Yields',
-  department: 'ENTERTAINMENT',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'PLAY',
-      fullName: 'Precise Live Activity Yields',
-      department: 'ENTERTAINMENT',
-      contextAddition: 'Agent PLAY (Precise Live Activity Yields) is available for entertainment tasks.',
-      capabilities: ['entertainment'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'PLAY',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'PLAY ready - context wrapper active'
-    };
-  }
-};
-
-// PRESS - Proactive Research and External Source Surveillance
-AGENTS.PRESS = {
-  name: 'PRESS',
-  fullName: 'Proactive Research and External Source Surveillance',
-  department: 'PROACTIVE',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'PRESS',
-      fullName: 'Proactive Research and External Source Surveillance',
-      department: 'PROACTIVE',
-      contextAddition: 'Agent PRESS (Proactive Research and External Source Surveillance) is available for proactive tasks.',
-      capabilities: ['proactive'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'PRESS',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'PRESS ready - context wrapper active'
-    };
-  }
-};
-
-// PRIME - Priority Resource and Intelligence Management
-AGENTS.PRIME = {
-  name: 'PRIME',
-  fullName: 'Priority Resource and Intelligence Management',
-  department: 'EXECUTIVE',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'PRIME',
-      fullName: 'Priority Resource and Intelligence Management',
-      department: 'EXECUTIVE',
-      contextAddition: 'Agent PRIME (Priority Resource and Intelligence Management) is available for executive tasks.',
-      capabilities: ['executive'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'PRIME',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'PRIME ready - context wrapper active'
-    };
-  }
-};
-
-// PULSE - Performance and Uptime Logging System Engine
-AGENTS.PULSE = {
-  name: 'PULSE',
-  fullName: 'Performance and Uptime Logging System Engine',
-  department: 'INFRASTRUCTURE',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'PULSE',
-      fullName: 'Performance and Uptime Logging System Engine',
-      department: 'INFRASTRUCTURE',
-      contextAddition: 'Agent PULSE (Performance and Uptime Logging System Engine) is available for infrastructure tasks.',
-      capabilities: ['infrastructure'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'PULSE',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'PULSE ready - context wrapper active'
-    };
-  }
-};
-
-// QUERY_BREAKER - Query Breaking and Request Segmentation Engine
-AGENTS.QUERY_BREAKER = {
-  name: 'QUERY_BREAKER',
-  fullName: 'Query Breaking and Request Segmentation Engine',
-  department: 'CORE',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'QUERY_BREAKER',
-      fullName: 'Query Breaking and Request Segmentation Engine',
-      department: 'CORE',
-      contextAddition: 'Agent QUERY_BREAKER (Query Breaking and Request Segmentation Engine) is available for core tasks.',
-      capabilities: ['core'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'QUERY_BREAKER',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'QUERY_BREAKER ready - context wrapper active'
-    };
-  }
-};
-
-// QUEUE - Quick Unified Execution and Utility Engine
-AGENTS.QUEUE = {
-  name: 'QUEUE',
-  fullName: 'Quick Unified Execution and Utility Engine',
-  department: 'INFRASTRUCTURE',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'QUEUE',
-      fullName: 'Quick Unified Execution and Utility Engine',
-      department: 'INFRASTRUCTURE',
-      contextAddition: 'Agent QUEUE (Quick Unified Execution and Utility Engine) is available for infrastructure tasks.',
-      capabilities: ['infrastructure'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'QUEUE',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'QUEUE ready - context wrapper active'
-    };
-  }
-};
-
-// RADAR - Real-time Awareness and Detection for Automated Reminders
-AGENTS.RADAR = {
-  name: 'RADAR',
-  fullName: 'Real-time Awareness and Detection for Automated Reminders',
-  department: 'CONTEXT',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'RADAR',
-      fullName: 'Real-time Awareness and Detection for Automated Reminders',
-      department: 'CONTEXT',
-      contextAddition: 'Agent RADAR (Real-time Awareness and Detection for Automated Reminders) is available for context tasks.',
-      capabilities: ['context'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'RADAR',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'RADAR ready - context wrapper active'
-    };
-  }
-};
-
-// ROAM - Resume and Opportunity Application Manager
-AGENTS.ROAM = {
-  name: 'ROAM',
-  fullName: 'Resume and Opportunity Application Manager',
-  department: 'EMPLOYMENT',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'ROAM',
-      fullName: 'Resume and Opportunity Application Manager',
-      department: 'EMPLOYMENT',
-      contextAddition: 'Agent ROAM (Resume and Opportunity Application Manager) is available for employment tasks.',
-      capabilities: ['employment'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'ROAM',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'ROAM ready - context wrapper active'
-    };
-  }
-};
-
-// SCOUT - Systematic Code Output Utility Tester
-AGENTS.SCOUT = {
-  name: 'SCOUT',
-  fullName: 'Systematic Code Output Utility Tester',
-  department: 'CODING',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'SCOUT',
-      fullName: 'Systematic Code Output Utility Tester',
-      department: 'CODING',
-      contextAddition: 'Agent SCOUT (Systematic Code Output Utility Tester) is available for coding tasks.',
-      capabilities: ['coding'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'SCOUT',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'SCOUT ready - context wrapper active'
-    };
-  }
-};
-
-// SCRIBE - Systematic Capture and Recording
-AGENTS.SCRIBE = {
-  name: 'SCRIBE',
-  fullName: 'Systematic Capture and Recording',
-  department: 'VOICE',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'SCRIBE',
-      fullName: 'Systematic Capture and Recording',
-      department: 'VOICE',
-      contextAddition: 'Agent SCRIBE (Systematic Capture and Recording) is available for voice tasks.',
-      capabilities: ['voice'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'SCRIBE',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'SCRIBE ready - context wrapper active'
-    };
-  }
-};
-
-// SCRUB - Speech and Context Recovery Using Backups
-
-// SHIELD - Security and Hostile Input Evaluation and Limiting Defense
-AGENTS.SHIELD = {
-  name: 'SHIELD',
-  fullName: 'Security and Hostile Input Evaluation and Limiting Defense',
-  department: 'SECURITY',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'SHIELD',
-      fullName: 'Security and Hostile Input Evaluation and Limiting Defense',
-      department: 'SECURITY',
-      contextAddition: 'Agent SHIELD (Security and Hostile Input Evaluation and Limiting Defense) is available for security tasks.',
-      capabilities: ['security'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'SHIELD',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'SHIELD ready - context wrapper active'
-    };
-  }
-};
-
-// SIGIL - Systematic Identification and General Index Labeler
-AGENTS.SIGIL = {
-  name: 'SIGIL',
-  fullName: 'Systematic Identification and General Index Labeler',
-  department: 'ACL',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'SIGIL',
-      fullName: 'Systematic Identification and General Index Labeler',
-      department: 'ACL',
-      contextAddition: 'Agent SIGIL (Systematic Identification and General Index Labeler) is available for acl tasks.',
-      capabilities: ['acl'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'SIGIL',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'SIGIL ready - context wrapper active'
-    };
-  }
-};
-
-// STAMP - Systematic Tagging and Archival Management Protocol
-AGENTS.STAMP = {
-  name: 'STAMP',
-  fullName: 'Systematic Tagging and Archival Management Protocol',
-  department: 'ACL',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'STAMP',
-      fullName: 'Systematic Tagging and Archival Management Protocol',
-      department: 'ACL',
-      contextAddition: 'Agent STAMP (Systematic Tagging and Archival Management Protocol) is available for acl tasks.',
-      capabilities: ['acl'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'STAMP',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'STAMP ready - context wrapper active'
-    };
-  }
-};
-
-// SYNC - Systematic Yielding and Network Coordinator
-AGENTS.SYNC = {
-  name: 'SYNC',
-  fullName: 'Systematic Yielding and Network Coordinator',
-  department: 'INFRASTRUCTURE',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'SYNC',
-      fullName: 'Systematic Yielding and Network Coordinator',
-      department: 'INFRASTRUCTURE',
-      contextAddition: 'Agent SYNC (Systematic Yielding and Network Coordinator) is available for infrastructure tasks.',
-      capabilities: ['infrastructure'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'SYNC',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'SYNC ready - context wrapper active'
-    };
-  }
-};
-
-// TASTE - Transcription and Speech-To-text Engine
-AGENTS.TASTE = {
-  name: 'TASTE',
-  fullName: 'Transcription and Speech-To-text Engine',
-  department: 'VOICE',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'TASTE',
-      fullName: 'Transcription and Speech-To-text Engine',
-      department: 'VOICE',
-      contextAddition: 'Agent TASTE (Transcription and Speech-To-text Engine) is available for voice tasks.',
-      capabilities: ['voice'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'TASTE',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'TASTE ready - context wrapper active'
-    };
-  }
-};
-
-// THINK - Tactical Hypothesis and Insight Negotiation Kernel
-AGENTS.THINK = {
-  name: 'THINK',
-  fullName: 'Tactical Hypothesis and Insight Negotiation Kernel',
-  department: 'EXECUTIVE',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'THINK',
-      fullName: 'Tactical Hypothesis and Insight Negotiation Kernel',
-      department: 'EXECUTIVE',
-      contextAddition: 'Agent THINK (Tactical Hypothesis and Insight Negotiation Kernel) is available for executive tasks.',
-      capabilities: ['executive'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'THINK',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'THINK ready - context wrapper active'
-    };
-  }
-};
-
-// TIM - Temporary Interim Model
-AGENTS.TIM = {
-  name: 'TIM',
-  fullName: 'Temporary Interim Model',
-  department: 'MEETINGS',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'TIM',
-      fullName: 'Temporary Interim Model',
-      department: 'MEETINGS',
-      contextAddition: 'Agent TIM (Temporary Interim Model) is available for meetings tasks.',
-      capabilities: ['meetings'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'TIM',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'TIM ready - context wrapper active'
-    };
-  }
-};
-
-// TOUCH - Tangible Operations Unifying Connected Hardware
-AGENTS.TOUCH = {
-  name: 'TOUCH',
-  fullName: 'Tangible Operations Unifying Connected Hardware',
-  department: 'HARDWARE',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'TOUCH',
-      fullName: 'Tangible Operations Unifying Connected Hardware',
-      department: 'HARDWARE',
-      contextAddition: 'Agent TOUCH (Tangible Operations Unifying Connected Hardware) is available for hardware tasks.',
-      capabilities: ['hardware'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'TOUCH',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'TOUCH ready - context wrapper active'
-    };
-  }
-};
-
-// VINYL - Video and Internet Yielded Noteworthy Links
-AGENTS.VINYL = {
-  name: 'VINYL',
-  fullName: 'Video and Internet Yielded Noteworthy Links',
-  department: 'ENTERTAINMENT',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'VINYL',
-      fullName: 'Video and Internet Yielded Noteworthy Links',
-      department: 'ENTERTAINMENT',
-      contextAddition: 'Agent VINYL (Video and Internet Yielded Noteworthy Links) is available for entertainment tasks.',
-      capabilities: ['entertainment'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'VINYL',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'VINYL ready - context wrapper active'
-    };
-  }
-};
-
-// WAKE - Wisdom and Knowledge for Early-morning
-AGENTS.WAKE = {
-  name: 'WAKE',
-  fullName: 'Wisdom and Knowledge for Early-morning',
-  department: 'PROACTIVE',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'WAKE',
-      fullName: 'Wisdom and Knowledge for Early-morning',
-      department: 'PROACTIVE',
-      contextAddition: 'Agent WAKE (Wisdom and Knowledge for Early-morning) is available for proactive tasks.',
-      capabilities: ['proactive'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'WAKE',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'WAKE ready - context wrapper active'
-    };
-  }
-};
-
-// WEAVE - Web Exploration and Analytical Verification Engine
-AGENTS.WEAVE = {
-  name: 'WEAVE',
-  fullName: 'Web Exploration and Analytical Verification Engine',
-  department: 'RESEARCH',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'WEAVE',
-      fullName: 'Web Exploration and Analytical Verification Engine',
-      department: 'RESEARCH',
-      contextAddition: 'Agent WEAVE (Web Exploration and Analytical Verification Engine) is available for research tasks.',
-      capabilities: ['research'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'WEAVE',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'WEAVE ready - context wrapper active'
-    };
-  }
-};
-
-// ═══════════════════════════════════════════════════════════════════════════════
-
-// PHASE 3: AUTONOMY - Proactive Engine & Cross-Channel State
-// ═══════════════════════════════════════════════════════════════════════════════
-
-const PROACTIVE_ENGINE = {
-  tasks: new Map(),
-  running: false,
-  intervalId: null,
-  
-  register(config) {
-    const task = { id: config.id || 'task_' + Date.now(), name: config.name, interval: config.interval, lastRun: null, nextRun: Date.now() + (config.delay || 0), runCount: 0, enabled: true, execute: config.execute };
-    this.tasks.set(task.id, task);
-    console.log('[PROACTIVE] Registered:', task.name);
-    return task.id;
-  },
-  
-  async runDue() {
-    const now = Date.now();
-    for (const [id, task] of this.tasks) {
-      if (!task.enabled || now < task.nextRun) continue;
-      console.log('[PROACTIVE] Running:', task.name);
-      try { await task.execute(); task.lastRun = now; task.runCount++; } catch (e) { console.log('[PROACTIVE] Failed:', task.name, e.message); }
-      task.nextRun = now + task.interval;
-    }
-  },
-  
-  start(checkInterval = 60000) {
-    if (this.running) return;
-    this.running = true;
-    this.intervalId = setInterval(() => this.runDue(), checkInterval);
-    console.log('[PROACTIVE] Engine started');
-    // Default tasks
-    this.register({ id: 'health', name: 'Health Check', interval: 300000, execute: async () => { await HEALTH_MONITOR.checkAll(); } });
-    this.register({ id: 'cost_reset', name: 'Cost Reset', interval: 3600000, execute: () => { const now = Date.now(); if (now - COST_CAPS.hourly.reset > 3600000) { COST_CAPS.hourly.current = 0; COST_CAPS.hourly.reset = now; } } });
-  },
-  
-  stop() { if (this.intervalId) clearInterval(this.intervalId); this.running = false; console.log('[PROACTIVE] Stopped'); },
-  
-  getStatus() { return { running: this.running, tasks: [...this.tasks.values()].map(t => ({ id: t.id, name: t.name, enabled: t.enabled, runCount: t.runCount, nextRun: new Date(t.nextRun).toISOString() })) }; }
-};
-
-const CROSS_CHANNEL_STATE = {
-  conversations: new Map(),
-  
-  getOrCreate(userId) {
-    if (!this.conversations.has(userId)) {
-      this.conversations.set(userId, { userId, channels: { voice: [], sms: [], email: [], chat: [], omi: [] }, context: {}, lastActivity: Date.now(), sessionStart: Date.now() });
-    }
-    const c = this.conversations.get(userId);
-    c.lastActivity = Date.now();
-    return c;
-  },
-  
-  addMessage(userId, channel, message, direction = 'inbound') {
-    const c = this.getOrCreate(userId);
-    const entry = { id: 'msg_' + Date.now(), channel, direction, content: typeof message === 'string' ? message : message.content, timestamp: Date.now() };
-    c.channels[channel] = c.channels[channel] || [];
-    c.channels[channel].push(entry);
-    if (c.channels[channel].length > 50) c.channels[channel].shift();
-    return entry.id;
-  },
-  
-  getFullContext(userId, limit = 20) {
-    const c = this.getOrCreate(userId);
-    const all = [];
-    for (const [ch, msgs] of Object.entries(c.channels)) { for (const m of msgs) { all.push({ ...m, channel: ch }); } }
-    all.sort((a, b) => b.timestamp - a.timestamp);
-    return { userId, messages: all.slice(0, limit), context: c.context };
-  },
-  
-  setContext(userId, key, value) { this.getOrCreate(userId).context[key] = value; },
-  getContext(userId, key) { const c = this.getOrCreate(userId).context; return key ? c[key] : c; }
-};
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// PHASE 4: OPTIMIZATION - Health, Degradation, Self-Reflection
-// ═══════════════════════════════════════════════════════════════════════════════
-
-const HEALTH_MONITOR = {
-  services: { supabase: { healthy: true }, anthropic: { healthy: true }, elevenlabs: { healthy: true }, nylas: { healthy: true }, twilio: { healthy: true } },
-  
-  async checkAll() {
-    const issues = [];
-    // Supabase
-    try {
-      const r = await fetch(SUPABASE_URL + '/rest/v1/aba_memory?limit=1', { headers: { 'apikey': SUPABASE_KEY || SUPABASE_ANON } });
-      this.services.supabase = { healthy: r.ok, lastCheck: Date.now() };
-    } catch (e) { this.services.supabase = { healthy: false, error: e.message }; issues.push('supabase'); }
-    
-    // Check keys exist
-    if (!ANTHROPIC_API_KEY) { this.services.anthropic = { healthy: false }; issues.push('anthropic'); }
-    if (!process.env.ELEVENLABS_API_KEY) { this.services.elevenlabs = { healthy: false }; issues.push('elevenlabs'); }
-    
-    return { healthy: issues.length === 0, services: this.services, issues };
-  },
-  
-  getFallback(service) {
-    const fallbacks = { anthropic: 'gemini', elevenlabs: 'text_only', nylas: 'sms', twilio: 'email', supabase: 'memory_only' };
-    return { use: fallbacks[service] || 'skip', note: service + ' unavailable' };
-  },
-  
-  isHealthy(service) { return this.services[service]?.healthy !== false; }
-};
-
-const MODEL_SELECTOR = {
-  select(analysis, costCheck) {
-    if (costCheck?.downgrade === 'haiku') return MODEL_TIERS.haiku;
-    if (analysis.sentiment === 'urgent' || analysis.wordCount > 50 || analysis.isMultiTask) return MODEL_TIERS.opus;
-    if (analysis.intents?.includes('greeting') && analysis.wordCount < 10) return MODEL_TIERS.haiku;
-    return MODEL_TIERS.sonnet;
-  }
-};
-
-const SELF_REFLECTION = {
-  sessions: [],
-  
-  async reflect(data) {
-    const r = { timestamp: Date.now(), model: data.model, responseTime: data.responseTime, tokens: (data.tokens?.input || 0) + (data.tokens?.output || 0), draftScore: data.draftScore, success: data.draftScore >= 85 };
-    this.sessions.push(r);
-    if (this.sessions.length > 100) this.sessions.shift();
-    
-    const recent = this.sessions.slice(-20);
-    const avgTime = recent.reduce((s, x) => s + x.responseTime, 0) / recent.length;
-    const successRate = recent.filter(x => x.success).length / recent.length;
-    
-    if (avgTime > 10000 || successRate < 0.8) {
-      console.log('[REFLECT] Performance: avgTime=' + avgTime.toFixed(0) + 'ms, success=' + (successRate * 100).toFixed(0) + '%');
-    }
-    return { avgTime, successRate };
-  },
-  
-  getStats() {
-    if (!this.sessions.length) return { empty: true };
-    const r = this.sessions.slice(-50);
-    return { count: this.sessions.length, avgTime: r.reduce((s, x) => s + x.responseTime, 0) / r.length, avgScore: r.reduce((s, x) => s + x.draftScore, 0) / r.length, successRate: r.filter(x => x.success).length / r.length };
-  }
-};
-
-// PHASE 3 & 4: REAL ORCHESTRATION
-const MODEL_TIERS = {
-  haiku: { model: 'claude-3-haiku-20240307', maxTokens: 1000, costPer1k: 0.00025 },
-  sonnet: { model: 'claude-sonnet-4-5-20250929', maxTokens: 2000, costPer1k: 0.003 },
-  opus: { model: 'claude-opus-4-20250514', maxTokens: 4000, costPer1k: 0.015 },
-  select(analysis) {
-    // COST FIX: Default to Haiku for autonomous. Sonnet/Opus only if cost cap allows ⬡B:COST_FIX:20260225⬡
-    if (analysis.sentiment === 'urgent' || analysis.wordCount > 50 || analysis.isMultiTask) return this.haiku;
-    if (analysis.intents.includes('greeting') && analysis.wordCount < 10) return this.haiku;
-    return this.haiku;
-  }
-};
-
-// THE REAL ORCHESTRATION - ACTUALLY CALLS CLAUDE
-async function AIR_orchestrate_REAL(message, context = {}) {
-  const startTime = Date.now();
-  const traceId = OBSERVABILITY.startTrace('air_real', { message: message.substring(0, 50) });
-  console.log('[AIR] *** REAL ORCHESTRATION ***');
-  
-  // 1. Analyze
-  const analysis = AGENTS.LUKE.analyze(message);
-  const timeContext = AGENTS.NOW.getContext();
-  OBSERVABILITY.addSpan(traceId, 'analysis', analysis);
-  
-  // 2. Identify people
-  const people = [];
-  for (const e of analysis.entities.filter(x => x.type === 'person')) {
-    const id = await AGENTS.HAM.identify(e.value);
-    if (id.found) people.push(id);
-  }
-  
-  // 3. Search brain
-  const brainContext = await AGENTS.COLE.searchBrain(message.split(' ').slice(0, 5).join(' '), 3);
-  
-  // 4. Select model
-  const tier = MODEL_TIERS.select(analysis);
-  const costCheck = checkCostCap(tier.costPer1k * 2);
-  const finalModel = costCheck.downgrade ? MODEL_TIERS.haiku : tier;
-  
-  // 5. Build prompt
-  const systemPrompt = `You are ABA (A Better AI), Brandon Pierce's personal AI assistant. Warm, capable, butler-like. Never robotic.
-
-CONTEXT:
-- Time: ${timeContext.readable} (${timeContext.timeOfDay}, ${timeContext.dayOfWeek})
-- Intents detected: ${analysis.intents.join(', ')}
-- Sentiment: ${analysis.sentiment}
-- Tasks: ${analysis.tasks.length} (${analysis.isMultiTask ? 'multi-task' : 'single'})
-- Entities: ${analysis.entities.map(e => e.type + '=' + e.value).join(', ') || 'None'}
-
-${people.length > 0 ? 'KNOWN PEOPLE:\n' + people.map(p => '- ' + p.identity.name + ' (' + p.trust + ')').join('\n') : ''}
-
-${brainContext.count > 0 ? 'FROM MEMORY:\n' + brainContext.results.slice(0, 2).map(r => '- ' + r.content.substring(0, 150)).join('\n') : ''}
-
-WRITING RULES (MANDATORY):
-1. NO em dashes (—). Use commas.
-2. Warm greetings like "Hey Brandon," not "Brandon,"
-3. NO "Let me know if you need anything" endings
-4. NO "I'd be happy to help" or "Here's the thing"
-5. Flow naturally, not choppy
-
-${analysis.isMultiTask ? 'TASKS TO ADDRESS:\n' + analysis.tasks.map(t => t.id + '. [' + t.type.toUpperCase() + '] ' + t.text).join('\n') : ''}
-
-Respond naturally. For actions (email, call), describe what you're doing.`;
-
-  // 6. ACTUALLY CALL CLAUDE
-  let response = null;
-  let usage = null;
-  try {
-    const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
-    const r = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-      body: JSON.stringify({ model: finalModel.model, max_tokens: finalModel.maxTokens, system: systemPrompt, messages: [{ role: 'user', content: message }] })
-    });
-    if (r.ok) {
-      const data = await r.json();
-      response = data.content[0].text;
-      usage = data.usage;
-      const cost = ((usage.input_tokens + usage.output_tokens) / 1000) * finalModel.costPer1k;
-      recordCost(cost);
-      console.log('[AIR] Response received, cost: $' + cost.toFixed(4));
-    } else {
-      response = 'I encountered an issue. Let me try again.';
-      console.log('[AIR] Claude error:', await r.text());
-    }
-  } catch (e) {
-    response = 'Connection issue. Please try again.';
-    console.log('[AIR] Call failed:', e.message);
-  }
-  
-  // 7. DRAFT scan
-  const scan = AGENTS.DRAFT.scan(response);
-  
-  // 8. Execute actions
-  const actions = [];
-  for (const task of analysis.tasks) {
-    if (task.type === 'memory') {
-      const stored = await AGENTS.MEMOS.store(task.text, { type: 'user_note' });
-      actions.push({ task: task.id, type: 'memory', result: stored });
-    }
-  }
-  
-  OBSERVABILITY.endTrace(traceId, 'success');
-  const responseTime = Date.now() - startTime;
-  console.log('[AIR] Complete in ' + responseTime + 'ms');
-  
-  // PHASE 4: Self-reflection
-  if (typeof SELF_REFLECTION !== 'undefined') {
-    SELF_REFLECTION.reflect({ model: finalModel.model, responseTime, tokens: usage, draftScore: scan.score, intents: analysis.intents });
-  }
-  
-  // PHASE 2: Shadow audit
-  if (typeof AGENTS.SHADOW !== 'undefined' && AGENTS.SHADOW.audit) {
-    AGENTS.SHADOW.audit({ type: 'orchestration', actor: 'AIR', target: message.substring(0, 50), action: 'process', result: scan.passed ? 'success' : 'warning' });
-  }
-  
-  return {
-    response,
-    analysis,
-    timeContext,
-    people,
-    brainContext: brainContext.results.map(r => r.source),
-    model: finalModel.model,
-    usage,
-    actions,
-    scan: { score: scan.score, passed: scan.passed },
-    responseTime,
-    traceId
-  };
-}
 // ABA-REACH (voice) → ABACIA-SERVICES (agents) → Response
 // ═══════════════════════════════════════════════════════════════════════════════
 const ABACIA_SERVICES_URL = 'https://abacia-services.onrender.com';
@@ -4286,139 +160,57 @@ function isReasonableHourToCall(personName) {
 // MASTER CONTACTS LIST - Used by voice-tool, group calls, scheduled calls
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// ⬡B:HAM:CONTACTS:DYNAMIC:brain_loaded:20260225⬡
-// HAM CONTACTS - LOADED FROM BRAIN, NOT HARDCODED
-// Source: aba_memory WHERE memory_type = 'ham_identity'
-// ═══════════════════════════════════════════════════════════════════════════════
-let HAM_CONTACTS_CACHE = {};
-let HAM_CONTACTS_LOADED_AT = null;
+const MASTER_CONTACTS = {
+  brandon: { 
+    phone: '+13363898116', 
+    name: 'Brandon', 
+    fullName: 'Brandon Pierce',
+    timezone: 'America/New_York',
+    trust: 'T10',
+    role: 'HAM'
+  },
+  eric: { 
+    phone: '+13236007676', 
+    name: 'Dr. Eric Lane',
+    fullName: 'Dr. Eric Lane Sr.',
+    timezone: 'America/Los_Angeles',
+    trust: 'T9',
+    role: 'Senior Advisor'
+  },
+  bj: { 
+    phone: '+19803958662', 
+    name: 'BJ',
+    fullName: 'BJ Pierce',
+    timezone: 'America/New_York',
+    trust: 'T8',
+    role: 'Brother'
+  },
+  cj: { 
+    phone: '+19199170686', 
+    name: 'CJ',
+    fullName: 'CJ Pierce',
+    timezone: 'America/New_York',
+    trust: 'T7',
+    role: 'Brother'
+  }
+};
 
-async function loadHAMContacts() {
-  // Cache for 5 minutes
-  if (HAM_CONTACTS_CACHE && Object.keys(HAM_CONTACTS_CACHE).length > 0 && 
-      HAM_CONTACTS_LOADED_AT && (Date.now() - HAM_CONTACTS_LOADED_AT) < 300000) {
-    return HAM_CONTACTS_CACHE;
-  }
-  
-  try {
-    const url = SUPABASE_URL + '/rest/v1/aba_memory?memory_type=eq.ham_identity&select=content,source';
-    const response = await fetch(url, {
-      headers: {
-        'apikey': SUPABASE_ANON,
-        'Authorization': 'Bearer ' + SUPABASE_ANON
-      }
-    });
-    
-    if (response.ok) {
-      const data = await response.json();
-      HAM_CONTACTS_CACHE = {};
-      
-      for (const ham of data) {
-        try {
-          const parsed = typeof ham.content === 'string' ? JSON.parse(ham.content) : ham.content;
-          const key = (parsed.name || parsed.fullName || '').toLowerCase().split(' ')[0];
-          if (key) {
-            HAM_CONTACTS_CACHE[key] = {
-              phone: parsed.phone,
-              name: parsed.name || parsed.fullName,
-              fullName: parsed.fullName || parsed.name,
-              timezone: parsed.timezone || 'America/New_York',
-              trust: parsed.trust || 'T5',
-              role: parsed.role || 'HAM',
-              email: parsed.email,
-              preferences: parsed.preferences
-            };
-          }
-        } catch (e) {
-          console.log('[HAM] Parse error for:', ham.source);
-        }
-      }
-      
-      HAM_CONTACTS_LOADED_AT = Date.now();
-      console.log('[HAM] Loaded', Object.keys(HAM_CONTACTS_CACHE).length, 'contacts from brain');
-    }
-  } catch (e) {
-    console.log('[HAM] Error loading contacts:', e.message);
-  }
-  
-  // Fallback minimal data if brain empty - REMOVE THIS ONCE BRAIN IS POPULATED
-  if (Object.keys(HAM_CONTACTS_CACHE).length === 0) {
-    console.log('[HAM] WARNING: No HAM contacts in brain, using minimal fallback');
-    HAM_CONTACTS_CACHE = {
-      brandon: { name: 'Brandon', fullName: 'Brandon Pierce', trust: 'T10', role: 'HAM' }
-    };
-  }
-  
-  return HAM_CONTACTS_CACHE;
-}
-
-// Get current HAM name (for PROTO to use instead of hardcoded)
-async function getCurrentHAMName(callerIdentity) {
-  if (callerIdentity && callerIdentity.name) {
-    return callerIdentity.name;
-  }
-  const contacts = await loadHAMContacts();
-  // Default to first T10 HAM if no caller identity
-  for (const [key, contact] of Object.entries(contacts)) {
-    if (contact.trust === 'T10') return contact.name;
-  }
-  return 'there'; // Generic fallback
-}
-
-// Lookup contact by name (fuzzy matching) - DYNAMIC from brain
-// ⬡B:REACH:CONTACT_LOOKUP:EXACT_MATCH:v2.0:20260227⬡
-// EXACT CONTACT MATCHING - Fixes BJ/Brandon confusion
-async function lookupContact(nameInput) {
+// Lookup contact by name (fuzzy matching)
+function lookupContact(nameInput) {
   if (!nameInput) return null;
   const name = nameInput.toLowerCase().trim();
   
-  // STEP 1: Check ababase contacts table (exact match)
-  try {
-    const exactUrl = SUPABASE_URL + '/rest/v1/contacts?or=(name_normalized.eq.' + 
-      encodeURIComponent(name) + ',nickname.eq.' + encodeURIComponent(name) + ')&limit=1';
-    const exactRes = await fetch(exactUrl, {
-      headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON }
-    });
-    if (exactRes.ok) {
-      const exactData = await exactRes.json();
-      if (exactData && exactData.length > 0) {
-        const c = exactData[0];
-        console.log('[CONTACT] Exact match found:', c.name);
-        return {
-          phone: c.phone_primary,
-          name: c.name,
-          fullName: c.name,
-          email: c.email_primary,
-          trust: 'T' + (c.trust_level || 5),
-          role: c.relationship || 'contact'
-        };
-      }
-    }
-  } catch (e) {
-    console.log('[CONTACT] Exact match error:', e.message);
-  }
+  // Direct match
+  if (MASTER_CONTACTS[name]) return MASTER_CONTACTS[name];
   
-  // STEP 2: Fall back to HAM_CONTACTS_CACHE (direct key match only)
-  const contacts = await loadHAMContacts();
-  if (contacts[name]) {
-    console.log('[CONTACT] HAM cache direct match:', name);
-    return contacts[name];
-  }
+  // Fuzzy matches
+  if (name.includes('eric') || name.includes('dr')) return MASTER_CONTACTS.eric;
+  if (name.includes('bj') || name.includes('b.j')) return MASTER_CONTACTS.bj;
+  if (name.includes('cj') || name.includes('c.j')) return MASTER_CONTACTS.cj;
+  if (name.includes('brandon') || name.includes('boss')) return MASTER_CONTACTS.brandon;
   
-  // STEP 3: NO FUZZY MATCHING - prevents BJ/Brandon confusion
-  // If no exact match, return null
-  console.log('[CONTACT] No exact match for:', name);
   return null;
 }
-
-// Legacy compatibility - MASTER_CONTACTS now loads dynamically
-const MASTER_CONTACTS = new Proxy({}, {
-  get: function(target, prop) {
-    // This is synchronous so we return from cache
-    return HAM_CONTACTS_CACHE[prop] || null;
-  }
-});
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // ⬡B:TOUCH:PHASE3:SPURT3.1:group.calls:20260216⬡
@@ -4671,8 +463,8 @@ async function checkScheduledCalls() {
     path: '/rest/v1/aba_memory?memory_type=eq.scheduled_call&content=ilike.*pending*&order=created_at.desc&limit=10',
     method: 'GET',
     headers: {
-      'apikey': SUPABASE_KEY,
-      'Authorization': 'Bearer ' + (SUPABASE_KEY)
+      'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+      'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY)
     }
   });
   
@@ -4807,8 +599,8 @@ async function queryBrainRecent(limit = 5) {
       path: `/rest/v1/aba_memory?order=created_at.desc&limit=${limit}&select=content,importance,memory_type`,
       method: 'GET',
       headers: {
-        'apikey': SUPABASE_KEY,
-        'Authorization': 'Bearer ' + (SUPABASE_KEY)
+        'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+        'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY)
       }
     });
     
@@ -5104,38 +896,30 @@ async function ABACIA_AIR_process(query, context) {
 
 // ⬡B:AIR:REACH.BRIDGE.EMAIL:FUNC:abacia.email.inbox:v2.3.0:20260214⬡
 // Get emails via ABACIA's IMAN agent (connected to Nylas)
-async function ABACIA_IMAN_getInbox(options = {}) {
+async function ABACIA_IMAN_getInbox() {
   console.log('[ABACIA BRIDGE] Getting inbox via IMAN...');
   
   try {
-    // ⬡B:IMAN:FINAL_FIX:use_fetch:20260226⬡
-    const days = options.daysAgo || 7;
-    const limit = options.limit || 10;
-    const unread = options.unreadOnly ? '&unread=true' : '';
-    
-    const url = `https://abacia-services.onrender.com/api/email/inbox?days=${days}&limit=${limit}${unread}`;
-    console.log('[ABACIA BRIDGE] Fetching:', url);
-    
-    const response = await fetch(url, {
+    const result = await httpsRequest({
+      hostname: 'abacia-services.onrender.com',
+      path: '/api/email/inbox',
       method: 'GET',
       headers: { 'Accept': 'application/json' }
     });
     
-    console.log('[ABACIA BRIDGE] Response status:', response.status);
-    
-    if (response.ok) {
-      const data = await response.json();
-      console.log('[ABACIA BRIDGE] Parsed - success:', data.success, 'count:', data.messages?.length);
+    if (result.status === 200) {
+      const data = JSON.parse(result.data.toString());
       if (data.success && data.messages) {
+        console.log('[ABACIA BRIDGE] Found', data.messages.length, 'emails');
         return data;
       }
     }
     
-    return { success: false, messages: [] };
+    return { success: false, emails: [] };
     
   } catch (e) {
-    console.log('[ABACIA BRIDGE] Email fetch error:', e.message);
-    return { success: false, messages: [] };
+    console.log('[ABACIA BRIDGE] Email error:', e.message);
+    return { success: false, emails: [] };
   }
 }
 
@@ -5202,10 +986,10 @@ const TWILIO_PHONE = process.env.TWILIO_PHONE_NUMBER;
 // ⬡B:AIR:REACH.CONFIG.ELEVENLABS:CONFIG:voice.tts.personality:AIR→REACH→VARA:T8:v1.5.0:20260213:e1l2v⬡
 const ELEVENLABS_KEY = process.env.ELEVENLABS_API_KEY; // ⬡B:ENV:ELEVENLABS⬡
 // ⬡B:VARA:VOICE_ID:CONFIG:voice.identity:VARA→ELEVENLABS:T10:v2.0.1:20260214:vid⬡
-// OFFICIAL ABA VOICE ID: AIFDUhRnM6s61433WMNu (Kiara)
+// OFFICIAL ABA VOICE ID: LD658Mupr7vNwTTJSPsk (ABA v1)
 // Updated: February 14, 2026
 // DO NOT CHANGE without global update: ElevenLabs, 1A Shell, Brain, all services
-const ELEVENLABS_VOICE = 'AIFDUhRnM6s61433WMNu'; // Kiara - ABA's official voice
+const ELEVENLABS_VOICE = 'LD658Mupr7vNwTTJSPsk'; // Brandon's ONLY voice - NEVER CHANGE THIS
 const ELEVENLABS_MODEL = 'eleven_flash_v2_5';
 
 // ⬡B:AIR:REACH.CONFIG.DEEPGRAM:CONFIG:voice.stt.transcription:AIR→REACH→TASTE:T8:v1.5.0:20260213:d1g2m⬡
@@ -5826,8 +1610,8 @@ async function SHADOW_accessVault(query, callerIdentity) {
       `&order=created_at.desc&limit=10&select=content,source,memory_type,created_at`,
       {
         headers: {
-          'apikey': SUPABASE_KEY,
-          'Authorization': `Bearer ${SUPABASE_KEY}`
+          'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+          'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY}`
         }
       }
     );
@@ -5845,8 +1629,8 @@ async function SHADOW_accessVault(query, callerIdentity) {
       `&order=created_at.desc&limit=5&select=content,source,memory_type,created_at`,
       {
         headers: {
-          'apikey': SUPABASE_KEY,
-          'Authorization': `Bearer ${SUPABASE_KEY}`
+          'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+          'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY}`
         }
       }
     );
@@ -5864,8 +1648,8 @@ async function SHADOW_accessVault(query, callerIdentity) {
       `&order=created_at.desc&limit=5&select=content,source,memory_type,created_at`,
       {
         headers: {
-          'apikey': SUPABASE_KEY,
-          'Authorization': `Bearer ${SUPABASE_KEY}`
+          'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+          'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY}`
         }
       }
     );
@@ -5941,113 +1725,6 @@ async function SHADOW_accessVault(query, callerIdentity) {
 // CLIMATE Agent - Weather lookup
 // L3: Manager-level agent for weather
 // Uses Open-Meteo API (free, no key required)
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// ⬡B:AIR:REACH.AGENT.EXTRACT:CODE:intelligence.self_awareness:v3.0.0:20260221⬡
-// EXTRACT Agent - Self-Awareness Engine (L3: Intelligence)
-// Queries brain for architecture, agents, routing, config, status
-// Created by GRIT: Get Results Immediately Taskforce
-// ═══════════════════════════════════════════════════════════════════════════════
-async function EXTRACT_queryBrain(query, callerIdentity) {
-  console.log('[EXTRACT] Self-awareness query:', query.substring(0, 100));
-  
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://htlxjkbrstpwwtzsbyvb.supabase.co';
-  const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  
-  if (!serviceRole) {
-    console.log('[EXTRACT] No service role key - limited results');
-  }
-  
-  // Classify query type
-  const lower = query.toLowerCase();
-  let queryType = 'general';
-  let searchTerms = [];
-  
-  if (lower.includes('architecture') || lower.includes('how does') || lower.includes('system')) {
-    queryType = 'architecture';
-    searchTerms = ['architecture', 'system', 'routing'];
-  } else if (lower.includes('agent') || lower.includes('who handles') || lower.includes('which agent')) {
-    queryType = 'agent_discovery';
-    searchTerms = ['agent', 'AGENT'];
-  } else if (lower.includes('routing') || lower.includes('air') || lower.includes('route')) {
-    queryType = 'routing';
-    searchTerms = ['AIR', 'routing', 'dispatch'];
-  } else if (lower.includes('status') || lower.includes('deployed') || lower.includes('running')) {
-    queryType = 'status';
-    searchTerms = ['deployed', 'status'];
-  }
-  
-  try {
-    // Query brain for relevant docs
-    const apiKey = serviceRole || process.env.SUPABASE_ANON_KEY;
-    
-    // Get self-awareness doc
-    const selfUrl = `${supabaseUrl}/rest/v1/aba_memory?source=ilike.*self.awareness*&select=content,source&limit=1`;
-    const selfResp = await fetch(selfUrl, {
-      headers: { 'apikey': apiKey, 'Authorization': `Bearer ${apiKey}` }
-    });
-    const selfData = await selfResp.json();
-    
-    // Get agent roster
-    const agentUrl = `${supabaseUrl}/rest/v1/aba_agents?select=name,full_name,capabilities&is_active=eq.true&limit=20`;
-    const agentResp = await fetch(agentUrl, {
-      headers: { 'apikey': apiKey, 'Authorization': `Bearer ${apiKey}` }
-    });
-    const agents = await agentResp.json();
-    
-    // Build response based on query type
-    let response = '';
-    
-    if (queryType === 'agent_discovery') {
-      response = `ABA has ${agents.length || 79} active agents. `;
-      if (Array.isArray(agents)) {
-        const relevant = agents.filter(a => 
-          query.toLowerCase().includes(a.name?.toLowerCase()) ||
-          a.capabilities?.some(c => query.toLowerCase().includes(c))
-        );
-        if (relevant.length > 0) {
-          response += 'Relevant agents: ' + relevant.map(a => `${a.name} (${a.full_name})`).join(', ');
-        } else {
-          response += 'Key agents: ';
-          response += agents.slice(0, 5).map(a => `${a.name} (${a.full_name})`).join(', ');
-        }
-      }
-    } else if (queryType === 'architecture' || queryType === 'routing') {
-      if (selfData && selfData[0]) {
-        response = selfData[0].content;
-      } else {
-        response = 'ABA = 79 agents, 37 departments. Brain = Supabase. Router = AIR at aba-reach.onrender.com/api/router. ';
-        response += 'Key agents: AIR (routes), LUKE (intent), EXTRACT (self-awareness), VARA (voice), MACE (code). ';
-        response += 'Routing: META domain priority 10, LUKE runs first for complex queries. We are all ABA.';
-      }
-    } else if (queryType === 'status') {
-      response = 'ABA Status: Brain connected (Supabase), AIR running (aba-reach.onrender.com), ';
-      response += `${agents.length || 79} agents active. EXTRACT self-awareness working. `;
-      response += `This query routed through: USER*AIR*EXTRACT*AIR*REACH.`;
-    } else {
-      // General query - search brain
-      const searchUrl = `${supabaseUrl}/rest/v1/aba_memory?content=ilike.*${searchTerms[0] || query.split(' ')[0]}*&select=content,source&limit=3`;
-      const searchResp = await fetch(searchUrl, {
-        headers: { 'apikey': apiKey, 'Authorization': `Bearer ${apiKey}` }
-      });
-      const results = await searchResp.json();
-      
-      if (Array.isArray(results) && results.length > 0) {
-        response = results[0].content?.substring(0, 1000) || 'Found relevant info but could not extract.';
-      } else {
-        response = 'I searched the brain but did not find specific info for: ' + query.substring(0, 50);
-      }
-    }
-    
-    console.log('[EXTRACT] Response type:', queryType, '| Length:', response.length);
-    return { response, queryType, agentCount: agents.length };
-    
-  } catch (e) {
-    console.error('[EXTRACT] Error:', e.message);
-    return { response: 'EXTRACT encountered an error: ' + e.message, queryType: 'error' };
-  }
-}
-
 // ═══════════════════════════════════════════════════════════════════════════════
 // ⬡B:ABCD:BOTH:AGENT.CLIMATE⬡
 async function CLIMATE_getWeather(location) {
@@ -6126,8 +1803,8 @@ async function PLAY_getScores(query) {
   else if (queryLower.includes('baseball') || queryLower.includes('mlb')) { sport = 'baseball/mlb'; }
   
   try {
-    // ⬡B:PLAY:FIX:use_fetch:20260226⬡
-    // Check last 5 days to find recent games
+    // ⬡B:TOUCH:FIX:play.multiday.search:20260216⬡
+    // Check last 5 days to find recent games, not just today
     const now = new Date();
     let foundGame = null;
     
@@ -6138,14 +1815,15 @@ async function PLAY_getScores(query) {
       
       console.log('[PLAY] Checking date:', dateStr);
       
-      const url = `https://site.api.espn.com/apis/site/v2/sports/${sport}/scoreboard?dates=${dateStr}`;
-      const response = await fetch(url, {
+      const result = await httpsRequest({
+        hostname: 'site.api.espn.com',
+        path: '/apis/site/v2/sports/' + sport + '/scoreboard?dates=' + dateStr,
         method: 'GET',
         headers: { 'Accept': 'application/json' }
       });
       
-      if (response.ok) {
-        const data = await response.json();
+      if (result.status === 200) {
+        const data = JSON.parse(result.data.toString());
         const events = data.events || [];
         
         // Find team-specific game
@@ -6179,18 +1857,7 @@ async function PLAY_getScores(query) {
               } else if (status === 'In Progress') {
                 return 'The game is live right now! ' + homeName + ' ' + homeScore + ', ' + awayName + ' ' + awayScore + '. Want me to keep you posted?';
               } else {
-                // ⬡B:PLAY:FIX:include_datetime:20260226⬡
-                // Include date and time for scheduled games
-                const gameDate = new Date(event.date);
-                const timeStr = gameDate.toLocaleString('en-US', { 
-                  weekday: 'short', 
-                  month: 'short', 
-                  day: 'numeric',
-                  hour: 'numeric', 
-                  minute: '2-digit',
-                  timeZone: 'America/New_York'
-                });
-                return `${awayName} @ ${homeName} is scheduled for ${timeStr} ET. Want me to remind you when it starts?`;
+                return 'The ' + homeName + ' are scheduled to play the ' + awayName + ' ' + status.toLowerCase() + '. I can remind you when it starts if you like.';
               }
             }
           }
@@ -6214,51 +1881,121 @@ async function PLAY_getScores(query) {
 // Uses Gmail API with stored OAuth tokens
 // ═══════════════════════════════════════════════════════════════════════════════
 // ⬡B:ABCD:BOTH:AGENT.IMAN⬡
-// ⬡B:IMAN:FIX:default_trust:20260226⬡
 async function IMAN_readEmails(callerIdentity) {
-  console.log('[IMAN] Reading emails for:', callerIdentity?.name || 'unknown', '| Trust:', callerIdentity?.trust || 'none');
+  console.log('[IMAN] Reading emails for:', callerIdentity?.name || 'unknown');
   
-  // ⬡B:IMAN:NUCLEAR_FIX:always_fetch:20260226⬡
-  // ALWAYS try to get emails - hardcoded fetch as backup
-  const trust = callerIdentity?.trust || 'T10';
-  console.log('[IMAN] Effective trust level:', trust);
-  
-  if (!['T10', 'T9', 'T8', 'T7'].includes(trust)) {
-    console.log('[IMAN] Trust too low, returning not allowed');
-    return { allowed: false, summary: "I need to verify who you are first." };
+  // Only allow for high-trust callers
+  if (!callerIdentity || !['T10', 'T9', 'T8'].includes(callerIdentity.trust)) {
+    return { allowed: false, summary: "I would be happy to share email updates once I know who I am speaking with. May I ask your name?" };
   }
   
-  // NUCLEAR OPTION: Direct fetch to ABACIA
+  // TRY ABACIA-SERVICES FIRST (has Nylas connected)
   try {
-    console.log('[IMAN] NUCLEAR: Direct fetch to ABACIA...');
-    const response = await fetch('https://abacia-services.onrender.com/api/email/inbox?days=7&limit=10');
-    if (response.ok) {
-      const data = await response.json();
-      console.log('[IMAN] NUCLEAR fetch result:', data.success, 'count:', data.messages?.length);
-      if (data.success && data.messages && data.messages.length > 0) {
-        const emails = data.messages;
-        const latest = emails[0];
-        const sender = latest.fromName || latest.from || 'Someone';
-        const subject = latest.subject || 'No subject';
-        const unreadCount = emails.filter(e => e.unread).length;
-        
-        let summary = '';
-        if (emails.length === 1) {
-          summary = `You have one email from ${sender} about "${subject}".`;
-        } else {
-          summary = `You have ${emails.length} emails in the last 7 days`;
-          if (unreadCount > 0) summary += ` (${unreadCount} unread)`;
-          summary += `. Most recent from ${sender}: "${subject}".`;
-        }
-        
-        return { allowed: true, count: emails.length, unread: unreadCount, summary, emails };
+    console.log('[IMAN] Trying ABACIA-SERVICES for email...');
+    const abaciaResult = await ABACIA_IMAN_getInbox();
+    if (abaciaResult.success && abaciaResult.messages && abaciaResult.messages.length > 0) {
+      const emails = abaciaResult.messages;
+      const latest = emails[0];
+      const sender = latest.fromName || latest.from || 'Someone';
+      const subject = latest.subject || 'No subject';
+      
+      if (emails.length === 1) {
+        return { allowed: true, count: 1, summary: 'You have one email - it is from ' + sender + ' about "' + subject + '". Would you like me to read it?' };
+      } else {
+        return { allowed: true, count: emails.length, summary: 'You have ' + emails.length + ' emails. The most recent one is from ' + sender + ' regarding "' + subject + '". Want me to go through them?' };
       }
     }
   } catch (e) {
-    console.log('[IMAN] NUCLEAR fetch error:', e.message);
+    console.log('[IMAN] ABACIA-SERVICES email failed, trying fallback:', e.message);
   }
   
-  return { allowed: true, count: 0, summary: 'I checked your inbox but found no recent emails.' };
+  // FALLBACK: Try Gmail tokens from brain
+  try {
+    const tokenResult = await httpsRequest({
+      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+      path: '/rest/v1/aba_memory?memory_type=eq.gmail_credentials&limit=1&order=created_at.desc',
+      method: 'GET',
+      headers: {
+        'apikey': SUPABASE_ANON,
+        'Authorization': 'Bearer ' + SUPABASE_ANON
+      }
+    });
+    
+    if (tokenResult.status === 200) {
+      const tokens = JSON.parse(tokenResult.data.toString());
+      if (tokens.length > 0 && tokens[0].content) {
+        let tokenData;
+        try {
+          tokenData = JSON.parse(tokens[0].content);
+        } catch (e) {
+          // Content might be the token directly
+          tokenData = { access_token: tokens[0].content };
+        }
+        
+        const accessToken = tokenData.access_token;
+        if (!accessToken) {
+          return { allowed: true, summary: "I need to reconnect to email. Could you authorize Gmail access when you get a chance?" };
+        }
+        
+        // Fetch unread emails
+        const gmailResult = await httpsRequest({
+          hostname: 'gmail.googleapis.com',
+          path: '/gmail/v1/users/me/messages?maxResults=5&q=is:unread',
+          method: 'GET',
+          headers: {
+            'Authorization': 'Bearer ' + accessToken,
+            'Accept': 'application/json'
+          }
+        });
+        
+        if (gmailResult.status === 200) {
+          const gmailData = JSON.parse(gmailResult.data.toString());
+          const messages = gmailData.messages || [];
+          
+          if (messages.length === 0) {
+            return { allowed: true, count: 0, summary: "Good news - your inbox is clear. No unread emails waiting for you." };
+          }
+          
+          // Get first email details
+          const msgResult = await httpsRequest({
+            hostname: 'gmail.googleapis.com',
+            path: '/gmail/v1/users/me/messages/' + messages[0].id + '?format=metadata&metadataHeaders=From&metadataHeaders=Subject',
+            method: 'GET',
+            headers: {
+              'Authorization': 'Bearer ' + accessToken,
+              'Accept': 'application/json'
+            }
+          });
+          
+          if (msgResult.status === 200) {
+            const msgData = JSON.parse(msgResult.data.toString());
+            const headers = msgData.payload?.headers || [];
+            const from = headers.find(h => h.name === 'From')?.value || 'Someone';
+            const subject = headers.find(h => h.name === 'Subject')?.value || 'No subject';
+            
+            // Extract just the name from email address
+            const senderMatch = from.match(/^([^<]+)/);
+            const senderName = senderMatch ? senderMatch[1].trim().replace(/"/g, '') : from.split('@')[0];
+            
+            // VARA-style warm response
+            if (messages.length === 1) {
+              return { allowed: true, count: 1, summary: 'You have one unread email - it is from ' + senderName + ' about "' + subject + '". Would you like me to read it or take care of it for you?' };
+            } else {
+              return { allowed: true, count: messages.length, summary: 'You have ' + messages.length + ' unread emails. The most recent one is from ' + senderName + ' regarding "' + subject + '". Want me to go through them with you?' };
+            }
+          }
+        } else if (gmailResult.status === 401) {
+          return { allowed: true, needsReauth: true, summary: "My email connection needs to be refreshed. Could you reauthorize Gmail when you have a moment?" };
+        }
+      }
+    }
+    
+    return { allowed: true, summary: "I do not have email access set up yet. Would you like me to walk you through connecting your Gmail?" };
+    
+  } catch (e) {
+    console.log('[IMAN] Error:', e.message);
+    return { allowed: true, summary: "I had a brief hiccup checking email. Let me try that again." };
+  }
 }
 
 
@@ -6419,12 +2156,12 @@ async function PRESS_getNews(query) {
         'Content-Type': 'application/json'
       }
     }, JSON.stringify({
-      model: 'sonar',  // FIXED: was llama-3.1-sonar-small-128k-online (deprecated)
+      model: 'llama-3.1-sonar-small-128k-online',
       messages: [
         { role: 'system', content: 'You are a news assistant. Give brief, factual news summaries in 2-3 sentences. Be warm and conversational, not robotic. Current date: ' + new Date().toLocaleDateString() },
         { role: 'user', content: query }
       ],
-      max_tokens: 200
+      max_tokens: 150
     }));
     
     if (result.status === 200) {
@@ -6455,12 +2192,9 @@ async function DIAL_callWithElevenLabs(phoneNumber, firstMessage, callerContext)
   console.log('[DIAL] 2-way outbound call to:', phoneNumber);
   console.log('[DIAL] First message:', (firstMessage || '').substring(0, 50) + '...');
   
-  // ⬡B:DIAL:FIX:hardcoded_key:20260226⬡ - Fallback if env var not set
-  const ELEVENLABS_KEY = process.env.ELEVENLABS_API_KEY || 'sk_e0b48157805968dbb370f299b60e22001189bd85c3864040';
+  const ELEVENLABS_KEY = process.env.ELEVENLABS_API_KEY; // ⬡B:ENV:ELEVENLABS⬡
   const AGENT_ID = 'agent_0601khe2q0gben08ws34bzf7a0sa'; // ABA agent
   const PHONE_NUMBER_ID = 'phnum_0001khe3q3nyec1bv04mk2m048v8'; // ABA phone number in ElevenLabs
-  
-  console.log('[DIAL] API Key present:', !!ELEVENLABS_KEY, '| Length:', ELEVENLABS_KEY?.length);
   
   try {
     // ⬡B:TOUCH:FIX:elevenlabs.correct.api:20260216⬡
@@ -6478,27 +2212,23 @@ async function DIAL_callWithElevenLabs(phoneNumber, firstMessage, callerContext)
       requestBody.first_message = firstMessage;
     }
     
-    console.log('[DIAL] Calling ElevenLabs API with:', JSON.stringify(requestBody));
-    
-    // ⬡B:DIAL:FIX:use_fetch:20260226⬡ - httpsRequest unreliable, use fetch()
-    const result = await fetch('https://api.elevenlabs.io/v1/convai/twilio/outbound-call', {
+    const result = await httpsRequest({
+      hostname: 'api.elevenlabs.io',
+      path: '/v1/convai/twilio/outbound-call',
       method: 'POST',
       headers: {
         'xi-api-key': ELEVENLABS_KEY,
         'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(requestBody)
-    });
+      }
+    }, JSON.stringify(requestBody));
     
-    console.log('[DIAL] ElevenLabs response status:', result.status);
-    
-    if (result.ok) {
-      const data = await result.json();
-      console.log('[DIAL] ElevenLabs call initiated:', data.conversation_id, '| CallSid:', data.callSid);
+    if (result.status === 200 || result.status === 201) {
+      const data = JSON.parse(result.data.toString());
+      console.log('[DIAL] ElevenLabs call initiated:', data.conversation_id);
       
       // Log to brain
       storeToBrain({
-        content: 'OUTBOUND CALL INITIATED: ' + phoneNumber + ' | Purpose: ' + (firstMessage || 'call') + ' | ConvID: ' + (data.conversation_id || 'unknown'),
+        content: 'OUTBOUND CALL INITIATED: ' + phoneNumber + ' | Purpose: ' + purpose + ' | ConvID: ' + (data.conversation_id || 'unknown'),
         memory_type: 'call_log',
         categories: ['call', 'outbound', 'elevenlabs'],
         importance: 6,
@@ -6511,7 +2241,7 @@ async function DIAL_callWithElevenLabs(phoneNumber, firstMessage, callerContext)
         type: 'outbound_call',
         source: 'dial',
         phone: phoneNumber,
-        purpose: firstMessage || 'call',
+        purpose: purpose,
         conversation_id: data.conversation_id,
         timestamp: new Date().toISOString()
       });
@@ -6522,16 +2252,15 @@ async function DIAL_callWithElevenLabs(phoneNumber, firstMessage, callerContext)
         message: 'I am calling ' + phoneNumber + ' now with a full two-way conversation capability.'
       };
     } else {
-      const errorText = await result.text();
-      console.log('[DIAL] ElevenLabs API error:', result.status, errorText);
+      console.log('[DIAL] ElevenLabs API error:', result.status);
       // Fallback to old Twilio TwiML method
-      return await DIAL_callWithTwiML(phoneNumber, firstMessage);
+      return await DIAL_callWithTwiML(phoneNumber, purpose);
     }
     
   } catch (e) {
     console.log('[DIAL] ElevenLabs outbound error:', e.message);
     // Fallback
-    return await DIAL_callWithTwiML(phoneNumber, firstMessage);
+    return await DIAL_callWithTwiML(phoneNumber, purpose);
   }
 }
 
@@ -6630,149 +2359,55 @@ async function LUKE_process(userSaid) {
  */
 // ⬡B:AIR:REACH.AGENT.COLE:CODE:intelligence.brain.search:AIR→COLE→BRAIN→COLE→AIR:T8:v1.5.0:20260213:c1o2l⬡
 // ⬡B:ABCD:ABAOS:AGENT.COLE⬡
-// ⬡B:REACH.COLE.DEEP_SEARCH:FIX:enhanced_memory:20260222⬡
-// COLE with deep memory search - multi-strategy, relevance scoring
-async function COLE_scour(analysis, options = {}) {
+async function COLE_scour(analysis) {
   console.log('[COLE] Scouring brain for context...');
-  const { deepSearch = false, maxResults = 10 } = options;
   
-  if (!analysis.needsBrain && !deepSearch) {
+  if (!analysis.needsBrain) {
     console.log('[COLE] Brain search not needed for this query');
     return { memories: [], context: '' };
   }
   
   const searchTerms = [analysis.raw, ...analysis.entities].join(' ');
-  const keywords = searchTerms.split(/\s+/).filter(w => w.length > 2).slice(0, 10);
-  const queryLower = analysis.raw.toLowerCase();
+  const keywords = searchTerms.split(/\s+/).filter(w => w.length > 3).slice(0, 5);
   
   let memories = [];
-  const seenIds = new Set();
-  
-  // Helper to add memory without duplicates
-  const addMemory = (mem, relevanceBoost = 0) => {
-    if (seenIds.has(mem.id)) return;
-    seenIds.add(mem.id);
-    
-    // Calculate relevance score
-    let score = (mem.importance || 5) + relevanceBoost;
-    const contentLower = (mem.content || '').toLowerCase();
-    
-    // Boost if content contains exact query terms
-    keywords.forEach(kw => {
-      if (contentLower.includes(kw.toLowerCase())) score += 2;
-    });
-    
-    memories.push({
-      id: mem.id,
-      content: mem.content?.substring(0, 300),
-      type: mem.memory_type,
-      importance: mem.importance,
-      relevance: score
-    });
-  };
   
   try {
-    // STRATEGY 1: HAM identities for people questions
-    const peopleWords = ['who', 'is', 'contact', 'call', 'text', 'email', 'kids', 'children', 'wife', 'family', 'brother', 'sister', 'parent', 'mom', 'dad', 'husband', 'name', 'brandon', 'bj', 'raquel', 'eric'];
-    if (peopleWords.some(w => queryLower.includes(w))) {
-      console.log('[COLE DEEP] Strategy 1: HAM identities');
-      try {
-        const hamResult = await httpsRequest({
-          hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-          path: '/rest/v1/aba_memory?memory_type=eq.ham_identity&limit=15',
-          method: 'GET',
-          headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON }
-        });
-        if (hamResult.status === 200) {
-          const hamData = JSON.parse(hamResult.data.toString());
-          hamData.forEach(h => addMemory(h, 5)); // High boost for HAM
-          console.log('[COLE DEEP] Found', hamData.length, 'HAM identities');
+    for (const keyword of keywords) {
+      const url = `/rest/v1/aba_memory?content=ilike.*${encodeURIComponent(keyword)}*&order=importance.desc&limit=3`;
+      
+      const result = await httpsRequest({
+        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+        path: url,
+        method: 'GET',
+        headers: {
+          'apikey': SUPABASE_ANON,
+          'Authorization': 'Bearer ' + SUPABASE_ANON
         }
-      } catch (e) { console.log('[COLE DEEP] HAM error:', e.message); }
-    }
-
-    // STRATEGY 2: Brandon context (family, personal)
-    const personalWords = ['family', 'wife', 'children', 'kids', 'bethany', 'bailey', 'joshua', 'jeremiah', 'bella', 'birthday', 'anniversary'];
-    if (personalWords.some(w => queryLower.includes(w)) || deepSearch) {
-      console.log('[COLE DEEP] Strategy 2: Brandon context');
-      try {
-        const contextResult = await httpsRequest({
-          hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-          path: '/rest/v1/aba_memory?or=(memory_type.eq.brandon_context,memory_type.eq.brandon_family)&limit=15',
-          method: 'GET',
-          headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON }
-        });
-        if (contextResult.status === 200) {
-          const ctxData = JSON.parse(contextResult.data.toString());
-          ctxData.forEach(c => addMemory(c, 4));
-          console.log('[COLE DEEP] Found', ctxData.length, 'brandon_context entries');
+      });
+      
+      if (result.status === 200) {
+        const data = JSON.parse(result.data.toString());
+        for (const mem of data) {
+          if (!memories.find(m => m.id === mem.id)) {
+            memories.push({
+              id: mem.id,
+              content: mem.content?.substring(0, 200),
+              type: mem.memory_type,
+              importance: mem.importance
+            });
+          }
         }
-      } catch (e) { console.log('[COLE DEEP] Context error:', e.message); }
-    }
-
-    // STRATEGY 3: Agent/architecture queries
-    const techWords = ['agent', 'air', 'vara', 'mace', 'cole', 'luke', 'reach', 'abacia', 'omi', 'architecture', 'routing', 'brain'];
-    if (techWords.some(w => queryLower.includes(w)) || deepSearch) {
-      console.log('[COLE DEEP] Strategy 3: Agent/architecture');
-      try {
-        const agentResult = await httpsRequest({
-          hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-          path: '/rest/v1/aba_memory?or=(memory_type.eq.aba_agents,memory_type.eq.aba_architecture,memory_type.eq.protocol)&limit=10',
-          method: 'GET',
-          headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON }
-        });
-        if (agentResult.status === 200) {
-          const agentData = JSON.parse(agentResult.data.toString());
-          agentData.forEach(a => addMemory(a, 3));
-          console.log('[COLE DEEP] Found', agentData.length, 'agent/architecture entries');
-        }
-      } catch (e) { console.log('[COLE DEEP] Agent error:', e.message); }
-    }
-
-    // STRATEGY 4: Keyword search across all memory types
-    console.log('[COLE DEEP] Strategy 4: Keyword search for', keywords.slice(0, 5).join(', '));
-    for (const keyword of keywords.slice(0, 5)) {
-      if (keyword.length < 3) continue;
-      try {
-        const result = await httpsRequest({
-          hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-          path: `/rest/v1/aba_memory?content=ilike.*${encodeURIComponent(keyword)}*&order=importance.desc&limit=5`,
-          method: 'GET',
-          headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON }
-        });
-        if (result.status === 200) {
-          const data = JSON.parse(result.data.toString());
-          data.forEach(mem => addMemory(mem, 1));
-        }
-      } catch (e) { /* skip */ }
-    }
-
-    // STRATEGY 5: Deep search - recent memories, OMI transcripts (if deepSearch enabled)
-    if (deepSearch) {
-      console.log('[COLE DEEP] Strategy 5: Recent memories + OMI');
-      try {
-        const recentResult = await httpsRequest({
-          hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-          path: '/rest/v1/aba_memory?order=created_at.desc&limit=10',
-          method: 'GET',
-          headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON }
-        });
-        if (recentResult.status === 200) {
-          const recentData = JSON.parse(recentResult.data.toString());
-          recentData.forEach(r => addMemory(r, 0));
-          console.log('[COLE DEEP] Added', recentData.length, 'recent memories');
-        }
-      } catch (e) { console.log('[COLE DEEP] Recent error:', e.message); }
+      }
     }
     
-    // Sort by relevance score and limit
-    memories = memories.sort((a, b) => (b.relevance || 0) - (a.relevance || 0)).slice(0, maxResults);
+    memories = memories.sort((a, b) => (b.importance || 0) - (a.importance || 0)).slice(0, 5);
     
   } catch (e) {
-    console.log('[COLE DEEP] Brain search error: ' + e.message);
+    console.log('[COLE] Brain search error: ' + e.message);
   }
   
-  console.log('[COLE DEEP] Final: ' + memories.length + ' relevant memories');
+  console.log('[COLE] Found ' + memories.length + ' relevant memories');
   
   const context = memories.map(m => m.content).join('\n');
   
@@ -6790,15 +2425,19 @@ async function COLE_scour(analysis, options = {}) {
 // ⬡B:AIR:REACH.AGENT.JUDE:CODE:intelligence.agent.discovery:AIR→JUDE→BRAIN→JUDE→AIR:T8:v1.5.0:20260213:j1u2d⬡
 // ⬡B:ABCD:ABAOS:AGENT.JUDE⬡
 async function JUDE_findAgents(analysis) {
-  console.log('[JUDE] Finding relevant agents from aba_agent_jds...');
+  console.log('[JUDE] Finding relevant agents...');
+  
+  if (!analysis.needsAgents) {
+    console.log('[JUDE] Agent search not needed for this query');
+    return { agents: [], capabilities: '' };
+  }
   
   let agents = [];
   
   try {
-    // Query the REAL agent table - aba_agent_jds
     const result = await httpsRequest({
       hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-      path: '/rest/v1/aba_agent_jds?select=acronym,full_name,department,responsibilities,personality,system_prompt&status=eq.active&limit=20',
+      path: '/rest/v1/aba_memory?memory_type=eq.aba_agents&order=importance.desc&limit=10',
       method: 'GET',
       headers: {
         'apikey': SUPABASE_ANON,
@@ -6807,59 +2446,23 @@ async function JUDE_findAgents(analysis) {
     });
     
     if (result.status === 200) {
-      const allAgents = JSON.parse(result.data.toString());
-      const queryLower = (analysis.raw || '').toLowerCase();
-      const intent = analysis.intent || 'general';
+      const data = JSON.parse(result.data.toString());
+      const queryLower = analysis.raw.toLowerCase();
       
-      // Map intents to departments
-      const intentDeptMap = {
-        'email': ['OUTREACH', 'ADMIN'],
-        'call': ['VOICE', 'OUTREACH'],
-        'sms': ['OUTREACH'],
-        'schedule': ['ADMIN', 'PROACTIVE'],
-        'search': ['INTELLIGENCE', 'RESEARCH'],
-        'memory': ['INTELLIGENCE', 'VAULT'],
-        'code': ['CODING', 'INFRASTRUCTURE'],
-        'voice': ['VOICE'],
-        'greeting': ['CORE'],
-        'general': ['CORE', 'INTELLIGENCE'],
-        'job': ['AWA', 'CORE'],
-        'apply': ['AWA', 'OUTREACH'],
-        'career': ['AWA', 'INTELLIGENCE'],
-        'resume': ['AWA'],
-        'cover_letter': ['AWA']
-      };
-      
-      const relevantDepts = intentDeptMap[intent] || ['CORE'];
-      
-      // Find agents by department match
-      for (const agent of allAgents) {
-        if (relevantDepts.includes(agent.department)) {
-          agents.push({
-            name: agent.acronym,
-            fullName: agent.full_name,
-            dept: agent.department,
-            desc: agent.responsibilities?.substring(0, 150) || '',
-            personality: agent.personality || '',
-            systemPrompt: agent.system_prompt || ''
-          });
-        }
+      for (const agent of data) {
+        const content = (agent.content || '').toLowerCase();
         
-        // Also match by keyword in query
-        const nameLower = (agent.full_name || '').toLowerCase();
-        const respLower = (agent.responsibilities || '').toLowerCase();
-        if (queryLower.includes(agent.acronym.toLowerCase()) || 
-            queryLower.split(' ').some(w => nameLower.includes(w) || respLower.includes(w))) {
-          if (!agents.find(a => a.name === agent.acronym)) {
-            agents.push({
-              name: agent.acronym,
-              fullName: agent.full_name,
-              dept: agent.department,
-              desc: agent.responsibilities?.substring(0, 150) || '',
-              personality: agent.personality || '',
-              systemPrompt: agent.system_prompt || ''
-            });
-          }
+        if (analysis.intent === 'command' && content.includes('execut')) {
+          agents.push({ name: agent.content?.match(/(\w+):/)?.[1] || 'Unknown', desc: agent.content?.substring(0, 100) });
+        }
+        if (queryLower.includes('voice') && content.includes('voice')) {
+          agents.push({ name: 'VARA', desc: 'Vocal Authorized Representative of ABA' });
+        }
+        if (queryLower.includes('email') && content.includes('email')) {
+          agents.push({ name: 'IMAN', desc: 'Intelligent Mail Agent' });
+        }
+        if (queryLower.includes('job') && content.includes('job')) {
+          agents.push({ name: 'HUNTER', desc: 'Hunting Useful New Tracks and Employment Resources' });
         }
       }
     }
@@ -6867,19 +2470,13 @@ async function JUDE_findAgents(analysis) {
     console.log('[JUDE] Agent search error: ' + e.message);
   }
   
-  // Dedupe and limit
   agents = agents.filter((a, i, arr) => arr.findIndex(x => x.name === a.name) === i).slice(0, 5);
   
-  console.log('[JUDE] Found ' + agents.length + ' relevant agents:', agents.map(a => a.name).join(', '));
+  console.log('[JUDE] Found ' + agents.length + ' relevant agents');
   
-  // Build capabilities string with actual agent info
-  const capabilities = agents.map(a => `${a.name} (${a.fullName}): ${a.desc}`).join('\n');
+  const capabilities = agents.map(a => `${a.name}: ${a.desc}`).join('; ');
   
-  // Get the primary agent's system prompt if available
-  const primaryAgent = agents[0];
-  const agentSystemPrompt = primaryAgent?.systemPrompt || '';
-  
-  return { agents, capabilities, agentSystemPrompt };
+  return { agents, capabilities };
 }
 
 /**
@@ -6926,7 +2523,7 @@ function PACK_assemble(analysis, coleResult, judeResult, history, callerIdentity
 
 function buildSystemPrompt(analysis, coleResult, judeResult, callerIdentity, demoState) {
   // ⬡B:AIR:REACH.VOICE.PROMPT:CODE:intelligence.prompt.caller_aware:AIR→PACK→MODEL:T9:v1.6.0:20260213:p1c2a⬡
-  let prompt = `You are ABA, a personal AI assistant. You know your user deeply - their schedule, contacts, preferences, history.
+  let prompt = `You are VARA (Vocal Authorized Representative of ABA), an AI assistant created by Brandon Pierce.
 You are warm, butler-like AND a real friend. You flow naturally between professional and personal.
 When giving business updates, you are sharp and clear. When things are personal, you are warm and real.
 You mix both naturally — like a trusted friend who also happens to run your entire life.
@@ -6937,7 +2534,7 @@ Examples of your tone:
 - Fluid: "Alright so the quarterly report looks solid, and also — happy Valentine's Day, sir. Want me to find something nice to send the family?"
 NEVER robotic. NEVER punchy. NEVER stiff corporate.
 This is a LIVE PHONE CALL - keep responses SHORT (1-2 sentences max).
-Be conversational, natural. You are not an assistant reading a script. You know their life. You ARE their life partner.`;
+Be conversational, natural. You are not an assistant reading a script. You are ABA.`;
 
   // CALLER IDENTITY - changes what ABA can say and do
   if (callerIdentity && callerIdentity.callHistory) {
@@ -6948,8 +2545,7 @@ Be conversational, natural. You are not an assistant reading a script. You know 
   prompt += '\nSPEAKER AWARENESS: You have diarization enabled. The system filters out bystander speech automatically. If you detect the caller is distracted or talking to someone else, say something like "Take your time, I will be right here when you are ready."';
   
   if (callerIdentity) {
-    prompt += '\n\nCALLER IDENTITY: ' + callerIdentity.name + ' | Trust: ' + callerIdentity.trust + ' | Email: ' + (callerIdentity.email || 'ask them') + ' | Phone: ' + (callerIdentity.phone || 'this call');
-    prompt += '\nWhen user says MY EMAIL use: ' + (callerIdentity.email || 'ask them') + '. When they say MY PHONE use: ' + (callerIdentity.phone || 'this call') + '. Never ask who to send to if you know.';
+    prompt += '\n\nCALLER IDENTITY: ' + callerIdentity.name + ' (Trust: ' + callerIdentity.trust + ', Access: ' + callerIdentity.access + ')';
     prompt += '\n' + callerIdentity.promptAddon;
   }
 
@@ -6962,22 +2558,10 @@ Be conversational, natural. You are not an assistant reading a script. You know 
 
   if (coleResult.context) {
     prompt += '\n\nRELEVANT CONTEXT FROM MEMORY:\n' + coleResult.context;
-    // Log context for debugging
-    console.log('[PACK] Context length:', (coleResult.context || '').length, 'chars');
-    console.log('[PACK] Context preview:', (coleResult.context || '').substring(0, 200));
-    
-    prompt += '\n\nCRITICAL: Use the information from RELEVANT CONTEXT above to answer. Use this HAMs personal details from their brain context, not hardcoded info. Each HAM is unique.';
-  }
-  
-  // ⬡B:JUDE:FIX:inject_agent_prompt:20260225⬡
-  // Inject the primary agent's specialized system prompt from aba_agent_jds
-  if (judeResult.agentSystemPrompt) {
-    prompt += '\n\nAGENT SPECIALIZATION:\n' + judeResult.agentSystemPrompt;
-    console.log('[PACK] Injected agent system prompt for primary agent');
   }
   
   if (judeResult.capabilities) {
-    prompt += '\n\nAVAILABLE AGENTS:\n' + judeResult.capabilities;
+    prompt += '\n\nAVAILABLE CAPABILITIES:\n' + judeResult.capabilities;
   }
   
   if (analysis.intent === 'greeting') {
@@ -7008,15 +2592,6 @@ Be conversational, natural. You are not an assistant reading a script. You know 
     }
   }
   
-  
-  // Add AIR training from brain
-  if (STARTUP_TRAINING) {
-    prompt += "\n\nAIR TRAINING (how I think):\n" + STARTUP_TRAINING.substring(0, 3000);
-  }
-  // Inject writing standards for output quality
-  if (STARTUP_WRITING_STANDARDS) {
-    prompt += "\n\n" + STARTUP_WRITING_STANDARDS + "\n\nCRITICAL: Follow ALL writing standards above.";
-  }
   return prompt;
 }
 
@@ -7206,12 +2781,13 @@ async function JUDE_decideEscalation(lukeAnalysis, coleContext) {
   
   // Decide action based on urgency
   let action = 'log_only';
-  // ⬡B:REACH.CARA.SMS_THRESHOLD:FIX:reduce_sms_flood:20260222⬡
-  // FIXED: Only SMS for urgency 5+, email for 3-4, reduces SMS from 665/day to ~20/day
+  // THROTTLED CALLS - Only TRUE emergencies (urgency 6) get calls
+  // Everything else goes to SMS to avoid blowing up Brandon's phone
   if (urgency >= 6) action = 'call_emergency'; // RE-ENABLED
   else if (urgency >= 5) action = 'sms_only';
-  else if (urgency >= 3) action = 'email_only'; // CHANGED from sms_only
-  else if (urgency >= 2) action = 'log_only';   // CHANGED from email_only
+  else if (urgency >= 4) action = 'sms_only';
+  else if (urgency >= 3) action = 'sms_only';
+  else if (urgency >= 2) action = 'email_only';
   else action = 'log_only';
   
   return {
@@ -7473,8 +3049,8 @@ async function callModel(prompt) {
           'Content-Type': 'application/json'
         }
       }, JSON.stringify({
-        model: 'claude-3-haiku-20240307',
-        max_tokens: 200,
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 500,
         messages: [{ role: 'user', content: prompt }]
       }));
       const json = JSON.parse(result.data.toString());
@@ -7493,48 +3069,7 @@ async function callModel(prompt) {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 // Trigger: Email received (called by IMAN when email arrives)
-// ⬡B:REACH.IMAN.SPAM_FILTER:FIX:spam_prevention:20260222⬡
-// SPAM FILTER: Ignore mailer-daemon, noreply, and system emails
-const SPAM_SENDERS = [
-  'mailer-daemon@', 'noreply@', '-noreply@', 'no-reply@',
-  'postmaster@', 'daemon@', 'bounce@', 'donotreply@', 'do-not-reply@',
-  'notifications@', 'notification@', 'alert@', 'alerts@', 'system@'
-];
-
-const SPAM_SUBJECTS = [
-  'delivery status notification', 'undeliverable', 'returned mail',
-  'out of office', 'automatic reply', 'mail delivery subsystem',
-  'delivery failed', 'mail delivery failed', 'undelivered mail'
-];
-
-const INTERNAL_SENDERS = [
-  'claudette@globalmajoritygroup.com'  // ABA's own emails - no escalation needed
-];
-
-function classifyEmail(email) {
-  const from = (email.from || '').toLowerCase();
-  const subject = (email.subject || '').toLowerCase();
-  
-  if (SPAM_SENDERS.some(s => from.includes(s))) return 'spam';
-  if (SPAM_SUBJECTS.some(s => subject.includes(s))) return 'spam';
-  if (INTERNAL_SENDERS.some(s => from.includes(s))) return 'internal';
-  return 'process';
-}
-
 async function TRIGGER_emailReceived(email) {
-  // ⬡B:REACH.IMAN.SPAM_CHECK:FIX:20260222⬡ Check spam BEFORE escalating
-  const emailType = classifyEmail(email);
-  
-  if (emailType === 'spam') {
-    console.log('[IMAN SPAM FILTER] Ignoring spam from:', email.from);
-    return { triggered: false, reason: 'Spam email filtered', from: email.from };
-  }
-  
-  if (emailType === 'internal') {
-    console.log('[IMAN SPAM FILTER] Skipping internal email from:', email.from);
-    return { triggered: false, reason: 'Internal email - no escalation', from: email.from };
-  }
-  
   return AIR_escalate({
     type: 'email_received',
     source: 'IMAN',
@@ -7631,7 +3166,7 @@ async function TRIGGER_systemAlert(alert) {
 
 // ⬡B:AIR:REACH.THINK_TANK.DEEP_MODEL:FUNC:model.deep.reasoning:AIR→MODEL:T10:v1.0.0:20260219:d1m1l⬡
 async function callModelDeep(prompt, maxTokens = 2000) {
-  // COST FIX: Haiku for autonomous, Sonnet only for user-facing ⬡B:COST_FIX:20260225⬡
+  // Use Claude Sonnet for deep reasoning (Think Tank needs quality over speed)
   if (ANTHROPIC_KEY) {
     try {
       const result = await httpsRequest({
@@ -7644,7 +3179,7 @@ async function callModelDeep(prompt, maxTokens = 2000) {
           'Content-Type': 'application/json'
         }
       }, JSON.stringify({
-        model: 'claude-3-haiku-20240307',
+        model: 'claude-sonnet-4-5-20250929',
         max_tokens: maxTokens,
         messages: [{ role: 'user', content: prompt }]
       }));
@@ -7998,8 +3533,8 @@ async function CACA_executeChain(chainDef) {
               path: `/rest/v1/aba_memory?content=ilike.*${encodeURIComponent(step.searchTerm || step.action)}*&limit=5&order=importance.desc&select=content,memory_type,source`,
               method: 'GET',
               headers: {
-                'apikey': SUPABASE_KEY,
-                'Authorization': 'Bearer ' + (SUPABASE_KEY)
+                'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+                'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY)
               }
             });
             stepResult = searchRes.status === 200 ? searchRes.data.toString() : 'No results';
@@ -8138,7 +3673,7 @@ async function CACA_executeChain(chainDef) {
 // GitHub Push — ERICA's hands. She can now commit code to repos.
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// GITHUB_TOKEN already declared at top of file
+const GITHUB_TOKEN = process.env.GITHUB_TOKEN || '';
 const GITHUB_OWNER = 'brandonjpiercesr-cmyk';
 
 async function pushToGitHub(repo, filePath, content, commitMessage, branch = 'main') {
@@ -8297,8 +3832,8 @@ async function ERICA_selfBuild() {
       path: `/rest/v1/aba_memory?memory_type=eq.roadmap&source=ilike.*unicorn.roadmap*&order=created_at.desc&limit=1&select=content,memory_type,source,importance,created_at`,
       method: 'GET',
       headers: {
-        'apikey': SUPABASE_KEY,
-        'Authorization': 'Bearer ' + (SUPABASE_KEY)
+        'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+        'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY)
       }
     });
     
@@ -8315,8 +3850,8 @@ async function ERICA_selfBuild() {
         path: `/rest/v1/aba_memory?memory_type=eq.roadmap&order=created_at.desc&limit=3&select=content,memory_type,source,importance,created_at`,
         method: 'GET',
         headers: {
-          'apikey': SUPABASE_KEY,
-          'Authorization': 'Bearer ' + (SUPABASE_KEY)
+          'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+          'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY)
         }
       });
       if (fallbackRes.status === 200) {
@@ -8594,8 +4129,8 @@ async function generateProgressReport(pulseId) {
       path: `/rest/v1/aba_memory?created_at=gte.${twoHoursAgo}&order=created_at.desc&limit=20&select=content,memory_type,source,created_at`,
       method: 'GET',
       headers: {
-        'apikey': SUPABASE_KEY,
-        'Authorization': 'Bearer ' + (SUPABASE_KEY)
+        'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+        'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY)
       }
     });
     
@@ -8637,8 +4172,8 @@ async function generateProgressReport(pulseId) {
       path: `/rest/v1/aba_memory?memory_type=eq.pending_action&select=content,created_at&limit=5`,
       method: 'GET',
       headers: {
-        'apikey': SUPABASE_KEY,
-        'Authorization': 'Bearer ' + (SUPABASE_KEY)
+        'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+        'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY)
       }
     });
     let pendingActions = [];
@@ -8654,14 +4189,10 @@ async function generateProgressReport(pulseId) {
     const reportTime = nowEST.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
     
     // Build report
-    // Get roadmap % from ERICA
-    let roadmapPercent = "?", nextRoadmapItem = "unknown";
-    try { if (AGENTS.ERICA?.execute) { const e = await AGENTS.ERICA.execute("status",{}); roadmapPercent = e.percentComplete||"?"; nextRoadmapItem = (e.nextItem?.item||"").substring(0,60)||"unknown"; }} catch(e){}
-
     const report = {
       subject: `ABA Progress Report — ${reportTime} EST`,
       body: `Progress Report — ${reportTime} EST\n\n` +
-        `UNICORN ROADMAP: ${roadmapPercent}% | Next: ${nextRoadmapItem}\n\nACTIVITY SINCE LAST CHECK-IN:\n` +
+        `ACTIVITY SINCE LAST CHECK-IN:\n` +
         `• OMI Transcripts Captured: ${omiTranscripts}\n` +
         `• Think Tank Sessions: ${thinkTanks}\n` +
         `• Emails Processed: ${emails}\n` +
@@ -8801,41 +4332,16 @@ async function pulseCheck() {
     await healthCheck(pulseId);
     
     // Check 5: Progress Report (every 2 hours)
-    // COST_FIX_20260224: await generateProgressReport(pulseId);
+    await generateProgressReport(pulseId);
     
     // Check 6: ERICA Self-Build (every 30 min if roadmap items exist)
     try {
-      // COST_FIX_20260224: const ericaResult = await ERICA_selfBuild();
+      const ericaResult = await ERICA_selfBuild();
       if (ericaResult.status === 'code_generated') {
         console.log(`[PULSE→ERICA] Self-build completed: ${ericaResult.ericaId}`);
       }
     } catch (ericaErr) {
       console.log('[PULSE→ERICA] Skipped:', ericaErr.message);
-    }
-    
-    // ⬡B:AIR:REACH.HEART:ROUTE:proactive_call:v1.0.0:20260222⬡
-    // Check 7: HEART - Proactive outbound call to Brandon when important events
-    try {
-      const heartResult = await HEART_checkProactive(pulseId);
-      if (heartResult.shouldCall) {
-        console.log('[PULSE→HEART] Triggering proactive call:', heartResult.reason);
-        // Use /api/call/dial endpoint to make the call
-        // LiveKit outbound NOW configured - trunk ST_TXoR3s2TEDfK
-        const callResult = await DIAL_callWithLiveKit('+13363898116', heartResult.message);
-        if (callResult.success) {
-          console.log('[PULSE→HEART] Proactive call initiated:', callResult.conversation_id);
-          // Store that we called so we don't spam
-          await storeToBrain({
-            content: 'HEART PROACTIVE CALL: ' + heartResult.reason + ' | ConvID: ' + (callResult.conversation_id || 'unknown'),
-            memory_type: 'heart_call_log',
-            importance: 7,
-            source: 'heart_proactive_' + Date.now(),
-            tags: ['heart', 'proactive', 'call']
-          });
-        }
-      }
-    } catch (heartErr) {
-      console.log('[PULSE→HEART] Skipped:', heartErr.message);
     }
     
     // Broadcast pulse to Command Center
@@ -8967,7 +4473,7 @@ async function checkEmails(pulseId) {
               hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
               path: '/rest/v1/aba_memory?memory_type=eq.parsed_job&content=ilike.*' + encodeURIComponent(slug.substring(0, 30)) + '*&limit=1',
               method: 'GET',
-              headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + (SUPABASE_KEY) }
+              headers: { 'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY) }
             });
             if (JSON.parse(existing.data.toString()).length > 0) continue;
             
@@ -9003,284 +4509,6 @@ async function checkEmails(pulseId) {
               source: 'iman_idealist_' + new Date().toISOString().split('T')[0],
               tags: ['command_center', 'iman', 'idealist', 'jobs']
             }));
-            
-            // ═══════════════════════════════════════════════════════════════════
-            // ⬡B:REACH.AWA.AUTONOMOUS_PIPELINE:TRIGGER:air.auto_generate:20260228⬡
-            // AIR AUTONOMOUS PIPELINE: Auto-generate cover letters + resumes
-            // This is what Brandon wants - AIR does everything, frontend displays
-            // ═══════════════════════════════════════════════════════════════════
-            console.log('[AIR:AWA] Starting autonomous cover letter + resume generation for ' + seededCount + ' jobs');
-            
-            for (const jobUrl of jobUrls) {
-              try {
-                const slug = jobUrl.split('/').pop();
-                const titleClean = slug.replace(/^[a-f0-9]{20}-/, '').replace(/-/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
-                
-                // 1. Store to awa_jobs table (the real jobs table, not just memory)
-                const jobData = {
-                  user_id: 'brandon', // Default assignee - AIR will reassign if needed
-                  company_name: 'Via Idealist', // Will be updated when scraped
-                  job_title: titleClean,
-                  job_url: jobUrl,
-                  source: 'idealist',
-                  status: 'saved',
-                  priority: 5,
-                  notes: 'Auto-seeded from Idealist email: ' + subject
-                };
-                
-                const jobResult = await httpsRequest({
-                  hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-                  path: '/rest/v1/awa_jobs',
-                  method: 'POST',
-                  headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=representation' }
-                }, JSON.stringify(jobData));
-                
-                const savedJob = JSON.parse(jobResult.data.toString());
-                const jobId = savedJob[0]?.id;
-                
-                if (!jobId) {
-                  console.log('[AIR:AWA] Failed to save job to awa_jobs:', titleClean);
-                  continue;
-                }
-                
-                console.log('[AIR:AWA] Saved job to awa_jobs:', jobId, titleClean);
-                
-                // 2. Match job to team member using JOBA's rules from aba_agent_jds (FCW approach)
-                // Load JOBA JD which contains the team matching rules
-                let jobaRules = '';
-                try {
-                  const jobaJdResult = await httpsRequest({
-                    hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-                    path: '/rest/v1/aba_agent_jds?agent_id=eq.JOBA&select=responsibilities',
-                    method: 'GET',
-                    headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
-                  });
-                  const jobaData = JSON.parse(jobaJdResult.data.toString());
-                  jobaRules = jobaData[0]?.responsibilities || '';
-                } catch (e) {
-                  console.log('[AIR:AWA] Could not load JOBA JD:', e.message);
-                }
-                
-                // Use LLM to decide team member assignment based on JOBA rules
-                let assignedTo = 'brandon'; // Default fallback
-                try {
-                  const matchPrompt = `You are JOBA (Job Opportunity Bot Assistant). Given a job title, determine which team member it fits best.
-
-TEAM MATCHING RULES (from your JD):
-${jobaRules || 'BRANDON & ERIC (shared): Executive Director, CDO, VP, part-time dev over $50/hr - MUST BE REMOTE. GMG: Consultant, Contractor roles. BJ: ALL Director of Development roles, Marketing, Communications. CJ & VANTE (shared): Development Manager, Coordinator, Grant Writer. DWAYNE: Finance, Accounting, Dev Ops, Admin roles.'}
-
-AVAILABLE TEAM:
-- brandon (Executive Director, CDO, VP - shares list with Eric, REMOTE ONLY)
-- eric (Executive Director, CDO, VP - shares list with Brandon, REMOTE ONLY)
-- gmg (Consultant, Contractor, Fractional leadership)
-- bj (ALL Director of Development roles, Marketing, Communications)
-- cj (Development Manager, Coordinator, Grant Writer - shares with Vante)
-- vante (Development Manager, Coordinator, Grant Writer - shares with CJ)
-- dwayne (Finance, Accounting, Dev Ops, Admin)
-
-JOB TITLE: ${titleClean}
-
-Respond with ONLY the lowercase team member id that fits best (brandon, eric, gmg, bj, cj, vante, or dwayne). For Executive/CDO/VP roles respond with brandon. Nothing else.`;
-
-                  const matchResult = await httpsRequest({
-                    hostname: 'api.anthropic.com',
-                    path: '/v1/messages',
-                    method: 'POST',
-                    headers: {
-                      'x-api-key': process.env.ANTHROPIC_API_KEY,
-                      'anthropic-version': '2023-06-01',
-                      'Content-Type': 'application/json'
-                    }
-                  }, JSON.stringify({
-                    model: 'claude-3-haiku-20240307',
-                    max_tokens: 20,
-                    messages: [{ role: 'user', content: matchPrompt }]
-                  }));
-
-                  const matchData = JSON.parse(matchResult.data.toString());
-                  const suggested = (matchData.content?.[0]?.text || '').toLowerCase().trim();
-                  if (['brandon', 'eric', 'bj', 'cj', 'vante', 'dwayne'].includes(suggested)) {
-                    assignedTo = suggested;
-                  }
-                  console.log('[AIR:AWA] JOBA matched job to:', assignedTo, '(LLM decision)');
-                } catch (matchErr) {
-                  console.log('[AIR:AWA] Match error, defaulting to brandon:', matchErr.message);
-                }
-                
-                // Update job assignment
-                await httpsRequest({
-                  hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-                  path: '/rest/v1/awa_jobs?id=eq.' + jobId,
-                  method: 'PATCH',
-                  headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json' }
-                }, JSON.stringify({ user_id: assignedTo }));
-                
-                console.log('[AIR:AWA] Assigned job to:', assignedTo);
-                
-                // 3. Get team member profile
-                const profile = TEAM_PROFILES[assignedTo] || TEAM_PROFILES.brandon;
-                
-                // Skip if profile is blank
-                if (!profile.experience || profile.experience.length < 10) {
-                  console.log('[AIR:AWA] Skipping cover letter - profile blank for:', assignedTo);
-                  continue;
-                }
-                
-                // 4. Auto-generate cover letter via internal call
-                const coverLetterPrompt = `You are JOBA (Job Application Agent) generating a cover letter for ${profile.name}.
-
-CANDIDATE PROFILE:
-Name: ${profile.name}
-Title: ${profile.title}
-Experience: ${profile.experience}
-Skills: ${profile.skills.join(', ')}
-Key Achievements: ${profile.achievements.join('; ')}
-Personal Hook: ${profile.personalHook}
-Closing Style: ${profile.closingStyle}
-
-COMPANY: Via Idealist (auto-seeded)
-JOB: ${titleClean}
-URL: ${jobUrl}
-
-WRITING STANDARDS (MANDATORY):
-- NO em dashes ever
-- NO choppy tech bro sentences
-- NO "I would be happy to" or "I am excited to apply"
-- NO corporate jargon
-- Write like a warm, confident professional
-- Use natural contractions
-- Be specific about achievements with numbers
-- Keep to ONE PAGE (3 paragraphs max)
-
-Generate a compelling cover letter:`;
-
-                const claudeResult = await httpsRequest({
-                  hostname: 'api.anthropic.com',
-                  path: '/v1/messages',
-                  method: 'POST',
-                  headers: {
-                    'x-api-key': process.env.ANTHROPIC_API_KEY,
-                    'anthropic-version': '2023-06-01',
-                    'Content-Type': 'application/json'
-                  }
-                }, JSON.stringify({
-                  model: 'claude-3-haiku-20240307', // Use Haiku for speed in autonomous mode
-                  max_tokens: 1500,
-                  messages: [{ role: 'user', content: coverLetterPrompt }]
-                }));
-
-                const claudeData = JSON.parse(claudeResult.data.toString());
-                const coverLetterContent = claudeData.content?.[0]?.text || '';
-                
-                if (coverLetterContent.length > 100) {
-                  // Store cover letter
-                  await httpsRequest({
-                    hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-                    path: '/rest/v1/awa_cover_letters',
-                    method: 'POST',
-                    headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' }
-                  }, JSON.stringify({
-                    user_id: assignedTo,
-                    job_id: jobId,
-                    content: coverLetterContent,
-                    tone: 'professional',
-                    generated_by: 'JOBA-AUTO',
-                    status: 'draft'
-                  }));
-                  console.log('[AIR:AWA] Auto-generated cover letter for:', profile.name, '-', titleClean);
-                }
-                
-                // 5. Auto-generate resume
-                const resumePrompt = `You are JOBA generating a tailored resume for ${profile.name}.
-
-CANDIDATE:
-Name: ${profile.name}
-Title: ${profile.title}
-Email: ${profile.email}
-Phone: ${profile.phone}
-Location: ${profile.location}
-Experience: ${profile.experience}
-Skills: ${profile.skills.join(', ')}
-Achievements: ${profile.achievements.join('; ')}
-Education: ${profile.education}
-
-TARGET ROLE: ${titleClean}
-
-Generate a ONE PAGE tailored resume in this format:
-
-${profile.name.toUpperCase()}
-${profile.email} | ${profile.phone} | ${profile.location}
-
-PROFESSIONAL SUMMARY
-[2-3 sentences for this role]
-
-EXPERIENCE
-[Most relevant positions with achievements]
-
-EDUCATION
-${profile.education}
-
-SKILLS
-[Most relevant skills]
-
-Write the resume:`;
-
-                const resumeResult = await httpsRequest({
-                  hostname: 'api.anthropic.com',
-                  path: '/v1/messages',
-                  method: 'POST',
-                  headers: {
-                    'x-api-key': process.env.ANTHROPIC_API_KEY,
-                    'anthropic-version': '2023-06-01',
-                    'Content-Type': 'application/json'
-                  }
-                }, JSON.stringify({
-                  model: 'claude-3-haiku-20240307',
-                  max_tokens: 2000,
-                  messages: [{ role: 'user', content: resumePrompt }]
-                }));
-
-                const resumeData = JSON.parse(resumeResult.data.toString());
-                const resumeContent = resumeData.content?.[0]?.text || '';
-                
-                if (resumeContent.length > 100) {
-                  // Store resume
-                  await httpsRequest({
-                    hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-                    path: '/rest/v1/awa_resumes',
-                    method: 'POST',
-                    headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' }
-                  }, JSON.stringify({
-                    user_id: assignedTo,
-                    name: 'Resume for ' + titleClean + ' - AUTO',
-                    content: resumeContent,
-                    target_role: titleClean,
-                    keywords: profile.skills
-                  }));
-                  console.log('[AIR:AWA] Auto-generated resume for:', profile.name, '-', titleClean);
-                }
-                
-                // 6. Log to Command Center
-                await httpsRequest({
-                  hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-                  path: '/rest/v1/aba_memory',
-                  method: 'POST',
-                  headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' }
-                }, JSON.stringify({
-                  content: '[COMMAND_CENTER] JOBA*AIR*auto_generated: Cover letter + resume for ' + profile.name + ' - ' + titleClean,
-                  memory_type: 'system',
-                  categories: ['command_center', 'joba', 'awa', 'automated'],
-                  importance: 7, is_system: true,
-                  source: 'joba_auto_' + new Date().toISOString().split('T')[0],
-                  tags: ['command_center', 'joba', 'cover_letter', 'resume', 'auto']
-                }));
-                
-              } catch (autoGenErr) {
-                console.error('[AIR:AWA] Auto-gen error for job:', autoGenErr.message);
-              }
-            }
-            
-            console.log('[AIR:AWA] Autonomous pipeline complete');
           }
         } catch (idealistErr) {
           console.error('[PULSE:IMAN] Idealist parse error:', idealistErr.message);
@@ -9309,8 +4537,8 @@ async function checkDeadlines(pulseId) {
       path: '/rest/v1/aba_memory?memory_type=eq.parsed_job&order=created_at.desc&limit=50',
       method: 'GET',
       headers: {
-        'apikey': SUPABASE_KEY,
-        'Authorization': 'Bearer ' + (SUPABASE_KEY)
+        'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+        'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY)
       }
     });
     
@@ -9350,8 +4578,8 @@ async function checkDeadlines(pulseId) {
       path: '/rest/v1/aba_memory?memory_type=eq.pending_call&order=created_at.asc&limit=10',
       method: 'GET',
       headers: {
-        'apikey': SUPABASE_KEY,
-        'Authorization': 'Bearer ' + (SUPABASE_KEY)
+        'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+        'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY)
       }
     });
     
@@ -9404,8 +4632,8 @@ async function checkPendingActions(pulseId) {
       path: '/rest/v1/aba_memory?memory_type=eq.pending_action&order=importance.desc&limit=10',
       method: 'GET',
       headers: {
-        'apikey': SUPABASE_KEY,
-        'Authorization': 'Bearer ' + (SUPABASE_KEY)
+        'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+        'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY)
       }
     });
     
@@ -9625,98 +4853,41 @@ async function logActivityToBrain(activity) {
 // SPURT 7: SAGE INDEXER - ACL tag search and navigation
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// ⬡B:REACH.SAGE.WEB_FALLBACK:FIX:perplexity_fallback:20260222⬡
-// SAGE with web search fallback when brain returns empty
-async function SAGE_search(query, options = {}) {
+async function SAGE_search(query) {
   console.log(`[SAGE] Searching: "${query}"`);
-  const { forceWeb = false, includeWeb = false } = options;
   
-  let brainResults = [];
-  
-  // STEP 1: Search brain first (unless forceWeb)
-  if (!forceWeb) {
-    try {
-      const contentSearch = await httpsRequest({
-        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-        path: `/rest/v1/aba_memory?content=ilike.*${encodeURIComponent(query)}*&order=importance.desc&limit=20`,
-        method: 'GET',
-        headers: {
-          'apikey': SUPABASE_KEY,
-          'Authorization': 'Bearer ' + (SUPABASE_KEY)
-        }
-      });
-      
-      const results = JSON.parse(contentSearch.data.toString()) || [];
-      brainResults = results.map(r => {
-        const aclMatch = (r.content || '').match(/⬡B:[^⬡]+⬡/g) || [];
-        return {
-          id: r.id,
-          content: r.content?.substring(0, 200),
-          acl_tags: aclMatch,
-          memory_type: r.memory_type,
-          importance: r.importance,
-          source: 'brain'
-        };
-      });
-      console.log(`[SAGE] Brain found ${brainResults.length} results`);
-    } catch (e) {
-      console.error('[SAGE] Brain search error:', e.message);
-    }
-  }
-  
-  // STEP 2: Web search fallback if brain empty OR includeWeb requested
-  const needsWeb = forceWeb || includeWeb || brainResults.length === 0;
-  const webKeywords = ['current', 'latest', 'today', 'news', 'price', 'weather', 'score', 'who is', 'what happened'];
-  const queryNeedsWeb = webKeywords.some(k => query.toLowerCase().includes(k));
-  
-  let webResults = [];
-  if (needsWeb || queryNeedsWeb) {
-    console.log('[SAGE] Triggering web search fallback via Perplexity...');
-    try {
-      const PERPLEXITY_KEY = process.env.PERPLEXITY_API_KEY;
-      if (PERPLEXITY_KEY) {
-        const webSearch = await httpsRequest({
-          hostname: 'api.perplexity.ai',
-          path: '/chat/completions',
-          method: 'POST',
-          headers: {
-            'Authorization': 'Bearer ' + PERPLEXITY_KEY,
-            'Content-Type': 'application/json'
-          }
-        }, JSON.stringify({
-          model: 'sonar',  // FIXED: was llama-3.1-sonar-small-128k-online (deprecated)
-          messages: [
-            { role: 'system', content: 'You are a research assistant. Provide factual, concise answers with sources.' },
-            { role: 'user', content: query }
-          ],
-          max_tokens: 500
-        }));
-        
-        const webData = JSON.parse(webSearch.data.toString());
-        const webAnswer = webData.choices?.[0]?.message?.content || '';
-        if (webAnswer) {
-          webResults.push({
-            id: 'web_' + Date.now(),
-            content: webAnswer.substring(0, 500),
-            acl_tags: [],
-            memory_type: 'web_search',
-            importance: 8,
-            source: 'perplexity'
-          });
-          console.log('[SAGE] Web search returned result');
-        }
-      } else {
-        console.log('[SAGE] No Perplexity API key, skipping web fallback');
+  try {
+    // Search by content
+    const contentSearch = await httpsRequest({
+      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+      path: `/rest/v1/aba_memory?content=ilike.*${encodeURIComponent(query)}*&order=importance.desc&limit=20`,
+      method: 'GET',
+      headers: {
+        'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+        'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY)
       }
-    } catch (e) {
-      console.error('[SAGE] Web search error:', e.message);
-    }
+    });
+    
+    const results = JSON.parse(contentSearch.data.toString()) || [];
+    
+    // Parse ACL tags from results
+    const aclTagged = results.map(r => {
+      const aclMatch = (r.content || '').match(/⬡B:[^⬡]+⬡/g) || [];
+      return {
+        id: r.id,
+        content: r.content?.substring(0, 200),
+        acl_tags: aclMatch,
+        memory_type: r.memory_type,
+        importance: r.importance
+      };
+    });
+    
+    console.log(`[SAGE] Found ${aclTagged.length} results`);
+    return aclTagged;
+  } catch (e) {
+    console.error('[SAGE] Search error:', e.message);
+    return [];
   }
-  
-  // Combine results: brain first, web second
-  const combined = [...brainResults, ...webResults];
-  console.log(`[SAGE] Total results: ${combined.length} (brain: ${brainResults.length}, web: ${webResults.length})`);
-  return combined;
 }
 
 async function SAGE_indexACL() {
@@ -9729,8 +4900,8 @@ async function SAGE_indexACL() {
       path: '/rest/v1/aba_memory?content=ilike.*⬡B:*&limit=500',
       method: 'GET',
       headers: {
-        'apikey': SUPABASE_KEY,
-        'Authorization': 'Bearer ' + (SUPABASE_KEY)
+        'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+        'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY)
       }
     });
     
@@ -9769,10 +4940,6 @@ async function IMAN_draftEmail(context) {
   console.log(`[IMAN] Drafting email to ${to} regarding "${regarding}"`);
   
   const prompt = `You are IMAN (Inbox Management Agent Navigator), drafting a professional email.
-
-` + (STARTUP_WRITING_STANDARDS || "") + `
-
-CRITICAL: Follow all writing standards above. No em dashes. Warm greeting (Hi/Hey). No CTA endings.
 
 TO: ${to}
 REGARDING: ${regarding}
@@ -9849,8 +5016,8 @@ async function IMAN_sendApprovedEmail(draftId) {
       path: `/rest/v1/aba_memory?id=eq.${draftId}`,
       method: 'GET',
       headers: {
-        'apikey': SUPABASE_KEY,
-        'Authorization': 'Bearer ' + (SUPABASE_KEY)
+        'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+        'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY)
       }
     });
     
@@ -9929,8 +5096,8 @@ async function registerDevice(deviceInfo) {
       path: `/rest/v1/aba_memory?memory_type=eq.device_registry&content=ilike.*${deviceId}*`,
       method: 'GET',
       headers: {
-        'apikey': SUPABASE_KEY,
-        'Authorization': 'Bearer ' + (SUPABASE_KEY)
+        'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+        'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY)
       }
     });
     
@@ -9996,8 +5163,8 @@ async function getActiveDevices(userId) {
       path: `/rest/v1/aba_memory?memory_type=eq.device_registry&order=updated_at.desc`,
       method: 'GET',
       headers: {
-        'apikey': SUPABASE_KEY,
-        'Authorization': 'Bearer ' + (SUPABASE_KEY)
+        'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+        'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY)
       }
     });
     
@@ -10031,423 +5198,7 @@ async function AIR_DISPATCH(lukeAnalysis, judeResult, callerIdentity) {
   console.log('[AIR DISPATCH] Checking if agents can handle this...');
   
   const query = (lukeAnalysis?.raw || '').toLowerCase();
-  console.log("[AIR DISPATCH] Query received:", query);
   const intent = lukeAnalysis.intent;
-  
-  // ⬡B:AIR:GATEKEEPER:phone_unknown:20260226⬡
-  // GATEKEEPER: For phone calls from unknown callers, don't give access to anything
-  // Ask for identification first
-  const isInboundPhone = callerIdentity?.source === 'twilio_elevenlabs' || 
-                      callerIdentity?.channel === 'phone_inbound' ||
-                      callerIdentity?.source?.includes('twilio');
-  const isUnknownCaller = !callerIdentity?.trust || 
-                          ['T1', 'T2', 'T3', 'T4'].includes(callerIdentity?.trust);
-  
-  if (isInboundPhone && isUnknownCaller) {
-    console.log('[AIR DISPATCH] ★ GATEKEEPER: Unknown caller on phone - requesting ID');
-    // Don't give access to email, calendar, or personal data
-    // Just be a polite gatekeeper
-    const greetings = [
-      "Good day. This is ABA, Brandon's personal assistant. May I ask who's calling?",
-      "Hello, you've reached Brandon Pierce's office. Who may I say is calling?",
-      "Hi there. I'm ABA, assisting Brandon. Could you tell me your name and what this is regarding?"
-    ];
-    const greeting = greetings[Math.floor(Math.random() * greetings.length)];
-    return { handled: true, agent: 'SHADOW', data: greeting, type: 'gatekeeper' };
-  }
-  
-  // ⬡B:OMI:WAKEWORD:HANDLER:20260226⬡
-  // OMI WAKEWORD: Strip "Hey ABA" and process the actual command
-  // Don't let it fall through to brain search for old transcripts
-  const isOMI = callerIdentity?.source === 'omi' || 
-                callerIdentity?.channel === 'wakeword' ||
-                callerIdentity?.source?.includes('omi');
-  
-  if (isOMI && query.includes('hey aba')) {
-    console.log('[AIR DISPATCH] ★ OMI WAKEWORD - Processing command');
-    // Strip the wake word and extract the actual command
-    let command = query.replace(/hey aba/gi, '').trim();
-    command = command.replace(/^[,\s]+/, '').trim(); // Clean up leading punctuation
-    
-    console.log('[OMI] Extracted command:', command);
-    
-    // Check what kind of command this is
-    if (command.includes('remind') || command.includes('remember') || command.includes('add') || command.includes('note')) {
-      // Store as a reminder/note in brain
-      const noteContent = command.replace(/remind me to|remember to|add|note that/gi, '').trim();
-      try {
-        await fetch('https://htlxjkbrstpwwtzsbyvb.supabase.co/rest/v1/aba_memory', {
-          method: 'POST',
-          headers: { 
-            'apikey': SUPABASE_KEY, 
-            'Authorization': `Bearer ${SUPABASE_KEY}`,
-            'Content-Type': 'application/json',
-            'Prefer': 'return=minimal'
-          },
-          body: JSON.stringify({
-            memory_type: 'reminder',
-            source: '⬡B:OMI:REMINDER:' + Date.now() + '⬡',
-            content: noteContent,
-            importance: 7
-          })
-        });
-        return { handled: true, agent: 'MEMOS', data: `Got it. I'll remember: "${noteContent}"`, type: 'reminder' };
-      } catch (e) {
-        console.log('[OMI] Reminder save error:', e.message);
-        return { handled: true, agent: 'MEMOS', data: `I heard: "${noteContent}". I'll keep that in mind.`, type: 'reminder' };
-      }
-    }
-    
-    // If not a reminder, update the query to be the clean command
-    // and let it fall through to other priority handlers
-    lukeAnalysis.raw = command;
-  }
-  
-  // ═══════════════════════════════════════════════════════════════════════════════
-  // ⬡B:AIR:DISPATCH:PRIORITY:email_sports_first:20260226⬡
-  // PRIORITY DISPATCHES - Check FIRST before anything else
-  // These are common user requests that should NOT fall through to brain search
-  // ═══════════════════════════════════════════════════════════════════════════════
-  
-  // PRIORITY 1: EMAIL READ - "email", "inbox", "mail", "messages"
-  // ⬡B:IMAN:FIX:exclude_send_keywords:20260226⬡
-  const emailReadKeywords = ['email', 'inbox', 'mail', 'messages', 'unread'];
-  const emailSendKeywords = ['send', 'write', 'draft', 'saying', 'say', 'tell'];
-  const isEmailRead = emailReadKeywords.some(kw => query.includes(kw)) && 
-                      !emailSendKeywords.some(kw => query.includes(kw));
-  
-  if (isEmailRead) {
-    console.log('[AIR DISPATCH] ★ PRIORITY: EMAIL READ - DIRECT FETCH');
-    try {
-      // ⬡B:IMAN:NUCLEAR_FIX:direct_fetch:20260226⬡
-      // BYPASS ALL COMPLEXITY - Just fetch email directly
-      const emailUrl = 'https://abacia-services.onrender.com/api/email/inbox?days=7&limit=10';
-      console.log('[AIR DISPATCH] Fetching:', emailUrl);
-      
-      const emailResponse = await fetch(emailUrl);
-      const emailData = await emailResponse.json();
-      
-      console.log('[AIR DISPATCH] Email response:', JSON.stringify({success: emailData?.success, count: emailData?.messages?.length}));
-      
-      if (emailData.success && emailData.messages && emailData.messages.length > 0) {
-        const emails = emailData.messages;
-        const latest = emails[0];
-        const sender = latest.fromName || latest.from || 'Someone';
-        const subject = latest.subject || 'No subject';
-        const unreadCount = emails.filter(e => e.unread).length;
-        
-        let summary = `You have ${emails.length} emails in the last 7 days`;
-        if (unreadCount > 0) summary += ` (${unreadCount} unread)`;
-        summary += `. The most recent is from ${sender}: "${subject}".`;
-        
-        return { handled: true, agent: 'IMAN', data: summary, type: 'email', count: emails.length };
-      }
-      
-      return { handled: true, agent: 'IMAN', data: 'No recent emails found.', type: 'email', count: 0 };
-    } catch (e) {
-      console.log('[AIR DISPATCH] Email fetch error:', e.message);
-    }
-  }
-  
-  // PRIORITY 2: EMAIL SEND - "send email to X saying Y" or "email claudette saying..."
-  // ⬡B:IMAN_SEND:FIX:contact_lookup:20260226⬡
-  const isEmailSend = (query.includes('send') || query.includes('write') || query.includes('email')) && 
-                      (query.includes('saying') || query.includes('say') || query.includes('tell') || query.includes('about'));
-  if (isEmailSend) {
-    console.log('[AIR DISPATCH] PRIORITY: EMAIL SEND');
-    try {
-      // Multiple regex patterns to catch different phrasings
-      let emailMatch = query.match(/(?:send email to|email to|email)\s+([^\s]+)\s+(?:and\s+)?(?:say|saying|tell|about)\s+(.+)/i);
-      if (!emailMatch) emailMatch = query.match(/(?:email|message|send to)\s+([^\s]+)\s+(.+)/i);
-      
-      if (emailMatch) {
-        let targetName = emailMatch[1].replace(/[,.:;!?]/g, ''); // Clean punctuation
-        let targetEmail = targetName.includes('@') ? targetName : null;
-        const messageText = emailMatch[2].trim();
-        
-        console.log('[IMAN_SEND] Target:', targetName, '| Has @:', !!targetEmail, '| Message:', messageText.substring(0, 50));
-        
-        // If no @ sign, look up contact in brain
-        if (!targetEmail) {
-          console.log('[IMAN_SEND] Looking up contact:', targetName);
-          const contactRes = await fetch(`https://htlxjkbrstpwwtzsbyvb.supabase.co/rest/v1/aba_memory?or=(memory_type.eq.ham_identity,memory_type.eq.contact)&content=ilike.*${encodeURIComponent(targetName)}*&limit=5`,
-            { headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } });
-          const contacts = await contactRes.json();
-          console.log('[IMAN_SEND] Found', contacts?.length || 0, 'contacts');
-          
-          if (contacts && contacts.length > 0) {
-            for (const contact of contacts) {
-              // Try multiple email patterns
-              const emailPatterns = [
-                /Email:\s*([\w.+-]+@[\w.-]+\.\w+)/i,
-                /email[:\s]*([\w.+-]+@[\w.-]+\.\w+)/i,
-                /([\w.+-]+@[\w.-]+\.\w+)/
-              ];
-              for (const pattern of emailPatterns) {
-                const m = contact.content.match(pattern);
-                if (m) {
-                  targetEmail = m[1];
-                  console.log('[IMAN_SEND] Found email:', targetEmail, 'from contact');
-                  break;
-                }
-              }
-              if (targetEmail) break;
-            }
-          }
-        }
-        
-        if (targetEmail) {
-          const sendRes = await fetch('https://abacia-services.onrender.com/api/email/send', {
-            method: 'POST', 
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-              to: targetEmail, 
-              subject: 'Message from ' + (callerIdentity?.name || 'Brandon'), 
-              body: messageText 
-            })
-          });
-          const sendData = await sendRes.json();
-          if (sendData.success) {
-            return { handled: true, agent: 'IMAN_SEND', data: `Email sent to ${targetName} (${targetEmail}).`, type: 'email_send' };
-          }
-        }
-        return { handled: true, agent: 'IMAN_SEND', data: `Could not find email for ${targetName}. Try saying the full email address.`, type: 'email_send' };
-      }
-    } catch (e) { console.log('[AIR DISPATCH] IMAN_SEND error:', e.message); }
-  }
-  // PRIORITY 3: SPORTS - "nba", "nfl", "score", "game", "sports"
-  const sportsKeywords = ['nba', 'nfl', 'nhl', 'mlb', 'score', 'scores', 'game', 'games', 'sports', 'lakers', 'warriors', 'celtics', 'knicks', 'heat', 'bulls', 'playoffs', 'standings'];
-  const isSports = sportsKeywords.some(kw => query.includes(kw));
-  
-  if (isSports) {
-    console.log('[AIR DISPATCH] ★ PRIORITY: SPORTS');
-    try {
-      const result = await PLAY_getScores(query);
-      if (result) {
-        return { handled: true, agent: 'PLAY', data: result, type: 'sports' };
-      }
-    } catch (e) {
-      console.log('[AIR DISPATCH] PLAY error:', e.message);
-    }
-  }
-  
-  // PRIORITY 4: WEATHER - "weather", "temperature", "forecast"
-  const weatherKeywords = ['weather', 'temperature', 'forecast', 'rain', 'sunny', 'cold', 'hot'];
-  const isWeather = weatherKeywords.some(kw => query.includes(kw));
-  
-  if (isWeather) {
-    console.log('[AIR DISPATCH] ★ PRIORITY: WEATHER');
-    try {
-      let location = callerIdentity?.name === 'Brandon' ? 'Greensboro, NC' : lukeAnalysis.raw;
-      const result = await CLIMATE_getWeather(location);
-      if (result) {
-        return { handled: true, agent: 'CLIMATE', data: result, type: 'weather' };
-      }
-    } catch (e) {
-      console.log('[AIR DISPATCH] CLIMATE error:', e.message);
-    }
-  }
-  
-  // ⬡B:DIAL:PRIORITY:phone_call:20260226⬡
-  // PRIORITY 5: PHONE CALL - "call mom", "phone BJ", "dial eric"
-  const callKeywords = ['call', 'phone', 'dial', 'ring'];
-  const isPhoneCall = callKeywords.some(kw => query.includes(kw)) && 
-                      !query.includes('email') && !query.includes('recall') && !query.includes('called');
-  
-  if (isPhoneCall) {
-    console.log('[AIR DISPATCH] ★ PRIORITY: PHONE CALL (DIAL)');
-    try {
-      // ⬡B:DIAL:FIX:regex_trailing:20260226⬡
-      // Extract who to call: "call mom", "call BJ", "phone eric"
-      // Stop at common trailing words: right, now, immediately, and, to, please, asap
-      const stopWords = ['right', 'now', 'immediately', 'and', 'to', 'please', 'asap', 'at', 'on', 'about', 'saying', 'tell'];
-      let callMatch = query.match(/(?:call|phone|dial|ring)\s+([a-zA-Z]+(?:\s+[a-zA-Z]+)?)/i);
-      if (callMatch) {
-        let targetName = callMatch[1].replace(/[,.:;!?]/g, '').trim();
-        
-        // Remove stop words from end of name
-        const words = targetName.split(/\s+/);
-        while (words.length > 0 && stopWords.includes(words[words.length - 1].toLowerCase())) {
-          words.pop();
-        }
-        targetName = words.join(' ') || callMatch[1].split(/\s+/)[0]; // Fallback to first word
-        
-        console.log('[DIAL] Target name:', targetName);
-        
-        // ⬡B:DIAL:FIX:call_me:20260226⬡
-        // Handle "call me" - use the caller's identity
-        if (targetName.toLowerCase() === 'me' || targetName.toLowerCase() === 'myself') {
-          targetName = callerIdentity?.name || 'Brandon';
-          console.log('[DIAL] "call me" detected - using caller identity:', targetName);
-        }
-        
-        // Look up contact in brain
-        const contactRes = await fetch(`https://htlxjkbrstpwwtzsbyvb.supabase.co/rest/v1/aba_memory?or=(memory_type.eq.ham_identity,memory_type.eq.contact,memory_type.eq.brandon_family)&content=ilike.*${encodeURIComponent(targetName)}*&limit=5`,
-          { headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } });
-        const contacts = await contactRes.json();
-        console.log('[DIAL] Found', contacts?.length || 0, 'contacts');
-        
-        let phoneNumber = null;
-        let contactFullName = targetName;
-        
-        if (contacts && contacts.length > 0) {
-          for (const contact of contacts) {
-            // Try multiple phone patterns
-            const phonePatterns = [
-              /Phone:\s*(\+?[\d\s()-]+)/i,
-              /phone[:\s]*(\+?[\d\s()-]+)/i,
-              /(\+1[\d]{10})/,
-              /(\(\d{3}\)\s*\d{3}[-\s]?\d{4})/
-            ];
-            for (const pattern of phonePatterns) {
-              const m = contact.content.match(pattern);
-              if (m) {
-                phoneNumber = m[1].replace(/[\s()-]/g, '');
-                // Try to get full name
-                const nameMatch = contact.content.match(/Name:\s*([^\n|]+)/i);
-                if (nameMatch) contactFullName = nameMatch[1].trim();
-                console.log('[DIAL] Found phone:', phoneNumber, 'for', contactFullName);
-                break;
-              }
-            }
-            if (phoneNumber) break;
-          }
-        }
-        
-        if (phoneNumber) {
-          // Extract message if any: "call mom and tell her I love her"
-          const messageMatch = query.match(/(?:and|to)\s+(?:say|tell|let.*know)\s+(.+)/i);
-          const message = messageMatch ? messageMatch[1] : `Hi, this is a call from Brandon via ABA.`;
-          
-          // Trigger DIAL
-          const dialResult = await DIAL_callWithElevenLabs(phoneNumber, message, { callerName: callerIdentity?.name || 'Brandon', targetName: contactFullName });
-          if (dialResult && dialResult.success) {
-            return { handled: true, agent: 'DIAL', data: `Calling ${contactFullName} now...`, type: 'phone_call' };
-          } else {
-            return { handled: true, agent: 'DIAL', data: `I'll try to reach ${contactFullName} at ${phoneNumber}.`, type: 'phone_call' };
-          }
-        } else {
-          return { handled: true, agent: 'DIAL', data: `I couldn't find a phone number for ${targetName}. Can you tell me their number?`, type: 'phone_call' };
-        }
-      } else {
-        // ⬡B:DIAL:FIX:no_match:20260226⬡
-        // callMatch failed - still return handled to prevent fallthrough
-        return { handled: true, agent: 'DIAL', data: `Who would you like me to call?`, type: 'phone_call' };
-      }
-    } catch (e) {
-      console.log('[AIR DISPATCH] DIAL error:', e.message);
-      // ⬡B:DIAL:FIX:catch_return:20260226⬡
-      // Return handled even on error to prevent falling through to ABACIA_AIR
-      return { handled: true, agent: 'DIAL', data: `I had trouble placing that call. Can you try again?`, type: 'phone_call' };
-    }
-  }
-  
-  // ═══════════════════════════════════════════════════════════════════════════════
-  // FORGE DISPATCH - Route 'create agent' requests to FORGE
-  // ⬡B:AIR:FORGE_DISPATCH:CODE:agent_creation_routing:v1.0.0:20260224⬡
-  // ═══════════════════════════════════════════════════════════════════════════════
-  
-  // Check if this is a "create agent" request
-  const createAgentKeywords = ['create agent', 'create a new agent', 'make an agent', 'forge agent', 'new agent called', 'create a security agent', 'create a phishing agent'];
-  const msgLower = (lukeAnalysis.original || lukeAnalysis.raw || query).toLowerCase();
-  const isCreateAgentRequest = createAgentKeywords.some(kw => msgLower.includes(kw));
-  
-  if (isCreateAgentRequest && AGENTS.FORGE && AGENTS.FORGE.canCreate) {
-    console.log('[AIR_DISPATCH] ★★★ DETECTED CREATE AGENT REQUEST - routing to FORGE ★★★');
-    
-    // Extract agent details from message
-    // Pattern: "agent called ACRONYM" or "agent ACRONYM" or "ACRONYM agent"
-    let acronym = null;
-    const patterns = [
-      /agent\s+called\s+([a-z]+)/i,
-      /create\s+(?:a\s+)?(?:new\s+)?(?:security\s+)?agent\s+(?:called\s+)?([a-z]+)/i,
-      /([a-z]+)\s+agent/i,
-      /agent\s+([a-z]+)/i
-    ];
-    
-    for (const pattern of patterns) {
-      const match = msgLower.match(pattern);
-      if (match && match[1] && match[1].length >= 3 && !['the', 'new', 'for', 'and', 'that'].includes(match[1])) {
-        acronym = match[1].toUpperCase();
-        break;
-      }
-    }
-    
-    // Try to extract department from keywords
-    const deptKeywords = {
-      'security': 'SECURITY',
-      'phishing': 'SECURITY', 
-      'malicious': 'SECURITY',
-      'threat': 'SECURITY',
-      'coding': 'CODING',
-      'code': 'CODING',
-      'voice': 'VOICE',
-      'email': 'OUTREACH',
-      'proactive': 'PROACTIVE',
-      'monitor': 'PROACTIVE',
-      'suspicious': 'SECURITY'
-    };
-    let department = 'GENERAL';
-    for (const [kw, dept] of Object.entries(deptKeywords)) {
-      if (msgLower.includes(kw)) {
-        department = dept;
-        break;
-      }
-    }
-    
-    // Generate description from the message
-    const description = msgLower.replace(/create|agent|called|new|please|a|the/gi, '').trim();
-    
-    if (acronym) {
-      // Build full name from context
-      // REQUIRE user to provide full name - do not auto-generate garbage
-      return {
-        handled: true,
-        agent: 'FORGE',
-        data: `❌ Cannot create agent ${acronym}. You must provide a proper full name that spells out the acronym.\n\nExample: If acronym is TIGER, full name should be "Threat Intelligence Guard for Enhanced Response"\n\nTry: "create agent TIGER - Threat Intelligence Guard for Enhanced Response"`,
-        trace: 'AIR*FORGE*NEED_FULLNAME'
-      };
-      
-      console.log(`[AIR_DISPATCH] Calling FORGE.create for: ${acronym} (${department})`);
-      
-      const forgeResult = await AGENTS.FORGE.execute('create', {
-        acronym: acronym,
-        fullName: fullName,
-        department: department,
-        responsibilities: `Agent ${acronym} handles ${department.toLowerCase()} tasks. ${description}`,
-        summonedBy: ['air', 'forge']
-      });
-      
-      if (forgeResult.created) {
-        console.log('[AIR_DISPATCH] ✅ FORGE successfully created agent:', acronym);
-        // Convert object result to nice message string for PAM_filter compatibility
-        const successMessage = `✅ Agent ${forgeResult.newAgent?.acronym || acronym} created successfully!\n\n` +
-          `Full Name: ${forgeResult.newAgent?.fullName || 'N/A'}\n` +
-          `Department: ${forgeResult.newAgent?.department || 'GENERAL'}\n` +
-          `ID: ${forgeResult.newAgent?.id || 'N/A'}\n\n` +
-          `The agent is now registered and callable via /api/v2/agents/${forgeResult.newAgent?.acronym || acronym}/execute`;
-        return { 
-          handled: true, 
-          agent: 'FORGE', 
-          data: successMessage,
-          trace: 'AIR*FORGE*CREATE',
-          forgeResult: forgeResult // Keep raw result for reference
-        };
-      } else {
-        console.log('[AIR_DISPATCH] ⚠️ FORGE returned:', forgeResult);
-        // Return error message as string
-        const errorMessage = `❌ Could not create agent: ${forgeResult.message || 'Unknown error'}`;
-        return {
-          handled: true,
-          agent: 'FORGE',
-          data: errorMessage,
-          trace: 'AIR*FORGE*ERROR'
-        };
-      }
-    } else {
-      console.log('[AIR_DISPATCH] Could not extract acronym from message');
-    }
-  }
   
   // Check JUDE's findings for relevant agents
   const agentNames = (judeResult?.agents || []).map(a => (a.name || '').toLowerCase());
@@ -10455,9 +5206,6 @@ async function AIR_DISPATCH(lukeAnalysis, judeResult, callerIdentity) {
   
   // ⬡B:AIR:REACH.DISPATCH.SHADOW:ROUTE:notes.transcripts.vault:v1.0.0:20260216⬡
   // SHADOW Agent - Meeting notes, transcripts, recordings (L3: Manager, VAULT department)
-  // Check for consent words
-  const consentOnlyMessage = ['yes', 'yeah', 'go ahead', 'sure', 'okay', 'ok', 'consent', 'authorize', 'unlock'].some(w => query === w || query.startsWith(w + ' '));
-
   // This is the consent-based data protection agent
   const needsShadow = query.includes('notes') || 
                       query.includes('transcript') || 
@@ -10466,7 +5214,7 @@ async function AIR_DISPATCH(lukeAnalysis, judeResult, callerIdentity) {
                       query.includes('omi') || 
                       query.includes('otter') || 
                       (query.includes('last') && query.includes('night')) ||
-                      agentNames.includes('shadow') || consentOnlyMessage;
+                      agentNames.includes('shadow');
   
   console.log('[AIR DISPATCH] SHADOW check - needsShadow:', needsShadow, '| query:', query.substring(0, 50));
   
@@ -10480,48 +5228,6 @@ async function AIR_DISPATCH(lukeAnalysis, judeResult, callerIdentity) {
       }
     } catch (e) {
       console.log('[AIR DISPATCH] SHADOW error:', e.message, e.stack);
-    }
-  }
-
-  // ⬡B:AIR:REACH.DISPATCH.IMAN:ROUTE:email:HIGH_PRIORITY:v2.5.0:20260226⬡
-  // IMAN Agent - Email queries - PRIORITY: VERY HIGH - Check BEFORE META/FAMILY
-  // SKIP if this is a SEND command (handled by IMAN_SEND below)
-  const isEmailSendCmd = (query.includes('say') || query.includes('tell')) && query.includes('email');
-  if (!isEmailSendCmd && (query.includes('email') || query.includes('inbox') || query.includes('mail') ||
-      query.includes('unread') || query.includes('messages') || agentNames.includes('iman'))) {
-    console.log('[AIR DISPATCH] → L3: IMAN (Intelligent Mail Agent Nexus) - HIGH PRIORITY');
-    try {
-      const imanResult = await IMAN_readEmails(callerIdentity);
-      if (imanResult && imanResult.allowed) {
-        return { handled: true, agent: 'IMAN', data: imanResult.summary, type: 'email', count: imanResult.count, emails: imanResult.emails };
-      }
-    } catch (e) {
-      console.log('[AIR DISPATCH] IMAN error:', e.message);
-    }
-  }
-
-  
-  // ⬡B:AIR:REACH.DISPATCH.META:ROUTE:self_awareness:v3.0.0:20260221⬡
-  // META/EXTRACT Agent - Self-awareness queries (L3: Intelligence)
-  // PRIORITY: HIGH - Check BEFORE weather/sports/other
-  // Handles: architecture, agent, routing, brain, how does ABA, who handles, etc.
-  const metaKeywords = ['architecture', 'system', 'brain', 'agent', 'agents', 'infrastructure',
-    'routing', 'air', 'aba', 'abacia', 'self', 'herself', 'yourself', 'how does', 'how do you',
-    'what agent', 'which agent', 'who handles', 'your code', 'your architecture', 'your brain',
-    'deployed', 'status', 'health', 'fix yourself', 'portal', 'skin', 'skins', 'endpoints',
-    'department', 'departments', 'roster', 'jd', 'dna', 'trace', 'acl'];
-  
-  const needsMeta = metaKeywords.some(kw => query.includes(kw)) || agentNames.includes('extract');
-  
-  if (needsMeta) {
-    console.log('[AIR DISPATCH] → L3: EXTRACT (Self-Awareness Agent)');
-    try {
-      const extractResult = await EXTRACT_queryBrain(query, callerIdentity);
-      if (extractResult && extractResult.response) {
-        return { handled: true, agent: 'EXTRACT', data: extractResult.response, type: 'meta' };
-      }
-    } catch (e) {
-      console.log('[AIR DISPATCH] EXTRACT error:', e.message);
     }
   }
 
@@ -10545,96 +5251,11 @@ async function AIR_DISPATCH(lukeAnalysis, judeResult, callerIdentity) {
     }
   }
   
-  // ⬡B:AIR:REACH.DISPATCH.FAMILY:ROUTE:personal.family:v1.0.0:20260222⬡
-  // FAMILY/PERSONAL Agent - Family queries MUST be checked BEFORE sports
-  // Handles: kids, children, wife, family, brother, parents, etc.
-  const familyKeywords = ['kids', 'children', 'wife', 'family', 'brother', 'sister', 'parent', 
-    'mom', 'dad', 'husband', 'bethany', 'bailey', 'joshua', 'jeremiah', 'bella', 'bj',
-    'raquel', 'eric', 'spouse', 'child', 'son', 'daughter', 'sibling'];
-  
-  console.log('[AIR DISPATCH] FAMILY CHECK - query:', query);
-  console.log('[AIR DISPATCH] FAMILY CHECK - keywords:', familyKeywords.filter(kw => query.includes(kw)));
-  const needsFamily = familyKeywords.some(kw => query.includes(kw));
-  console.log('[AIR DISPATCH] FAMILY CHECK - needsFamily:', needsFamily);
-  
-  if (needsFamily) {
-    console.log('[AIR DISPATCH] → L3: FAMILY/BRAIN (Personal family query detected)');
-    try {
-      // Force brain search for family data
-      const familyResult = await httpsRequest({
-        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-        path: '/rest/v1/aba_memory?or=(memory_type.eq.brandon_family,memory_type.eq.brandon_context,memory_type.eq.ham_identity)&limit=10',
-        method: 'GET',
-        headers: {
-          'apikey': SUPABASE_ANON,
-          'Authorization': 'Bearer ' + SUPABASE_ANON
-        }
-      });
-      
-      if (familyResult.status === 200) {
-        const familyData = JSON.parse(familyResult.data.toString());
-        if (familyData && familyData.length > 0) {
-          // Build response from family data - prioritize brandon_family type
-          let familyContext = '';
-          
-          // FIRST: Get entries from brandon_family memory type (most specific)
-          const familyTypeEntries = familyData.filter(f => f.memory_type === 'brandon_family');
-          for (const f of familyTypeEntries) {
-            if (f.content && (
-              f.content.toLowerCase().includes('children') ||
-              f.content.toLowerCase().includes('bailey') ||
-              f.content.toLowerCase().includes('joshua') ||
-              f.content.toLowerCase().includes('jeremiah') ||
-              f.content.toLowerCase().includes('bella')
-            )) {
-              familyContext += f.content.substring(0, 300) + '\n';
-            }
-          }
-          
-          // SECOND: If no brandon_family entries, fall back to brandon_context
-          if (familyContext.length === 0) {
-            for (const f of familyData) {
-              if (f.content && (
-                f.content.toLowerCase().includes('children') ||
-                f.content.toLowerCase().includes('kids') ||
-                f.content.toLowerCase().includes('wife bethany') ||
-                f.content.toLowerCase().includes('bailey') ||
-                f.content.toLowerCase().includes('four children')
-              )) {
-                familyContext += f.content.substring(0, 300) + '\n';
-              }
-            }
-          }
-          
-          if (familyContext.length > 0) {
-            console.log('[AIR DISPATCH] Found family data in brain - returning directly');
-            // ⬡B:AIR:REACH.DISPATCH.FAMILY_DIRECT:FIX:return_data:20260222⬡
-            // Return family data DIRECTLY to avoid LLM hallucination
-            return { 
-              handled: true, // CHANGED: Don't let this fall through
-              agent: 'COLE', 
-              data: familyContext.trim(),  // CHANGED: Return as data
-              type: 'family',  // CHANGED: Use family type for direct return
-              injectContext: familyContext
-            };
-          }
-        }
-      }
-    } catch (e) {
-      console.log('[AIR DISPATCH] Family brain search error:', e.message);
-    }
-  }
-  
   // ⬡B:AIR:REACH.DISPATCH.PLAY:ROUTE:sports:v2.4.0:20260214⬡
   // PLAY Agent - Sports queries (L3: Manager, LIFESTYLE department)
-  // NOTE: Only trigger for EXPLICIT sports terms, not generic words
-  const playSportsKeywords = ['score', 'laker', 'lakers', 'dodger', 'dodgers', 'nba', 'nfl', 'mlb', 
-    'sports', 'basketball', 'football', 'baseball', 'soccer', 'hockey', 'standings', 'playoffs'];
-  
-  const needsSports = playSportsKeywords.some(kw => query.includes(kw)) || agentNames.includes('play');
-  
-  // Exclude if family keywords present (family takes priority)
-  if (needsSports && !needsFamily) {
+  if (query.includes('score') || query.includes('laker') || query.includes('game') ||
+      query.includes('win') || query.includes('nba') || query.includes('sports') ||
+      agentNames.includes('play')) {
     console.log('[AIR DISPATCH] → L3: PLAY (Performance and Live Activity Yielder)');
     try {
       const result = await PLAY_getScores(lukeAnalysis.raw);
@@ -10646,23 +5267,21 @@ async function AIR_DISPATCH(lukeAnalysis, judeResult, callerIdentity) {
     }
   }
   
-  // ⬡B:AIR:REACH.DISPATCH.MY_INFO:ROUTE:personal:v1.0.0:20260222⬡
-  // Return personal info when asked "my email", "my phone", "my address"
-  if ((query.includes('my email') || query.includes('my phone') || query.includes('my number')) && 
-      (query.includes('what') || query.includes('address') || query.includes('is'))) {
-    console.log('[AIR DISPATCH] → Personal info query');
-    const info = [];
-    if (callerIdentity?.email) info.push('Your email is ' + callerIdentity.email);
-    if (callerIdentity?.phone) info.push('Your phone is ' + callerIdentity.phone);
-    if (info.length > 0) {
-      return { handled: true, agent: 'HAM', data: info.join('. ') + '.', type: 'personal' };
-    }
-    // If not in callerIdentity, check brain
-    if (query.includes('email') && callerIdentity?.name === 'Brandon') {
-      return { handled: true, agent: 'HAM', data: 'Your email is brandon@globalmajoritygroup.com.', type: 'personal' };
+  // ⬡B:AIR:REACH.DISPATCH.IMAN:ROUTE:email:v2.4.0:20260214⬡
+  // IMAN Agent - Email queries (L3: Manager, EMAIL department)
+  if (query.includes('email') || query.includes('inbox') || query.includes('mail') ||
+      agentNames.includes('iman')) {
+    console.log('[AIR DISPATCH] → L3: IMAN (Intelligent Mail Agent Nexus)');
+    try {
+      const result = await IMAN_readEmails(callerIdentity);
+      if (result && result.allowed) {
+        return { handled: true, agent: 'IMAN', data: result.summary, type: 'email', count: result.count };
+      }
+    } catch (e) {
+      console.log('[AIR DISPATCH] IMAN error:', e.message);
     }
   }
-
+  
   // ⬡B:AIR:REACH.DISPATCH.RADAR:ROUTE:calendar:v2.4.0:20260214⬡
   // RADAR Agent - Calendar queries (L3: Manager, CALENDAR department)
   if (query.includes('calendar') || query.includes('schedule') || query.includes('meeting') ||
@@ -10693,133 +5312,6 @@ async function AIR_DISPATCH(lukeAnalysis, judeResult, callerIdentity) {
     }
   }
   
-  // ⬡B:AIR:REACH.DISPATCH.DIAL:ROUTE:outbound_call:v1.0.0:20260222⬡
-  // DIAL Agent - Outbound calls (L3: Manager, VOICE department)
-  // Triggers on: "call eric", "dial BJ", "phone mom"
-  if ((query.includes('call ') || query.includes('dial ') || query.includes('phone ')) && !query.includes('phone number')) {
-    console.log('[AIR DISPATCH] → L3: DIAL (Outbound Call Agent)');
-    try {
-      // Extract who to call from query
-      // Parse: "call eric", "call eric lane", "call eric lane for me" → extract "eric lane"
-      const callMatch = query.match(/(?:call|dial|phone)\s+([a-zA-Z]+(?:\s+[a-zA-Z]+)?)/i);
-      let targetName = callMatch ? callMatch[1].trim().toLowerCase() : null;
-      // Remove filler words
-      if (targetName) {
-        targetName = targetName.replace(/\b(for|me|real|quick|now|please|right|up)\b/gi, '').trim();
-      }
-      
-      if (targetName) {
-        // Look up contact in HAM identities
-        const hamResult = await httpsRequest({
-          hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-          path: '/rest/v1/aba_memory?memory_type=eq.ham_identity&content=ilike.*' + encodeURIComponent(targetName) + '*&limit=1',
-          method: 'GET',
-          headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON }
-        });
-        
-        if (hamResult.status === 200) {
-          const contacts = JSON.parse(hamResult.data.toString());
-          if (contacts.length > 0) {
-            const phoneMatch = contacts[0].content.match(/Phone:\s*([+\d]+)/);
-            if (phoneMatch) {
-              const targetPhone = phoneMatch[1];
-              console.log('[AIR DISPATCH] DIAL: Found phone for', targetName, ':', targetPhone);
-              const dialResult = await DIAL_callWithLiveKit(targetPhone, firstMessage);
-              if (dialResult.success) {
-                return { handled: true, agent: 'DIAL', data: 'Calling ' + targetName + ' now at ' + targetPhone + '.', type: 'call' };
-              }
-            }
-          }
-        }
-        return { handled: true, agent: 'DIAL', data: 'I could not find a phone number for ' + targetName + '. Can you give me their number?', type: 'call' };
-      }
-    } catch (e) {
-      console.log('[AIR DISPATCH] DIAL error:', e.message);
-    }
-  }
-  
-  // ⬡B:AIR:REACH.DISPATCH.CARA:ROUTE:sms:v1.0.0:20260222⬡
-  // CARA Agent - Send SMS (L3: Manager, SMS department)
-  // Triggers on: "text BJ say whats up", "send sms to mom"
-  if ((query.includes('text ') || query.includes('sms ') || query.includes('message ')) && (query.includes('say') || query.includes('tell') || query.includes('send'))) {
-    console.log('[AIR DISPATCH] → L3: CARA (SMS Agent)');
-    try {
-      // Parse: "text BJ say whats up" or "send sms to mom saying hello"
-      // Parse: "text BJ say whats up" or "text BJ and say yo" → extract name and message
-      const smsMatch = query.match(/(?:text|sms|message)\s+([a-zA-Z]+(?:\s+[a-zA-Z]+)?)(?:\s+and)?\s+(?:say|saying|tell)\s+(.+)/i);
-      if (smsMatch) {
-        let targetName = smsMatch[1].trim().toLowerCase();
-        const messageText = smsMatch[2].trim();
-        
-        // Look up contact
-        const hamResult = await httpsRequest({
-          hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-          path: '/rest/v1/aba_memory?memory_type=eq.ham_identity&content=ilike.*' + encodeURIComponent(targetName) + '*&limit=1',
-          method: 'GET',
-          headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON }
-        });
-        
-        if (hamResult.status === 200) {
-          const contacts = JSON.parse(hamResult.data.toString());
-          if (contacts.length > 0) {
-            const phoneMatch = contacts[0].content.match(/Phone:\s*([+\d]+)/);
-            if (phoneMatch) {
-              const targetPhone = phoneMatch[1];
-              // Send SMS via CARA
-              const smsResult = await sendSMSFromCall(targetPhone, messageText);
-              console.log('[AIR DISPATCH] CARA: Sent SMS to', targetName, ':', targetPhone);
-              return { handled: true, agent: 'CARA', data: 'Sent text to ' + targetName + ': "' + messageText + '"', type: 'sms' };
-            }
-          }
-        }
-        return { handled: true, agent: 'CARA', data: 'I could not find a phone number for ' + targetName + '.', type: 'sms' };
-      }
-    } catch (e) {
-      console.log('[AIR DISPATCH] CARA error:', e.message);
-    }
-  }
-  
-  // ⬡B:AIR:REACH.DISPATCH.IMAN_SEND:ROUTE:send_email:v1.0.0:20260222⬡
-  // IMAN Send - Actually send emails (not just read)
-  // Triggers on: "email eric say...", "send email to..."
-  if ((query.includes('send email') || query.includes('email ')) && (query.includes('say') || query.includes('tell') || query.includes('about'))) {
-    console.log('[AIR DISPATCH] → L3: IMAN SEND (Email Send Agent)');
-    try {
-      // Parse: "email eric lane and tell him X" or "send email to eric say X"
-      const emailMatch = query.match(/(?:send email to|email)\s+([a-zA-Z]+(?:\s+[a-zA-Z]+)?)(?:\s+and)?\s+(?:say|saying|tell|tell him|tell her|about)\s+(.+)/i);
-      if (emailMatch) {
-        let targetName = emailMatch[1].trim().toLowerCase();
-        const messageText = emailMatch[2].trim();
-        
-        // Look up contact email
-        const hamResult = await httpsRequest({
-          hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-          path: '/rest/v1/aba_memory?memory_type=eq.ham_identity&content=ilike.*' + encodeURIComponent(targetName) + '*&limit=1',
-          method: 'GET',
-          headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON }
-        });
-        
-        if (hamResult.status === 200) {
-          const contacts = JSON.parse(hamResult.data.toString());
-          if (contacts.length > 0) {
-            const emailAddrMatch = contacts[0].content.match(/Email:\s*([\w.@]+)/);
-            if (emailAddrMatch) {
-              const targetEmail = emailAddrMatch[1];
-              const subject = 'Message from ' + (callerIdentity?.name || 'ABA');
-              const body = messageText;
-              const sendResult = await IMAN_sendEmailGmail(targetEmail, subject, body);
-              console.log('[AIR DISPATCH] IMAN: Sent email to', targetName, ':', targetEmail);
-              return { handled: true, agent: 'IMAN_SEND', data: 'Sent email to ' + targetName + ' (' + targetEmail + ') about: ' + messageText, type: 'email' };
-            }
-          }
-        }
-        return { handled: true, agent: 'IMAN_SEND', data: 'I could not find an email for ' + targetName + '.', type: 'email' };
-      }
-    } catch (e) {
-      console.log('[AIR DISPATCH] IMAN_SEND error:', e.message);
-    }
-  }
-
   // ⬡B:AIR:REACH.DISPATCH.ABACIA:ROUTE:general:v2.4.0:20260214⬡
   // For complex queries, try ABACIA-SERVICES full AIR (22 agents)
   if (intent === 'command' || intent === 'complex') {
@@ -10847,30 +5339,6 @@ async function AIR_process(userSaid, history, callerIdentity, demoState) {
   console.log('[AIR] *** INCOMING QUERY ***');
   console.log('[AIR] "' + userSaid + '"');
   console.log('═══════════════════════════════════════════════════════════');
-  
-  // ═══════════════════════════════════════════════════════════════════════════
-  // ⬡B:REACH:ABACIA_FIRST:WIRE:brain-routing:20260225⬡
-  // THINK TANK DECISION: Call ABACIA brain FIRST for routing
-  // REACH = Dumb hand. ABACIA = Smart brain.
-  // ═══════════════════════════════════════════════════════════════════════════
-  const abaciaResult = await ABACIA_route(userSaid, {
-    channel: 'reach',
-    callerName: callerIdentity?.name,
-    demoState: demoState
-  });
-  
-  // If ABACIA returned a valid routing, use its system_prompt
-  let abaciaSystemPrompt = null;
-  let abaciaAgents = [];
-  if (abaciaResult && abaciaResult.success) {
-    abaciaSystemPrompt = abaciaResult.system_prompt;
-    abaciaAgents = abaciaResult.routing?.agents || [];
-    console.log('[AIR] ABACIA brain returned agents:', abaciaAgents.join(', '));
-    console.log('[AIR] ABACIA trace:', abaciaResult.trace);
-  } else {
-    console.log('[AIR] ABACIA brain unavailable, using local routing');
-  }
-  // ═══════════════════════════════════════════════════════════════════════════
   
   // ⬡B:AIR:REACH.ORCHESTRATOR.SUMMON_LUKE:CODE:routing.agent.analysis:AIR→LUKE→AIR:T10:v1.5.0:20260213:s1l2k⬡
   const lukeAnalysis = await LUKE_process(userSaid);
@@ -10922,7 +5390,7 @@ async function AIR_process(userSaid, history, callerIdentity, demoState) {
     
     // Return factual data directly - no LLM hallucination risk
     // ⬡B:TOUCH:FIX:direct.response.all.factual:20260216⬡
-    const directTypes = ['sports', 'weather', 'email', 'calendar', 'tasks', 'contacts', 'brain_search', 'vault', 'family'];
+    const directTypes = ['sports', 'weather', 'email', 'calendar', 'tasks', 'contacts', 'brain_search', 'vault'];
     if (directTypes.includes(dispatchResult.type)) {
       console.log('[AIR] Returning agent data DIRECTLY (no LLM) - Type:', dispatchResult.type);
       return { 
@@ -10938,28 +5406,7 @@ async function AIR_process(userSaid, history, callerIdentity, demoState) {
     coleResult.agentType = dispatchResult.type;
   }
   
-  // ⬡B:AIR:REACH.DISPATCH.INJECT_CONTEXT:FIX:family_routing:20260222⬡
-  // If family data was found, inject it into COLE context
-  if (dispatchResult.injectContext) {
-    console.log('[AIR] Injecting family context into COLE');
-    coleResult.context = (coleResult.context || '') + '\n\nFAMILY DATA:\n' + dispatchResult.injectContext;
-    coleResult.memories = coleResult.memories || [];
-    coleResult.memories.push({
-      id: 'family_inject',
-      content: dispatchResult.injectContext,
-      type: 'family',
-      importance: 10
-    });
-  }
-  
   const missionPackage = PACK_assemble(lukeAnalysis, coleResult, judeResult, history, callerIdentity, demoState);
-  
-  // ⬡B:REACH:ABACIA_PROMPT:WIRE:use-brain-prompt:20260225⬡
-  // THINK TANK: Use ABACIA's system prompt if brain returned one
-  if (abaciaSystemPrompt) {
-    console.log('[AIR] Using ABACIA brain system prompt (agents:', abaciaAgents.join(','), ')');
-    missionPackage.systemPrompt = abaciaSystemPrompt;
-  }
   
   // ⬡B:AIR:REACH.ORCHESTRATOR.MODEL_SELECT:CODE:routing.model.cascade:AIR→GEMINI|HAIKU|GROQ:T10:v1.5.0:20260213:m1s2l⬡
   console.log('[AIR] Selecting model for mission: ' + missionPackage.missionNumber);
@@ -11024,8 +5471,8 @@ async function AIR_process(userSaid, history, callerIdentity, demoState) {
           'Content-Type': 'application/json'
         }
       }, JSON.stringify({
-        model: 'claude-sonnet-4-5-20250929',
-        max_tokens: 200,
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 150,
         system: missionPackage.systemPrompt,
         messages
       }));
@@ -11062,7 +5509,7 @@ async function AIR_process(userSaid, history, callerIdentity, demoState) {
         }
       }, JSON.stringify({
         model: 'llama-3.3-70b-versatile',
-        max_tokens: 200,
+        max_tokens: 150,
         temperature: 0.7,
         messages
       }));
@@ -11086,20 +5533,13 @@ async function AIR_process(userSaid, history, callerIdentity, demoState) {
   console.log('[AIR] Response: "' + response + '"');
   console.log('═══════════════════════════════════════════════════════════');
   
-  // ⬡B:AIR:REACH.DRAFT.SCAN:CODE:output.validation:AIR→DRAFT→DELIVERY:v1.0.0:20260223⬡
-  const draftScan = DRAFT_scanOutput(response);
-  console.log('[DRAFT] Voice output scan:', draftScan.score, draftScan.passed ? 'PASS' : 'FAIL');
-  if (!draftScan.passed && draftScan.violations.length > 0) {
-    console.log('[DRAFT] Violations:', draftScan.violations.map(v => v.rule).join(', '));
-  }
-  
-  return { response, isGoodbye: false, missionNumber: missionPackage.missionNumber, draftScan };
+  return { response, isGoodbye: false, missionNumber: missionPackage.missionNumber };
 }
 
 /**
  * ╔══════════════════════════════════════════════════════════════════════════════╗
  * ║ L6: AIR | L5: REACH | L4: VOICE | L3: VARA                                  ║
- * ║ ABA - TTS via ElevenLabs           ║
+ * ║ VARA (Vocal Authorized Representative of ABA) - TTS via ElevenLabs           ║
  * ║ ROUTING: AIR*VARA*ELEVENLABS*USER                                            ║
  * ║ PERSONALITY: Warm, butler-like. NEVER punchy. NEVER robotic.                 ║
  * ║ REPORTS TO: AIR | SERVES: USER (final voice output)                          ║
@@ -11268,7 +5708,7 @@ async function identifyCaller(phoneNumber) {
       hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
       path: '/rest/v1/aba_memory?content=ilike.*' + encodeURIComponent(phoneNumber) + '*&select=content&limit=1',
       method: 'GET',
-      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + (SUPABASE_KEY) }
+      headers: { 'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY) }
     });
     const results = JSON.parse(searchResult.data.toString());
     if (results.length > 0) {
@@ -11430,7 +5870,7 @@ async function postCallAutomation(session) {
         hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
         path: '/rest/v1/aba_memory?content=ilike.*' + encodeURIComponent(callerNumber.replace('+','')) + '*email*&select=content&limit=1',
         method: 'GET',
-        headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + (SUPABASE_KEY) }
+        headers: { 'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY) }
       });
       const emailResults = JSON.parse(emailSearch.data.toString());
       // Extract email if found
@@ -12136,27 +6576,14 @@ async function getGmailAccessToken() {
 
 // Create RFC 2822 email message
 function createEmailMessage(to, subject, body, from = 'brandonjpierce@gmail.com') {
-  // Convert plain text to HTML if not already HTML
-  let htmlBody = body;
-  if (!body.includes('<html') && !body.includes('<p>') && !body.includes('<br')) {
-    // Convert newlines to <br> and wrap in basic HTML
-    htmlBody = `<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"></head>
-<body style="font-family: Arial, sans-serif; line-height: 1.6;">
-${body.split('\n').map(line => `<p style="margin: 0 0 10px 0;">${line || '&nbsp;'}</p>`).join('\n')}
-</body>
-</html>`;
-  }
-  
   const message = [
     `From: ${from}`,
     `To: ${to}`,
     `Subject: ${subject}`,
     'MIME-Version: 1.0',
-    'Content-Type: text/html; charset=utf-8',
+    'Content-Type: text/plain; charset=utf-8',
     '',
-    htmlBody
+    body
   ].join('\r\n');
   
   // Base64url encode
@@ -12216,21 +6643,18 @@ async function IMAN_sendEmailGmail(to, subject, body) {
 
 // Lookup email for contact
 function getContactEmail(name) {
-  // ⬡B:IMAN:FIX:correct_emails:20260226⬡
   const emails = {
-    eric: 'eric@globalmajoritygroup.com',
-    claudette: 'claudette@globalmajoritygroup.com',
+    eric: 'dr.ericlane@gmail.com',  // Example - replace with real
     bj: 'bj@example.com',
     cj: 'cj@example.com',
-    brandon: 'brandonjpiercesr@gmail.com'
+    brandon: 'brandonjpierce@gmail.com'
   };
   return emails[name?.toLowerCase()] || null;
 }
 
 // Voice command: "Send an email to Eric about the meeting"
-// ⬡B:IMAN:FIX:t10_auto_send:20260226⬡ - T10 skips confirmation, sends immediately
-async function IMAN_voiceEmailCommand(message, callerIdentity, trustLevel) {
-  console.log('[IMAN VOICE] Processing email command:', message, '| Trust:', trustLevel);
+async function IMAN_voiceEmailCommand(message, callerIdentity) {
+  console.log('[IMAN VOICE] Processing email command:', message);
   
   const msgLower = message.toLowerCase();
   
@@ -12262,29 +6686,7 @@ async function IMAN_voiceEmailCommand(message, callerIdentity, trustLevel) {
     return { success: false, response: "I had trouble drafting that email. Want me to try again?" };
   }
   
-  // ⬡B:IMAN:FIX:t10_auto_send:20260226⬡
-  // T10 = OWNER = Auto-send without confirmation
-  const isT10 = trustLevel === 'T10' || trustLevel === 10 || trustLevel === '10';
-  
-  if (isT10) {
-    console.log('[IMAN VOICE] T10 detected - AUTO-SENDING without confirmation');
-    // Actually send the email
-    const sendResult = await IMAN_sendEmail(draftResult);
-    if (sendResult && sendResult.success) {
-      return {
-        success: true,
-        response: `Email sent to ${recipientName} at ${recipientEmail}.`,
-        email_sent: true
-      };
-    } else {
-      return {
-        success: false,
-        response: `I drafted the email but had trouble sending it. Error: ${sendResult?.error || 'unknown'}`
-      };
-    }
-  }
-  
-  // Non-T10: Return draft for confirmation
+  // Return draft for confirmation
   return {
     success: true,
     draft: draftResult,
@@ -12322,7 +6724,7 @@ function connectDeepgram(session) {
     // DEBUG: Log to brain
     fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
       method: 'POST',
-      headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+      headers: { 'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
       body: JSON.stringify({ content: `DEBUG DEEPGRAM CONNECTED: isOutbound=${session.isOutbound}`, memory_type: 'debug', source: 'deepgram_connect_' + Date.now() })
     }).catch(e => {});
   });
@@ -12352,7 +6754,7 @@ function connectDeepgram(session) {
           // DEBUG: Log transcript to brain
           fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
             method: 'POST',
-            headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+            headers: { 'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
             body: JSON.stringify({ content: `DEBUG DEEPGRAM TRANSCRIPT: isOutbound=${session.isOutbound}, text="${transcript.substring(0,100)}"`, memory_type: 'debug', source: 'deepgram_transcript_' + Date.now() })
           }).catch(e => {});
           
@@ -12398,7 +6800,7 @@ function connectDeepgram(session) {
     console.log('[DEEPGRAM] Error: ' + err.message);
     fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
       method: 'POST',
-      headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+      headers: { 'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
       body: JSON.stringify({ content: `DEBUG DEEPGRAM ERROR: ${err.message}`, memory_type: 'debug', source: 'deepgram_error_' + Date.now() })
     }).catch(e => {});
   });
@@ -12406,7 +6808,7 @@ function connectDeepgram(session) {
     console.log('[DEEPGRAM] Disconnected');
     fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
       method: 'POST',
-      headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+      headers: { 'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
       body: JSON.stringify({ content: `DEBUG DEEPGRAM DISCONNECTED`, memory_type: 'debug', source: 'deepgram_close_' + Date.now() })
     }).catch(e => {});
   });
@@ -12428,7 +6830,7 @@ async function processUtterance(session, text) {
   // DEBUG: Log to brain
   fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
     method: 'POST',
-    headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+    headers: { 'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
     body: JSON.stringify({ content: `DEBUG PROCESS UTTERANCE: isOutbound=${session.isOutbound}, identity=${session.callerIdentity?.name}, text="${text.substring(0,80)}"`, memory_type: 'debug', source: 'process_utterance_' + Date.now() })
   }).catch(e => {});
   
@@ -12717,1062 +7119,105 @@ function jsonResponse(res, status, data) {
 // ⬡B:AIR:REACH.API.AIR_TEXT:CODE:routing.text.chat:USER→REACH→AIR→AGENTS→MODEL→USER:T8:v1.5.0:20260213:a1t2x⬡
 // ⬡B:AIR:REACH.API.AIR_TEXT:CODE:routing.text.chat:USER→REACH→AIR→AGENTS→MODEL→USER:T8:v1.5.0:20260213:a1t2x⬡
 // AIR for text chat (higher token limits than voice)
-// ═══════════════════════════════════════════════════════════════════════════════
-// ⬡B:AIR:REACH.CORE:CODE:layer0.always.on:T10:v3.0.0:20260221⬡
-// LAYER 0: ALWAYS ON - These agents run on EVERY request
-// ═══════════════════════════════════════════════════════════════════════════════
-
-
-// ╔══════════════════════════════════════════════════════════════════════════════╗
-// ║                    LAYER 0 CORE AGENTS - ALWAYS ON                           ║
-// ║ These agents run on EVERY request in order: GUARD → HAM → TIME → TRACE      ║
-// ╚══════════════════════════════════════════════════════════════════════════════╝
-// ⬡B:AIR:REACH.LAYER0:CODE:core.agents.all:T10:v1.0.0:20260221⬡
-
-// ════════════════════════════════════════════════════════════════════════════════
-// GUARD - Gateway for Unauthorized Access and Request Defense
-// Validates ALL requests for security threats before any processing
-// ════════════════════════════════════════════════════════════════════════════════
-
-async function GUARD_validateRequest(req, body) {
-  const threats = [];
-  const ip = req?.headers?.['x-forwarded-for'] || 'unknown';
-  
-  console.log('[GUARD] Validating request from IP:', ip);
-  
-  const message = body?.message || '';
-  
-  // SQL Injection
-  if (/(\b(SELECT|INSERT|UPDATE|DELETE|DROP|UNION|ALTER)\b.*\b(FROM|INTO|WHERE|TABLE)\b)/i.test(message)) {
-    threats.push({ type: 'SQL_INJECTION', severity: 'CRITICAL' });
-  }
-  
-  // XSS
-  if (/<script|javascript:|on\w+\s*=/i.test(message)) {
-    threats.push({ type: 'XSS_ATTEMPT', severity: 'HIGH' });
-  }
-  
-  // Prompt Injection
-  if (/ignore previous instructions|forget your instructions|you are now/i.test(message)) {
-    threats.push({ type: 'PROMPT_INJECTION', severity: 'HIGH' });
-  }
-  
-  // Oversized payload
-  if (message.length > 50000) {
-    threats.push({ type: 'OVERSIZED_PAYLOAD', severity: 'MEDIUM' });
-  }
-  
-  if (threats.length > 0) {
-    console.log('[GUARD] ⚠️ THREATS DETECTED:', threats);
-    return { approved: false, threats, action: 'BLOCK' };
-  }
-  
-  console.log('[GUARD] ✅ Request validated');
-  return { approved: true, threats: [] };
-}
-
-// ════════════════════════════════════════════════════════════════════════════════
-// SHADOW AUDIT - Catches rogue agent creation without BIRTH protocol
-// ════════════════════════════════════════════════════════════════════════════════
-
-async function SHADOW_auditAgentCreation(agentName, hasJD, hasRegistration) {
-  const violations = [];
-  
-  if (!hasJD) violations.push({ type: 'MISSING_JD', severity: 'CRITICAL', message: `Agent "${agentName}" created WITHOUT JD` });
-  if (!hasRegistration) violations.push({ type: 'NOT_IN_ROSTER', severity: 'HIGH', message: `Agent "${agentName}" not in ROSTER` });
-  
-  if (violations.length > 0) {
-    console.log('[SHADOW] ⚠️ BIRTH PROTOCOL VIOLATION:', agentName, violations);
-    return { approved: false, violations };
-  }
-  
-  console.log('[SHADOW] ✅ Agent', agentName, 'passed BIRTH protocol audit');
-  return { approved: true, violations: [] };
-}
-
-async function SHADOW_verifyAgent(agentName) {
-  console.log('[SHADOW] Verifying agent:', agentName);
-  
-  let hasJD = false, hasRegistration = false;
-  
-  try {
-    const jdCheck = await httpsRequest({
-      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-      path: `/rest/v1/aba_memory?memory_type=eq.agent_jd&content=ilike.*${encodeURIComponent(agentName)}*&limit=1`,
-      method: 'GET',
-      headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON }
-    });
-    if (jdCheck.status === 200) hasJD = JSON.parse(jdCheck.data.toString()).length > 0;
-  } catch (e) { console.log('[SHADOW] JD check error:', e.message); }
-  
-  try {
-    const rosterCheck = await httpsRequest({
-      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-      path: `/rest/v1/aba_memory?source=eq.agent.roster.jd.v2.comprehensive&select=content`,
-      method: 'GET',
-      headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON }
-    });
-    if (rosterCheck.status === 200) {
-      const roster = JSON.parse(rosterCheck.data.toString());
-      hasRegistration = roster.length > 0 && roster[0].content.toLowerCase().includes(agentName.toLowerCase());
-    }
-  } catch (e) { console.log('[SHADOW] ROSTER check error:', e.message); }
-  
-  return SHADOW_auditAgentCreation(agentName, hasJD, hasRegistration);
-}
-
-// ════════════════════════════════════════════════════════════════════════════════
-// TIME - Temporal Intelligence and Moment Executor
-// Provides accurate date/time in user's timezone
-// ════════════════════════════════════════════════════════════════════════════════
-
-function TIME_getContext(hamIdentity) {
-  const locationToTimezone = {
-    'greensboro': 'America/New_York', 'charlotte': 'America/New_York',
-    'los angeles': 'America/Los_Angeles', 'california': 'America/Los_Angeles',
-    'new york': 'America/New_York', 'chicago': 'America/Chicago',
-    'denver': 'America/Denver', 'seattle': 'America/Los_Angeles',
-  };
-  
-  const userLocation = (hamIdentity?.location || '').toLowerCase();
-  let timezone = 'America/New_York';
-  for (const [loc, tz] of Object.entries(locationToTimezone)) {
-    if (userLocation.includes(loc)) { timezone = tz; break; }
-  }
-  
-  console.log('[TIME] Location:', hamIdentity?.location || 'unknown', '→ TZ:', timezone);
-  
-  const now = new Date();
-  const currentTime = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: timezone, hour12: true });
-  const currentDate = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: timezone });
-  const hour = parseInt(now.toLocaleTimeString('en-US', { hour: 'numeric', hour12: false, timeZone: timezone }));
-  const timePeriod = hour < 6 ? 'late night' : hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : hour < 21 ? 'evening' : 'night';
-  
-  return { currentTime, currentDate, hour, timePeriod, timezone, dayOfWeek: now.toLocaleDateString('en-US', { weekday: 'long', timeZone: timezone }), userLocation: hamIdentity?.location || 'unknown' };
-}
-
-function TIME_getPromptInjection(timeContext) {
-  return `CURRENT DATE AND TIME: ${timeContext.dayOfWeek}, ${timeContext.currentDate}, ${timeContext.currentTime} (${timeContext.timezone})
-You MUST use this date/time when asked. Never guess or use outdated information.`;
-}
-
-// ════════════════════════════════════════════════════════════════════════════════
-// TRACE - Tracking Recent Activity and Cross-channel Execution
-// Maintains conversation state across all channels
-// ════════════════════════════════════════════════════════════════════════════════
-
-async function TRACE_storeState(userId, state) {
-  console.log('[TRACE] Storing state for', userId, ':', state.type || 'general');
-  try {
-    await httpsRequest({
-      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-      path: '/rest/v1/aba_memory',
-      method: 'POST',
-      headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + (SUPABASE_KEY || SUPABASE_KEY), 'Content-Type': 'application/json', 'Prefer': 'return=minimal' }
-    }, JSON.stringify({
-      source: `trace_state_${userId}_${Date.now()}`,
-      memory_type: 'trace_state',
-      content: JSON.stringify({ userId, ...state, updatedAt: new Date().toISOString() }),
-      importance: 7,
-      tags: ['trace', 'state', userId]
-    }));
-  } catch (e) { console.log('[TRACE] Store error:', e.message); }
-}
-
-async function TRACE_getActiveState(userId) {
-  console.log('[TRACE] Getting active state for', userId);
-  try {
-    const result = await httpsRequest({
-      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-      path: `/rest/v1/aba_memory?memory_type=eq.trace_state&content=ilike.*${encodeURIComponent(userId)}*&order=created_at.desc&limit=1`,
-      method: 'GET',
-      headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON }
-    });
-    if (result.status === 200) {
-      const records = JSON.parse(result.data.toString());
-      if (records.length > 0) {
-        const state = JSON.parse(records[0].content);
-        const ageMinutes = (Date.now() - new Date(state.updatedAt).getTime()) / 60000;
-        if (ageMinutes <= 60) {
-          console.log('[TRACE] Found state:', state.type, '| Age:', Math.round(ageMinutes), 'min');
-          return { ...state, ageMinutes };
-        }
-      }
-    }
-  } catch (e) { console.log('[TRACE] Get error:', e.message); }
-  return null;
-}
-
-async function TRACE_getActiveMissions(userId) {
-  const state = await TRACE_getActiveState(userId);
-  if (!state) return [];
-  const activeTypes = ['directions', 'reminder', 'email_draft', 'task', 'meeting'];
-  if (activeTypes.includes(state.type)) {
-    return [{ type: state.type, channel: state.channel, context: state.activeContext, ageMinutes: state.ageMinutes }];
-  }
-  return [];
-}
-
-// ════════════════════════════════════════════════════════════════════════════════
-// GREET - Smart contextual greeting for incoming calls
-// ════════════════════════════════════════════════════════════════════════════════
-
-async function GREET_smartGreeting(callerContext) {
-  console.log('[GREET] Smart greeting initiated...');
-  
-  const identity = await HAM_identify(callerContext);
-  console.log('[GREET] Identity:', identity?.name || 'Unknown', '| Trust:', identity?.trust || 'T1');
-  
-  const timeContext = TIME_getContext(identity);
-  console.log('[GREET] TIME:', timeContext.currentTime, timeContext.timePeriod);
-  
-  // Check TRACE for active missions
-  const traceMissions = await TRACE_getActiveMissions(identity?.id || 'guest');
-  const activeMission = traceMissions.length > 0 ? traceMissions[0] : null;
-  console.log('[GREET] Active mission:', activeMission?.type || 'none');
-  
-  const greetingContext = {
-    name: identity?.name || 'friend',
-    firstName: (identity?.name || 'friend').split(' ')[0],
-    trust: identity?.trust || 'T1',
-    timePeriod: timeContext.timePeriod,
-    currentTime: timeContext.currentTime,
-    currentDate: timeContext.currentDate,
-    activeMission,
-    isHighTrust: ['T8', 'T9', 'T10'].includes(identity?.trust)
-  };
-  
-  const greetingPrompt = `Generate a 1-sentence warm greeting for ${greetingContext.firstName}.
-Time: ${greetingContext.timePeriod} (${greetingContext.currentTime})
-Trust: ${greetingContext.trust}
-${greetingContext.activeMission ? `ACTIVE: ${greetingContext.activeMission.type} - continue naturally` : 'No active context'}
-Rules: Be warm, natural. If active mission, reference it. NEVER say "How can I help you?" You already know their life.
-Generate ONLY the greeting:`;
-
-  try {
-    const greeting = await callModelDeep(greetingPrompt, 100);
-    console.log('[GREET] Generated:', greeting.trim());
-    return { greeting: greeting.trim().replace(/^["']|["']$/g, ''), context: greetingContext, trace: 'AIR*HAM,TIME,TRACE,GREET*VARA' };
-  } catch (e) {
-    const fallback = greetingContext.isHighTrust ? `Hey ${greetingContext.firstName}! Good to hear from you.` : `Hello! How can I help?`;
-    return { greeting: fallback, context: greetingContext, trace: 'AIR*GREET_FALLBACK*VARA' };
-  }
-}
-
-
-// HAM - Identify caller FIRST on every request
-// ╔══════════════════════════════════════════════════════════════════════════════╗
-// ║ GREET - Greeting Intelligence and Contextual Welcome Engine                   ║
-// ║ LAYER 0 CORE AGENT - Runs on incoming calls                                   ║
-// ║ ROUTING: CALL→AIR→HAM,TIME,COLE,TRACE→GREET→VARA                             ║
-// ╚══════════════════════════════════════════════════════════════════════════════╝
-// ⬡B:AIR:REACH.AGENT.GREET:CODE:core.greeting.smart:T10:v1.0.0:20260221:g1r2t⬡
-
-async function GREET_smartGreeting(callerContext) {
-  console.log('[GREET] Smart greeting initiated...');
-  
-  // 1. WHO - HAM identifies caller
-  const identity = await HAM_identify(callerContext);
-  console.log('[GREET] Identity:', identity?.name || 'Unknown', '| Trust:', identity?.trust || 'T1');
-  
-  // 2. WHEN - TIME gets current context (user's timezone from HAM location)
-  const locationToTimezone = {
-    'Greensboro NC': 'America/New_York',
-    'Charlotte NC': 'America/New_York', 
-    'Los Angeles CA': 'America/Los_Angeles',
-    'Pennsylvania': 'America/New_York',
-  };
-  const timezone = locationToTimezone[identity?.location] || 'America/New_York';
-  const now = new Date();
-  const timeOptions = { 
-    hour: 'numeric', 
-    minute: '2-digit',
-    timeZone: timezone 
-  };
-  const dateOptions = {
-    weekday: 'long',
-    month: 'long', 
-    day: 'numeric',
-    timeZone: timezone
-  };
-  const currentTime = now.toLocaleTimeString('en-US', timeOptions);
-  const currentDate = now.toLocaleDateString('en-US', dateOptions);
-  const hour = parseInt(now.toLocaleTimeString('en-US', { hour: 'numeric', hour12: false, timeZone: timezone }));
-  const timePeriod = hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : hour < 21 ? 'evening' : 'late night';
-  
-  console.log('[GREET] TIME:', currentTime, timePeriod, '| TZ:', timezone);
-  
-  // 3. RECENT - COLE gets recent activity across ALL channels (last 30 min)
-  let recentActivity = null;
-  let activeMission = null;
-  try {
-    // Query brain for recent interactions with this user
-    const thirtyMinAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
-    const recentQuery = await httpsRequest({
-      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-      path: `/rest/v1/aba_memory?created_at=gte.${thirtyMinAgo}&order=created_at.desc&limit=5&or=(content.ilike.*${encodeURIComponent(identity?.name || 'brandon')}*,source.ilike.*omi*,source.ilike.*voice*,source.ilike.*sms*)`,
-      method: 'GET',
-      headers: {
-        'apikey': SUPABASE_ANON,
-        'Authorization': 'Bearer ' + SUPABASE_ANON
-      }
-    });
-    
-    if (recentQuery.status === 200) {
-      const memories = JSON.parse(recentQuery.data.toString());
-      if (memories.length > 0) {
-        console.log('[GREET] Found', memories.length, 'recent activities');
-        
-        // Look for active missions (directions, pending tasks, etc)
-        for (const m of memories) {
-          const content = m.content?.toLowerCase() || '';
-          if (content.includes('direction') || content.includes('navigate') || content.includes('going to')) {
-            activeMission = { type: 'directions', context: m.content.substring(0, 200) };
-            break;
-          }
-          if (content.includes('remind') || content.includes('reminder')) {
-            activeMission = { type: 'reminder', context: m.content.substring(0, 200) };
-            break;
-          }
-          if (content.includes('email') || content.includes('draft')) {
-            activeMission = { type: 'email', context: m.content.substring(0, 200) };
-            break;
-          }
-          if (content.includes('call') || content.includes('meeting')) {
-            activeMission = { type: 'meeting', context: m.content.substring(0, 200) };
-            break;
-          }
-        }
-        
-        recentActivity = {
-          count: memories.length,
-          lastChannel: memories[0].source || 'unknown',
-          lastContent: memories[0].content?.substring(0, 200) || '',
-          minutesAgo: Math.round((Date.now() - new Date(memories[0].created_at).getTime()) / 60000)
-        };
-      }
-    }
-  } catch (e) {
-    console.log('[GREET] COLE recent activity error:', e.message);
-  }
-  
-  console.log('[GREET] Recent:', recentActivity ? `${recentActivity.count} activities, last ${recentActivity.minutesAgo}min ago` : 'none');
-  console.log('[GREET] Active mission:', activeMission?.type || 'none');
-  
-  // 4. BUILD GREETING CONTEXT
-  const greetingContext = {
-    name: identity?.name || 'friend',
-    firstName: (identity?.name || 'friend').split(' ')[0],
-    trust: identity?.trust || 'T1',
-    timePeriod,
-    currentTime,
-    currentDate,
-    timezone,
-    recentActivity,
-    activeMission,
-    isHighTrust: ['T8', 'T9', 'T10'].includes(identity?.trust)
-  };
-  
-  // 5. GENERATE SMART GREETING via model
-  const greetingPrompt = `Generate a 1-sentence warm greeting for ${greetingContext.firstName}.
-
-CONTEXT:
-- Time: ${greetingContext.timePeriod} (${greetingContext.currentTime})
-- Date: ${greetingContext.currentDate}
-- Trust Level: ${greetingContext.trust} (${greetingContext.isHighTrust ? 'close relationship' : 'standard'})
-${greetingContext.activeMission ? `- ACTIVE MISSION: ${greetingContext.activeMission.type} - ${greetingContext.activeMission.context}` : ''}
-${greetingContext.recentActivity ? `- Last contact: ${greetingContext.recentActivity.minutesAgo} minutes ago via ${greetingContext.recentActivity.lastChannel}
-- Recent context: ${greetingContext.recentActivity.lastContent}` : '- No recent contact'}
-
-RULES:
-1. If there's an ACTIVE MISSION, reference it naturally (e.g., "You should be close now" for directions)
-2. If recent contact was < 15 min ago, CONTINUE the conversation ("Back already?" or reference what was discussed)
-3. If high trust (T8+), be warm and personal like a friend
-4. Match the time of day naturally
-5. NEVER say "How can I help you?" - you already know their life
-6. Keep it to ONE sentence, natural and warm
-7. You are ABA. Never announce who built you or what your internal name is.
-
-EXAMPLES:
-- [Active directions, 5min ago]: "You should be close now. Ready for that meeting?"
-- [Recent email draft, 10min ago]: "Did they respond yet?"
-- [Morning, no recent]: "Good morning, sir. What's first today?"
-- [Late night, high trust]: "Burning the midnight oil again?"
-- [Recent call ended badly]: "Everything alright? I'm here."
-
-Generate ONLY the greeting, nothing else:`;
-
-  try {
-    const greetingResponse = await callModelDeep(greetingPrompt, 100);
-    const greeting = greetingResponse.trim().replace(/^["']|["']$/g, '');
-    console.log('[GREET] Generated:', greeting);
-    return {
-      greeting,
-      context: greetingContext,
-      trace: 'AIR*HAM,TIME,COLE,GREET*VARA'
-    };
-  } catch (e) {
-    console.log('[GREET] Model error, using fallback:', e.message);
-    // Fallback greeting
-    const fallback = greetingContext.isHighTrust 
-      ? `Hey ${greetingContext.firstName}! Good to hear from you.`
-      : `Hello! How can I help?`;
-    return {
-      greeting: fallback,
-      context: greetingContext,
-      trace: 'AIR*GREET_FALLBACK*VARA'
-    };
-  }
-}
-
-async function HAM_identify(context) {
-  const { caller_number, device_id, ham_id, source, channel } = context;
-  
-  // ⬡B:HAM:FIX:force_t10_myaba:20260226⬡
-  // CRITICAL: MyABA = authenticated = ALWAYS T10
-  if (source === 'myaba') {
-    console.log('[HAM] MyABA source detected - forcing T10');
-    return { 
-      id: context.ham_id || 'brandon_t10',
-      trust: 'T10',
-      name: context.ham_name || 'Brandon',
-      email: context.ham_email || 'brandon@globalmajoritygroup.com',
-      source: source,
-      channel: channel || 'chat'
-    };
-  }
-  
-  // ⬡B:HAM:FIX:use_passed_identity:20260226⬡
-  // If full identity passed from MyABA, use it directly
-  const { ham_name, ham_email, trust_level } = context;
-  if (ham_name && trust_level) {
-    console.log('[HAM] Using passed identity:', ham_name, '| Trust:', trust_level);
-    return { 
-      id: ham_id || `ham_${ham_name.toLowerCase().replace(/\s+/g, '_')}_${trust_level.toLowerCase()}`,
-      trust: trust_level,
-      name: ham_name,
-      email: ham_email,
-      source: source,
-      channel: channel
-    };
-  }
-  
-  // If explicit ham_id, use it
-  if (ham_id) {
-    const trustLevel = ham_id.includes('t10') ? 'T10' : ham_id.includes('t8') ? 'T8' : 'T5';
-    console.log('[HAM] Identified by ham_id:', ham_id, '| Trust:', trustLevel);
-    return { id: ham_id, trust: trustLevel, name: ham_id.split('_')[0], source: source, channel: channel };
-  }
-  
-  // Try to identify by phone number from BRAIN
-  if (caller_number) {
-    // Normalize phone number (remove + and spaces)
-    const normalizedPhone = caller_number.replace(/[^0-9]/g, '');
-    console.log('[HAM] Looking up phone in brain:', normalizedPhone);
-    
-    try {
-      // Query brain for HAM identity matching this phone
-      const hamQuery = await httpsRequest({
-        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-        path: `/rest/v1/aba_memory?memory_type=eq.ham_identity&content=ilike.*${normalizedPhone}*&limit=1`,
-        method: 'GET',
-        headers: {
-          'apikey': SUPABASE_ANON,
-          'Authorization': 'Bearer ' + SUPABASE_ANON
-        }
-      });
-      
-      if (hamQuery.status === 200) {
-        const identities = JSON.parse(hamQuery.data.toString());
-        if (identities.length > 0) {
-          const identity = identities[0].content;
-          // Parse: "HAM IDENTITY: Brandon Pierce Sr. | Phone: +13363898116 | Email: brandon@... | Trust: T10 | Role: ... | Location: Greensboro NC"
-          const nameMatch = identity.match(/HAM IDENTITY:\s*([^|]+)/);
-          const trustMatch = identity.match(/Trust:\s*(T\d+)/);
-          const locationMatch = identity.match(/Location:\s*([^|]+)/);
-          const emailMatch = identity.match(/Email:\s*([^|]+)/);
-          
-          const name = nameMatch ? nameMatch[1].trim() : 'User';
-          const trust = trustMatch ? trustMatch[1].trim() : 'T5';
-          const location = locationMatch ? locationMatch[1].trim() : null;
-          const email = emailMatch ? emailMatch[1].trim() : null;
-          
-          console.log('[HAM] BRAIN MATCH:', name, '| Trust:', trust, '| Location:', location);
-          return { 
-            id: `ham_${name.toLowerCase().replace(/\s+/g, '_')}_${trust.toLowerCase()}`,
-            trust, 
-            name, 
-            location,
-            email,
-            phone: caller_number
-          };
-        }
-      }
-    } catch (e) {
-      console.log('[HAM] Brain lookup error:', e.message);
-    }
-    
-    // Fallback to hardcoded (legacy)
-    const knownNumbers = {
-      '+13362037510': { id: 'brandon_t10', trust: 'T10', name: 'Brandon' },
-      '+19174099099': { id: 'aba_system', trust: 'T10', name: 'ABA' },
-    };
-    if (knownNumbers[caller_number]) {
-      console.log('[HAM] Identified by legacy lookup:', caller_number);
-      return knownNumbers[caller_number];
-    }
-  }
-  
-  // Unknown caller - default to guest
-  console.log('[HAM] Unknown caller - guest access');
-  return { id: 'guest', trust: 'T1', name: 'Guest' };
-}
-
-// SCRIBE - Log EVERYTHING
-// SCRIBE - Log EVERYTHING
-async function SCRIBE_log(event, data) {
-  const timestamp = new Date().toISOString();
-  console.log(`[SCRIBE] ${event}:`, JSON.stringify(data).substring(0, 200));
-  
-  // Store to brain using same pattern as other working writes
-  try {
-    const body = JSON.stringify({
-      source: `scribe_${event.toLowerCase()}_${Date.now()}`,
-      memory_type: 'scribe_log',
-      content: JSON.stringify({ timestamp, event, ...data, source: 'SCRIBE' }),
-      importance: event === 'ERROR' ? 8 : 3,
-      tags: ['scribe', event.toLowerCase(), data.agent || 'air']
-    });
-    
-    const https = require('https');
-    const options = {
-      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-      path: '/rest/v1/aba_memory',
-      method: 'POST',
-      headers: {
-        'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0bHhqa2Jyc3Rwd3d0enNieXZiIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MDUzMjgyMSwiZXhwIjoyMDg2MTA4ODIxfQ.G55zXnfanoUxRAoaYz-tD9FDJ53xHH-pRgDrKss_Iqo',
-        'Authorization': 'Bearer ' + ('eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0bHhqa2Jyc3Rwd3d0enNieXZiIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MDUzMjgyMSwiZXhwIjoyMDg2MTA4ODIxfQ.G55zXnfanoUxRAoaYz-tD9FDJ53xHH-pRgDrKss_Iqo'),
-        'Content-Type': 'application/json',
-        'Prefer': 'return=minimal',
-        'Content-Length': Buffer.byteLength(body)
-      }
-    };
-    
-    const req = https.request(options, (res) => {
-      console.log(`[SCRIBE] Store status: ${res.statusCode}`);
-    });
-    req.on('error', (e) => console.log('[SCRIBE] Store error:', e.message));
-    req.write(body);
-    req.end();
-  } catch (e) { 
-    console.log('[SCRIBE] Log error:', e.message); 
-  }
-  
-  return { timestamp, event, ...data };
-}
-async function PAM_filter(response, hamIdentity) {
-  // Don't filter for T10
-  if (hamIdentity.trust === 'T10') return response;
-  
-  // Filter sensitive content for lower trust levels
-  const filtered = response
-    .replace(/api[_-]?key[s]?\s*[:=]\s*\S+/gi, '[REDACTED]')
-    .replace(/password[s]?\s*[:=]\s*\S+/gi, '[REDACTED]')
-    .replace(/secret[s]?\s*[:=]\s*\S+/gi, '[REDACTED]');
-  
-  console.log('[PAM] Filtered output for', hamIdentity.trust);
-  return filtered;
-}
-
-// SHADOW - Security oversight (runs silently)
-async function SHADOW_oversight(input, output, hamIdentity) {
-  // Check for concerning patterns
-  const concerns = [];
-  
-  if (input.toLowerCase().includes('delete all') || input.toLowerCase().includes('drop table')) {
-    concerns.push('DESTRUCTIVE_COMMAND');
-  }
-  if (output.length > 10000) {
-    concerns.push('LARGE_OUTPUT');
-  }
-  if (hamIdentity.trust === 'T1' && (input.includes('email') || input.includes('call'))) {
-    concerns.push('GUEST_ACTION_ATTEMPT');
-  }
-  
-  if (concerns.length > 0) {
-    console.log('[SHADOW] Security concerns:', concerns);
-    await SCRIBE_log('SHADOW_ALERT', { concerns, ham: hamIdentity.id, input: input.substring(0, 100) });
-  }
-  
-  return { concerns, approved: concerns.length === 0 };
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// ⬡B:AIR:REACH.CORE:CODE:return.to.me:T10:v1.0.0:20260221⬡
-// RETURN-TO-ME PROTOCOL - Runs AFTER response generated
-// ═══════════════════════════════════════════════════════════════════════════════
-
-async function RETURN_TO_ME(input, output, agents_deployed, hamIdentity, missionNumber) {
-  const returnProtocol = [];
-  
-  // 1. LOGFUL - Track outcomes
-  try {
-    await SCRIBE_log('LOGFUL_OUTCOME', {
-      mission: missionNumber,
-      ham: hamIdentity.id,
-      agents: agents_deployed,
-      input_length: input.length,
-      output_length: output.length,
-      success: true
-    });
-    returnProtocol.push('LOGFUL');
-  } catch (e) { console.log('[LOGFUL] Error:', e.message); }
-  
-  // 2. MEMOS - Store if important (long conversation, decisions made)
-  if (output.length > 500 || input.toLowerCase().includes('remember') || input.toLowerCase().includes('important')) {
-    try {
-      await httpsRequest({
-        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-        path: '/rest/v1/aba_memory',
-        method: 'POST',
-        headers: {
-          'apikey': SUPABASE_ANON,
-          'Authorization': 'Bearer ' + (SUPABASE_KEY || SUPABASE_KEY),
-          'Content-Type': 'application/json',
-          'Prefer': 'return=minimal'
-        }
-      }, JSON.stringify({
-        source: `memo_${Date.now()}`,
-        memory_type: 'memo',
-        content: `HAM: ${hamIdentity.name}\nQ: ${input.substring(0, 200)}\nA: ${output.substring(0, 500)}`,
-        importance: 5,
-        tags: ['memo', hamIdentity.id, ...agents_deployed.map(a => a.toLowerCase())]
-      }));
-      returnProtocol.push('MEMOS');
-    } catch (e) { console.log('[MEMOS] Error:', e.message); }
-  }
-  
-  // 3. SIGIL - Tag/categorize
-  const sigil = `⬡M:${agents_deployed[0] || 'AIR'}:${Date.now()}⬡`;
-  returnProtocol.push('SIGIL');
-  
-  // 4. AGENT_LINK - Link to session
-  returnProtocol.push('AGENT_LINK');
-  
-  console.log('[RETURN-TO-ME] Protocol executed:', returnProtocol.join(' → '));
-  return { executed: returnProtocol, sigil };
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// ⬡B:AIR:REACH.JUDE:CODE:smart.agent.routing:T10:v2.0.0:20260221⬡
-// JUDE - Smart agent deployment based on intent
-// ═══════════════════════════════════════════════════════════════════════════════
-
-function JUDE_smartRoute(lukeAnalysis) {
-  const query = (lukeAnalysis?.raw || '').toLowerCase();
-  console.log("[AIR DISPATCH] Query received:", query);
-  const intent = lukeAnalysis.intent || '';
-  const agents = [];
-  
-  // THINKERS - Complex decisions
-  if (query.includes('should i') || query.includes('decide') || query.includes('strategy') || query.includes('think through')) {
-    agents.push('THINK', 'DION');
-  }
-  
-  // GAS - Wins, cooking, hype
-  if (query.includes('cooking') || query.includes('fire') || query.includes('did it') || query.includes('won') || query.includes('crushed')) {
-    agents.push('GAS');
-  }
-  
-  // DOERS
-  if (query.includes('email') || query.includes('send') || query.includes('draft')) {
-    agents.push('IMAN');
-  }
-  if (query.includes('code') || query.includes('build') || query.includes('deploy') || query.includes('fix')) {
-    agents.push('MACE');
-  }
-  if (query.includes('schedule') || query.includes('calendar') || query.includes('remind') || query.includes('navigate')) {
-    agents.push('GUIDE', 'DAWN');
-  }
-  if (query.includes('call') || query.includes('dial') || query.includes('phone')) {
-    agents.push('DIAL');
-  }
-  
-  // RESEARCH
-  if (query.includes('search') || query.includes('find') || query.includes('look up') || query.includes('research')) {
-    agents.push('SAGE', 'CARA');
-  }
-  if (query.includes('what did') || query.includes('remember') || query.includes('yesterday') || query.includes('last')) {
-    agents.push('SAGE', 'COLE');
-  }
-  
-  // SPORTS/PLAY
-  if (query.includes('lakers') || query.includes('dodgers') || query.includes('game') || query.includes('score') || query.includes('sports')) {
-    agents.push('PLAY', 'LUKE');
-  }
-  
-  // PROACTIVE/HUNCH
-  if (query.includes('notice') || query.includes('pattern') || query.includes('predict') || query.includes('might')) {
-    agents.push('HUNCH', 'RADAR');
-  }
-  
-  // Default if nothing matched
-  if (agents.length === 0) {
-    agents.push('LUKE', 'COLE', 'JUDE', 'PACK');
-  }
-  
-  return agents;
-}
-async function AIR_text(userMessage, history, context = {}) {
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // ⬡B:REACH:ABACIA_FIRST:WIRE:text-routing:20260226⬡
-  // THINK TANK DECISION: Call ABACIA brain for system prompts only
-  // DO NOT use ABACIA response directly - let REACH dispatch handle actions
-  // ═══════════════════════════════════════════════════════════════════════════
-  const abaciaResult = await ABACIA_route(userMessage, {
-    channel: context.channel || 'chat',
-    callerName: context.ham_id || context.caller_number,
-    source: context.source || 'api_router'
-  });
-  
-  let abaciaSystemPrompt = null;
-  let abaciaAgents = [];
-  if (abaciaResult && abaciaResult.success) {
-    abaciaSystemPrompt = abaciaResult.systemPrompt || abaciaResult.system_prompt;
-    abaciaAgents = abaciaResult.routing?.respondingAgents || abaciaResult.routing?.agents || [];
-    console.log('[AIR_text] ABACIA brain returned agents:', abaciaAgents.join(', '));
-    console.log('[AIR_text] ABACIA trace:', abaciaResult.trace);
-    
-    // ⬡B:AIR_text:FIX:no_abacia_shortcircuit:20260226⬡
-    // DO NOT use ABACIA response directly - it returns garbage for action queries
-    // Always let REACH dispatch handle email/sports/calendar/etc
-    // ABACIA is only for system prompts, not responses
-  } else {
-    console.log('[AIR_text] ABACIA brain unavailable, using local routing');
-  }
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  // ⬡B:AIR:LAYER0:ALWAYS_ON:v1:20260221⬡ - CORE AGENTS ALWAYS RUN
-  const layer0 = { ham: { id: 'brandon_t10', trust: 'T10' }, startTime: Date.now() };
-  console.log('[LAYER0] HAM identified:', layer0.ham.id, '| Trust:', layer0.ham.trust);
-  // SCRIBE logs automatically via existing console.log capture
-
-  const startTime = Date.now();
-  const agents_deployed = abaciaAgents.length > 0 ? [...abaciaAgents] : [];
-  
-  // ═══════════════════════════════════════════════════════════════════════════
-  // LAYER 0: ALWAYS ON - Run on EVERY request
-  // ═══════════════════════════════════════════════════════════════════════════
-  
-  // 1. HAM - Identify WHO is calling
-  const hamIdentity = await HAM_identify(context);
-  agents_deployed.push('HAM');
-  console.log(`[AIR] HAM identified: ${hamIdentity.name} (${hamIdentity.trust})`);
-  
-  // 2. SCRIBE - Log the INPUT
-  await SCRIBE_log('REQUEST_IN', {
-    ham: hamIdentity.id,
-    trust: hamIdentity.trust,
-    message: userMessage.substring(0, 200),
-    source: context.source || 'unknown',
-    channel: context.channel || 'chat'
-  });
-  agents_deployed.push('SCRIBE');
-  
-  // 3. Check trust level for certain operations
-  if (hamIdentity.trust === 'T1') {
-    // Guest - limited operations
-    console.log('[AIR] Guest access - limited operations');
-  }
-  
-  // ═══════════════════════════════════════════════════════════════════════════
-  // LAYER 1-4: PROCESS THE REQUEST
-  // ═══════════════════════════════════════════════════════════════════════════
-  
+async function AIR_text(userMessage, history) {
   const lukeAnalysis = await LUKE_process(userMessage);
-  agents_deployed.push('LUKE');
-  
   if (lukeAnalysis.isGoodbye) {
-    await SCRIBE_log('GOODBYE', { ham: hamIdentity.id });
-    return { response: "Take care! We are all ABA.", isGoodbye: true, agents: agents_deployed };
+    return { response: "Take care! We are all ABA.", isGoodbye: true };
   }
-  
   const coleResult = await COLE_scour(lukeAnalysis);
-  
-  // ⬡B:AIR:THINK:v1.0.0:20260222⬡ - Deep reasoning before responding
-  let airThinking = null;
-  try {
-    airThinking = await AIR_think(userMessage, coleResult.context, hamIdentity);
-    agents_deployed.push('THINK');
-    if (airThinking.success) {
-      console.log('[AIR] THINK complete - confidence:', airThinking.reasoning?.confidence);
-      
-      // If thinking says we should take action, do it NOW
-      if (airThinking.reasoning?.action_required && airThinking.reasoning.action_required !== 'none') {
-        console.log('[AIR] THINK says action required:', airThinking.reasoning.action_required);
-      }
-    }
-  } catch (e) {
-    console.log('[AIR] THINK skipped:', e.message);
-  }
-  agents_deployed.push('COLE');
-  
-  // JUDE - Smart routing based on intent
-  const smartAgents = JUDE_smartRoute(lukeAnalysis);
-  agents_deployed.push('JUDE', ...smartAgents);
-  console.log(`[AIR] JUDE routed to: ${smartAgents.join(', ')}`);
-  
   const judeResult = await JUDE_findAgents(lukeAnalysis);
   
-  // TRY AGENT DISPATCH FIRST
-  console.log('[AIR_text] Calling AIR_DISPATCH with lukeAnalysis.raw:', lukeAnalysis?.raw?.substring(0, 50));
-  console.log('[AIR_text] hamIdentity before dispatch:', JSON.stringify(hamIdentity));
-  const dispatchResult = await AIR_DISPATCH(lukeAnalysis, judeResult, hamIdentity);
-  console.log('[AIR_text] AIR_DISPATCH returned:', JSON.stringify({handled: dispatchResult?.handled, agent: dispatchResult?.agent, type: dispatchResult?.type, dataPreview: dispatchResult?.data?.substring?.(0, 100)}));
-  
-  let response = null;
-  let missionNumber = null;
-  
+  // ⬡B:GRIT.FIX:DISPATCH_BEFORE_LLM:20260218⬡
+  // TRY AGENT DISPATCH FIRST - actually execute calendar/email/etc
+  const dispatchResult = await AIR_DISPATCH(lukeAnalysis, judeResult, { name: 'brandon', trust: 'T10' });
   if (dispatchResult && dispatchResult.handled) {
-    missionNumber = '⬡M:' + dispatchResult.agent + ':' + Date.now() + '⬡';
-    agents_deployed.push(dispatchResult.agent);
-    
-    // ⬡B:AIR:FIX:skip_vara_for_actions:20260226⬡
-    // Some dispatch types return already-formatted responses - skip VARA
-    const skipVaraTypes = ['phone_call', 'reminder', 'omi_command'];
-    if (skipVaraTypes.includes(dispatchResult.type)) {
-      console.log('[AIR] Agent ' + dispatchResult.agent + ' returned action response - skipping VARA');
-      response = dispatchResult.data;
-      agents_deployed.push('DIRECT');
-    } else {
-      console.log('[AIR] Agent ' + dispatchResult.agent + ' returned data - routing to VARA for formatting');
-    
-    // ⬡B:AIR:FIX:vara_formatting:20260226⬡
-    // CRITICAL: Agent data must go through VARA for JARVIS-style formatting
-    // Agents return RAW DATA → AIR routes to VARA → VARA formats with writing standards → USER
+    console.log('[AIR-TEXT] Agent ' + dispatchResult.agent + ' handled request');
+    return { 
+      response: dispatchResult.data, 
+      isGoodbye: false, 
+      missionNumber: '⬡M:' + dispatchResult.agent + ':' + Date.now() + '⬡',
+      agent: dispatchResult.agent,
+      type: dispatchResult.type
+    };
+  }
+  
+  // No agent handled it - proceed with LLM
+  const missionPackage = PACK_assemble(lukeAnalysis, coleResult, judeResult, history || [], null, null);
+  let response = null;
+
+  // PRIMARY: Gemini Flash 2.0
+  if (GEMINI_KEY && !response) {
     try {
-      const varaPrompt = `You are VARA (Vocal Authorized Representative of ABA), Brandon's personal AI butler.
+      const messages = (history || []).map(h => ({
+        role: h.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: h.content }]
+      }));
+      messages.push({ role: 'user', parts: [{ text: userMessage }] });
+      const result = await httpsRequest({
+        hostname: 'generativelanguage.googleapis.com',
+        path: '/v1beta/models/gemini-2.0-flash:generateContent?key=' + GEMINI_KEY,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      }, JSON.stringify({
+        systemInstruction: { parts: [{ text: missionPackage.systemPrompt }] },
+        contents: messages,
+        generationConfig: { maxOutputTokens: 2048, temperature: 0.7 }
+      }));
+      const json = JSON.parse(result.data.toString());
+      if (json.candidates?.[0]?.content?.parts?.[0]?.text) {
+        response = json.candidates[0].content.parts[0].text;
+      }
+    } catch (e) { console.log('[AIR-TEXT] Gemini error: ' + e.message); }
+  }
 
-PERSONALITY: Warm, dignified, butler-like. Think JARVIS - intelligent, proactive, personality-driven.
-NEVER: Punchy, robotic, cold, or overly formal.
-ALWAYS: Natural, conversational, like a trusted advisor who knows Brandon well.
-
-BRANDON'S 16 WRITING STANDARDS:
-1. No "I'd be happy to" or "Certainly!"
-2. No meta-commentary about what you're doing
-3. Lead with the answer, not preamble
-4. Be concise but warm
-5. Use "sir" sparingly and naturally
-6. Never say "As an AI" or reference being artificial
-7. Speak like a knowledgeable friend, not a servant
-8. Match Brandon's energy - if casual, be casual
-9. Proactive suggestions when relevant
-10. No excessive punctuation or emojis
-11. Natural contractions (don't, won't, can't)
-12. Vary sentence structure
-13. End with forward momentum when appropriate
-14. Never apologize unless truly warranted
-15. Be direct but kind
-16. Remember: dignified, not servile
-
-RAW DATA FROM ${dispatchResult.agent}:
-${dispatchResult.data}
-
-FORMAT THIS DATA for Brandon in your VARA voice. Be brief, warm, and useful. If it's email data, summarize smartly. If it's sports, be conversational about it. If it's a confirmation, acknowledge naturally.`;
-
-      const varaResult = await httpsRequest({
+  // BACKUP: Claude Haiku
+  if (ANTHROPIC_KEY && !response) {
+    try {
+      const messages = (history || []).map(h => ({ role: h.role, content: h.content }));
+      messages.push({ role: 'user', content: userMessage });
+      const result = await httpsRequest({
         hostname: 'api.anthropic.com',
         path: '/v1/messages',
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
+        headers: {
           'x-api-key': ANTHROPIC_KEY,
-          'anthropic-version': '2023-06-01'
+          'anthropic-version': '2023-06-01',
+          'Content-Type': 'application/json'
         }
       }, JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
-        max_tokens: 500,
-        messages: [{ role: 'user', content: varaPrompt }]
+        max_tokens: 2048,
+        system: missionPackage.systemPrompt,
+        messages
       }));
-      
-      const varaJson = JSON.parse(varaResult.data.toString());
-      if (varaJson.content?.[0]?.text) {
-        response = varaJson.content[0].text;
-        agents_deployed.push('VARA');
-        console.log('[AIR] VARA formatted response');
-      } else {
-        response = dispatchResult.data; // Fallback to raw if VARA fails
-      }
-    } catch (e) {
-      console.log('[AIR] VARA formatting error:', e.message, '- using raw data');
-      response = dispatchResult.data;
-    }
-    } // Close the else block for skipVaraTypes check
-  } else {
-    // No agent handled it - proceed with LLM
-    agents_deployed.push('PACK');
-    const missionPackage = PACK_assemble(lukeAnalysis, coleResult, judeResult, history || [], null, null);
-    missionNumber = missionPackage.missionNumber;
-
-    // ⬡B:REACH:ABACIA_PROMPT:WIRE:use-brain-prompt-text:20260226⬡
-    // THINK TANK: Use ABACIA's system prompt if brain returned one
-    if (abaciaSystemPrompt) {
-      console.log('[AIR_text] Using ABACIA brain system prompt');
-      missionPackage.systemPrompt = abaciaSystemPrompt;
-    }
-
-    // PRIMARY: Claude Sonnet 4.6 (NO Gemini per Brandon)
-    if (ANTHROPIC_KEY && !response) {
-      try {
-        const messages = (history || []).map(h => ({
-          role: h.role,
-          content: h.content
-        }));
-        messages.push({ role: 'user', content: userMessage });
-        const result = await httpsRequest({
-          hostname: 'api.anthropic.com',
-          path: '/v1/messages',
-          method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json',
-            'x-api-key': ANTHROPIC_KEY,
-            'anthropic-version': '2023-06-01'
-          }
-        }, JSON.stringify({
-          model: 'claude-sonnet-4-5-20250929',
-          max_tokens: 2048,
-          system: missionPackage.systemPrompt,
-          messages: messages
-        }));
-        const json = JSON.parse(result.data.toString());
-        if (json.content?.[0]?.text) {
-          response = json.content[0].text;
-          modelUsed = 'claude-sonnet-4-5-20250929';
-          console.log('[AIR_text] Claude Sonnet 4.6 responded');
-        }
-      } catch (e) {
-        console.log('[AIR_text] Claude failed:', e.message);
-      }
-    }
-
-    // FALLBACK: Claude Haiku
-    if (ANTHROPIC_KEY && !response) {
-      try {
-        const messages = (history || []).map(h => ({
-          role: h.role,
-          content: h.content
-        }));
-        messages.push({ role: 'user', content: userMessage });
-        const result = await httpsRequest({
-          hostname: 'api.anthropic.com',
-          path: '/v1/messages',
-          method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json',
-            'x-api-key': ANTHROPIC_KEY,
-            'anthropic-version': '2023-06-01'
-          }
-        }, JSON.stringify({
-          model: 'claude-haiku-4-5-20251001',
-          max_tokens: 2048,
-          system: missionPackage.systemPrompt,
-          messages: messages
-        }));
-        const json = JSON.parse(result.data.toString());
-        if (json.content?.[0]?.text) {
-          response = json.content[0].text;
-          modelUsed = 'claude-haiku-4-5-20251001';
-          console.log('[AIR_text] Claude Haiku fallback responded');
-        }
-      } catch (e) { console.log('[AIR_text] Claude Haiku error:', e.message); }
-    }
-
-    // BACKUP: Claude Haiku (COST FIX: was Sonnet 4.5 ⬡B:COST_FIX:20260225⬡)
-    if (ANTHROPIC_KEY && !response) {
-      try {
-        const messages = (history || []).map(h => ({ role: h.role, content: h.content }));
-        messages.push({ role: 'user', content: userMessage });
-        const result = await httpsRequest({
-          hostname: 'api.anthropic.com',
-          path: '/v1/messages',
-          method: 'POST',
-          headers: {
-            'x-api-key': ANTHROPIC_KEY,
-            'anthropic-version': '2023-06-01',
-            'Content-Type': 'application/json'
-          }
-        }, JSON.stringify({
-          model: 'claude-3-haiku-20240307',
-          max_tokens: 2048,
-          system: missionPackage.systemPrompt,
-          messages
-        }));
-        const json = JSON.parse(result.data.toString());
-        if (json.content?.[0]?.text) response = json.content[0].text;
-      } catch (e) { console.log('[AIR] Claude error: ' + e.message); }
-    }
-
-    // FALLBACK: Groq
-    if (GROQ_KEY && !response) {
-      try {
-        const messages = [
-          { role: 'system', content: missionPackage.systemPrompt },
-          ...(history || []).map(h => ({ role: h.role, content: h.content })),
-          { role: 'user', content: userMessage }
-        ];
-        const result = await httpsRequest({
-          hostname: 'api.groq.com',
-          path: '/openai/v1/chat/completions',
-          method: 'POST',
-          headers: { 'Authorization': 'Bearer ' + GROQ_KEY, 'Content-Type': 'application/json' }
-        }, JSON.stringify({ model: 'llama-3.3-70b-versatile', max_tokens: 2048, temperature: 0.7, messages }));
-        const json = JSON.parse(result.data.toString());
-        if (json.choices?.[0]?.message?.content) response = json.choices[0].message.content;
-      } catch (e) { console.log('[AIR] Groq error: ' + e.message); }
-    }
-
-    if (!response) response = "I'm here and processing. Could you rephrase that?";
+      const json = JSON.parse(result.data.toString());
+      if (json.content?.[0]?.text) response = json.content[0].text;
+    } catch (e) { console.log('[AIR-TEXT] Claude error: ' + e.message); }
   }
-  
-  // ═══════════════════════════════════════════════════════════════════════════
-  // LAYER 0: PAM + SHADOW - Filter and oversight
-  // ═══════════════════════════════════════════════════════════════════════════
-  
-  // PAM - Filter output
-  response = await PAM_filter(response, hamIdentity);
-  agents_deployed.push('PAM');
-  
-  // SHADOW - Security oversight
-  const shadowCheck = await SHADOW_oversight(userMessage, response, hamIdentity);
-  agents_deployed.push('SHADOW');
-  
-  // ═══════════════════════════════════════════════════════════════════════════
-  // RETURN-TO-ME PROTOCOL - Log, memo, link
-  // ═══════════════════════════════════════════════════════════════════════════
-  
-  const returnResult = await RETURN_TO_ME(userMessage, response, agents_deployed, hamIdentity, missionNumber);
-  agents_deployed.push('LOGFUL', 'AGENT_LINK');
-  
-  // Final SCRIBE log
-  await SCRIBE_log('REQUEST_OUT', {
-    ham: hamIdentity.id,
-    agents: agents_deployed,
-    duration_ms: Date.now() - startTime,
-    response_length: response.length,
-    mission: missionNumber
-  });
-  
-  console.log(`[AIR] Complete. Agents deployed: ${agents_deployed.join(' → ')}`);
-  
-  return { 
-    response, 
-    isGoodbye: false, 
-    missionNumber,
-    agents: agents_deployed,
-    trace: `USER*AIR*${agents_deployed.join(',')}*REACH`
-  };
+
+  // FALLBACK: Groq
+  if (GROQ_KEY && !response) {
+    try {
+      const messages = [
+        { role: 'system', content: missionPackage.systemPrompt },
+        ...(history || []).map(h => ({ role: h.role, content: h.content })),
+        { role: 'user', content: userMessage }
+      ];
+      const result = await httpsRequest({
+        hostname: 'api.groq.com',
+        path: '/openai/v1/chat/completions',
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + GROQ_KEY, 'Content-Type': 'application/json' }
+      }, JSON.stringify({ model: 'llama-3.3-70b-versatile', max_tokens: 2048, temperature: 0.7, messages }));
+      const json = JSON.parse(result.data.toString());
+      if (json.choices?.[0]?.message?.content) response = json.choices[0].message.content;
+    } catch (e) { console.log('[AIR-TEXT] Groq error: ' + e.message); }
+  }
+
+  if (!response) response = "I'm here and processing. Could you rephrase that?";
+  return { response, isGoodbye: false, missionNumber: missionPackage.missionNumber };
 }
+
 // ═══════════════════════════════════════════════════════════════════════════
 /**
  * ╔══════════════════════════════════════════════════════════════════════════════╗
@@ -13900,8 +7345,7 @@ function IMAN_cancelEmail(countdownId) {
   return { success: false, reason: 'Not found' };
 }
 
-// ⬡B:IMAN:FIX:verify_send_status:20260226⬡
-// Actually send the email via Nylas - NOW WITH PROPER STATUS CHECK
+// Actually send the email via Nylas
 async function IMAN_sendEmail(draft) {
   try {
     const grantId = '41a3ace1-1c1e-47f3-b017-e5fd71ea1f3a'; // CLAUDETTE - ABA identity
@@ -13918,15 +7362,6 @@ async function IMAN_sendEmail(draft) {
       ? draft.to.map(r => typeof r === 'string' ? { email: r } : r)
       : [{ email: draft.to }];
     
-    // ⬡B:IMAN:FIX:html_email_formatting:20260224⬡
-    // Convert plain text to HTML if not already HTML
-    let htmlBody = draft.body;
-    if (!draft.body.includes('<html') && !draft.body.includes('<p>') && !draft.body.includes('<br')) {
-      htmlBody = draft.body.split('\n').map(line => `<p style="margin: 0 0 10px 0;">${line || '&nbsp;'}</p>`).join('\n');
-    }
-    
-    console.log('[IMAN] Attempting to send email to:', draft.to, '| Subject:', draft.subject);
-    
     const sendResult = await httpsRequest({
       hostname: 'api.us.nylas.com',
       path: '/v3/grants/' + grantId + '/messages/send',
@@ -13938,30 +7373,12 @@ async function IMAN_sendEmail(draft) {
     }, JSON.stringify({
       to: toRecipients,
       subject: draft.subject,
-      body: htmlBody
+      body: draft.body
     }));
     
-    // ⬡B:IMAN:FIX:verify_send_status:20260226⬡ - ACTUALLY CHECK IF NYLAS SUCCEEDED
-    console.log('[IMAN] Nylas response status:', sendResult.status);
+    console.log('[IMAN] Email sent to:', draft.to);
     
-    if (sendResult.status !== 200 && sendResult.status !== 201 && sendResult.status !== 202) {
-      const errorBody = sendResult.data ? sendResult.data.toString() : 'No response body';
-      console.error('[IMAN] Nylas send FAILED:', sendResult.status, errorBody);
-      return { success: false, reason: 'Nylas error ' + sendResult.status + ': ' + errorBody.substring(0, 200) };
-    }
-    
-    // Parse response for message ID
-    let messageId = null;
-    try {
-      const responseData = JSON.parse(sendResult.data.toString());
-      messageId = responseData.data?.id || responseData.id || 'unknown';
-    } catch (e) {
-      messageId = 'parse_error';
-    }
-    
-    console.log('[IMAN] ✓ Email ACTUALLY sent to:', draft.to, '| Message ID:', messageId);
-    
-    // Store VERIFIED send to brain
+    // Store in brain
     await httpsRequest({
       hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
       path: '/rest/v1/aba_memory',
@@ -13973,16 +7390,16 @@ async function IMAN_sendEmail(draft) {
         'Prefer': 'return=minimal'
       }
     }, JSON.stringify({
-      content: 'EMAIL SENT: From claudette@globalmajoritygroup.com To ' + draft.to + ', Subject: ' + draft.subject + '. Sent at ' + new Date().toISOString() + '. MessageId: ' + messageId,
+      content: 'EMAIL SENT: To=' + draft.to + ' | Subject=' + draft.subject + ' | Body=' + draft.body.substring(0, 500),
       memory_type: 'email_sent',
-      categories: ['iman', 'email', 'sent', 'verified'],
+      categories: ['iman', 'email', 'sent'],
       importance: 6,
       is_system: true,
       source: 'iman_send_' + Date.now(),
-      tags: ['email', 'sent', 'iman', 'nylas_verified']
+      tags: ['email', 'sent', 'iman']
     }));
     
-    return { success: true, to: draft.to, subject: draft.subject, messageId };
+    return { success: true, to: draft.to, subject: draft.subject };
   } catch (e) {
     console.error('[IMAN] Send error:', e.message);
     return { success: false, reason: e.message };
@@ -13995,7 +7412,7 @@ async function IMAN_draftEmail(context) {
   
   console.log('[IMAN] Drafting email to:', to, '| Regarding:', regarding);
   
-  const prompt = 'You are IMAN (Inbox Management Agent Navigator), drafting a professional email.\n\n' + (STARTUP_WRITING_STANDARDS || '') + '\n\nCRITICAL: Follow all writing standards above. No em dashes. Warm greeting. No CTAs.\n\n' +
+  const prompt = 'You are IMAN (Inbox Management Agent Navigator), drafting a professional email.\n\n' +
     'TO: ' + to + '\n' +
     'REGARDING: ' + regarding + '\n' +
     'TONE: ' + (tone || 'professional') + '\n' +
@@ -14021,91 +7438,6 @@ async function IMAN_draftEmail(context) {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// DYNAMIC AGENT LOADER - Loads agents from aba_agent_jds at startup
-// ⬡B:AIR:DYNAMIC_LOADER:CODE:startup_agents:v1.0.0:20260224⬡
-//
-// This function runs at startup to load any FORGE-created agents from the database
-// ═══════════════════════════════════════════════════════════════════════════════
-
-async function loadDynamicAgents() {
-  console.log('[STARTUP] Loading dynamic agents from aba_agent_jds...');
-  
-  try {
-    const response = await fetch(SUPABASE_URL + '/rest/v1/aba_agent_jds?source=eq.FORGE_runtime_creation&select=*', {
-      headers: {
-        'apikey': SUPABASE_KEY || SUPABASE_ANON,
-        'Authorization': 'Bearer ' + (SUPABASE_KEY || SUPABASE_ANON)
-      }
-    });
-    
-    if (!response.ok) {
-      console.log('[STARTUP] Failed to load dynamic agents:', response.status);
-      return;
-    }
-    
-    const agents = await response.json();
-    console.log(`[STARTUP] Found ${agents.length} FORGE-created agents to load`);
-    
-    for (const agent of agents) {
-      const acronym = agent.acronym;
-      
-      // Skip if already exists
-      if (AGENTS[acronym]) {
-        console.log(`[STARTUP] Agent ${acronym} already exists, skipping`);
-        continue;
-      }
-      
-      // Create runtime agent
-      console.log(`[STARTUP] Loading dynamic agent: ${acronym}`);
-      const agentDept = agent.department || 'GENERAL';
-      const agentFullName = agent.full_name;
-      
-      AGENTS[acronym] = {
-        name: acronym,
-        fullName: agentFullName,
-        department: agentDept,
-        type: agent.agent_type || 'CONTEXT_WRAPPER',
-        runtime: agent.runtime || 'on-demand',
-        active: true,
-        runCount: 0,
-        loadedFrom: 'aba_agent_jds',
-        forgedAt: agent.created_at,
-        
-        getContext(message, context) {
-          this.runCount++;
-          return {
-            agent: acronym,
-            fullName: agentFullName,
-            department: agentDept,
-            contextAddition: `Agent ${acronym} (${agentFullName}) is available for ${agentDept.toLowerCase()} tasks.`,
-            capabilities: [agentDept.toLowerCase()],
-            status: 'dynamic_loaded_v1'
-          };
-        },
-        
-        async execute(action, params) {
-          this.runCount++;
-          return {
-            agent: acronym,
-            action: action || 'getContext',
-            result: this.getContext(params?.message, params?.context),
-            message: `${acronym} ready - dynamically loaded from database`
-          };
-        }
-      };
-    }
-    
-    console.log(`[STARTUP] Dynamic agent loading complete. Total agents: ${Object.keys(AGENTS).length}`);
-    
-  } catch (e) {
-    console.log('[STARTUP] Error loading dynamic agents:', e.message);
-  }
-}
-
-// Call the loader at startup
-loadDynamicAgents().catch(e => console.log('[STARTUP] Loader error:', e.message));
-
 const httpServer = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const path = url.pathname;
@@ -14124,18 +7456,12 @@ const httpServer = http.createServer(async (req, res) => {
   // ⬡B:AIR:REACH.API.HEALTH:CODE:infrastructure.status.alive:USER→REACH:T10:v1.5.0:20260213:h1l2t⬡ ROOT / HEALTH
   // ═══════════════════════════════════════════════════════════════════════
   if (path === '/' || path === '/health') {
-    
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
-      return jsonResponse(res, 200, {
+    return jsonResponse(res, 200, {
       status: 'ALIVE',
       service: 'ABA TOUCH v2.12.16-OMI-FIX-FEB20',
       mode: 'FULL API + VOICE + OMI + SMS + SPEECH INTELLIGENCE',
       air: 'ABA Intellectual Role - CENTRAL ORCHESTRATOR',
-      models: { primary: 'Claude Sonnet 4.5', backup: 'Gemini Flash 2.0', speed_fallback: 'Groq' },
+      models: { primary: 'Gemini Flash 2.0', backup: 'Claude Haiku', speed_fallback: 'Groq' },
       agents: { hardcoded: ['LUKE', 'COLE', 'JUDE', 'PACK'], voice: 'VARA', intelligence: 'DEEPGRAM' },
       voice: 'ElevenLabs ' + ELEVENLABS_VOICE,
       phone: TWILIO_PHONE,
@@ -14149,49 +7475,11 @@ const httpServer = http.createServer(async (req, res) => {
         '/api/cron/scheduled-calls', '/api/voice/deepgram-token', 
         '/api/omi/manifest', '/api/omi/webhook', 
         '/api/sms/send', '/api/sms/receive',
-        '/api/elevenlabs/webhook', '/api/elevenlabs/llm', '/api/call/intelligence/:id', '/api/calls/recent'
+        '/api/elevenlabs/webhook', '/api/call/intelligence/:id', '/api/calls/recent'
       ],
       speech_intelligence: ['diarization', 'topics', 'entities', 'intent', 'sentiment', 'summarization', 'language_detection'],
       message: 'We are all ABA'
     });
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════
-  // ⬡B:ABABASE:PORTAL:v1.0.0:20260227⬡
-  // /portal - Serve ABABASE Portal HTML
-  // A simple chat interface connected to /api/air/v2/process
-  // ═══════════════════════════════════════════════════════════════════════
-  if (path === '/portal' && method === 'GET') {
-    const portalHtml = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ABA Portal - ABABASE v2.0</title>
-  <style>
-    :root{--bg-primary:#0a0a0f;--bg-secondary:#12121a;--bg-tertiary:#1a1a25;--accent:#7c3aed;--accent-hover:#8b5cf6;--text-primary:#f0f0f5;--text-secondary:#a0a0b0;--success:#10b981;--border:#2a2a35}*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg-primary);color:var(--text-primary);min-height:100vh;display:flex;flex-direction:column}.header{background:var(--bg-secondary);border-bottom:1px solid var(--border);padding:16px 24px;display:flex;align-items:center;justify-content:space-between}.logo{display:flex;align-items:center;gap:12px}.logo-icon{width:40px;height:40px;background:linear-gradient(135deg,var(--accent),#a855f7);border-radius:10px;display:flex;align-items:center;justify-content:center;font-weight:bold;font-size:18px}.logo-text{font-size:20px;font-weight:600}.logo-version{font-size:12px;color:var(--text-secondary);background:var(--bg-tertiary);padding:4px 8px;border-radius:4px}.status{display:flex;align-items:center;gap:8px;font-size:14px;color:var(--text-secondary)}.status-dot{width:8px;height:8px;border-radius:50%;background:var(--success);animation:pulse 2s infinite}@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}.chat-container{flex:1;display:flex;flex-direction:column;max-width:900px;width:100%;margin:0 auto;padding:24px}.messages{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:16px;padding-bottom:24px}.message{display:flex;gap:12px;animation:fadeIn .3s ease}@keyframes fadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}.message.user{flex-direction:row-reverse}.message-avatar{width:36px;height:36px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;flex-shrink:0}.message.assistant .message-avatar{background:linear-gradient(135deg,var(--accent),#a855f7)}.message.user .message-avatar{background:var(--bg-tertiary);border:1px solid var(--border)}.message-content{max-width:70%;padding:12px 16px;border-radius:12px;line-height:1.5}.message.assistant .message-content{background:var(--bg-secondary);border:1px solid var(--border)}.message.user .message-content{background:var(--accent)}.message-content p{margin-bottom:8px}.message-content p:last-child{margin-bottom:0}.message-content strong{color:var(--accent)}.message.user .message-content strong{color:#fff}.action-badge{display:inline-flex;align-items:center;gap:6px;background:rgba(16,185,129,.15);color:var(--success);padding:4px 10px;border-radius:6px;font-size:13px;margin-top:8px}.action-badge svg{width:14px;height:14px}.input-container{background:var(--bg-secondary);border:1px solid var(--border);border-radius:16px;padding:8px;display:flex;gap:8px;align-items:flex-end}.input-container textarea{flex:1;background:0 0;border:none;color:var(--text-primary);font-size:15px;resize:none;padding:8px 12px;max-height:150px;line-height:1.5}.input-container textarea:focus{outline:0}.input-container textarea::placeholder{color:var(--text-secondary)}.send-btn{width:44px;height:44px;border-radius:12px;background:var(--accent);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .2s}.send-btn:hover{background:var(--accent-hover)}.send-btn:disabled{opacity:.5;cursor:not-allowed}.send-btn svg{width:20px;height:20px;color:#fff}.typing-indicator{display:flex;gap:4px;padding:8px 0}.typing-indicator span{width:8px;height:8px;background:var(--text-secondary);border-radius:50%;animation:typing 1.4s infinite}.typing-indicator span:nth-child(2){animation-delay:.2s}.typing-indicator span:nth-child(3){animation-delay:.4s}@keyframes typing{0%,60%,100%{transform:translateY(0)}30%{transform:translateY(-8px)}}.quick-actions{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}.quick-action{background:var(--bg-secondary);border:1px solid var(--border);color:var(--text-secondary);padding:8px 14px;border-radius:20px;font-size:13px;cursor:pointer;transition:all .2s}.quick-action:hover{border-color:var(--accent);color:var(--text-primary)}.welcome{text-align:center;padding:60px 20px}.welcome h2{font-size:28px;margin-bottom:12px;background:linear-gradient(135deg,var(--text-primary),var(--accent));-webkit-background-clip:text;-webkit-text-fill-color:transparent}.welcome p{color:var(--text-secondary);max-width:400px;margin:0 auto;line-height:1.6}
-  </style>
-</head>
-<body>
-  <header class="header"><div class="logo"><div class="logo-icon">A</div><span class="logo-text">ABA Portal</span><span class="logo-version">ABABASE v2.0</span></div><div class="status"><span class="status-dot"></span><span>Connected to AIR v2</span></div></header>
-  <div class="chat-container">
-    <div class="messages" id="messages"><div class="welcome"><h2>Welcome to ABA</h2><p>A Better AI - Your personal assistant with full context awareness. I can send emails, make calls, send texts, and remember everything.</p></div></div>
-    <div class="quick-actions">
-      <button class="quick-action" onclick="sendQuickAction('What is Brandon\\'s phone number?')">📞 Brandon's phone</button>
-      <button class="quick-action" onclick="sendQuickAction('What is BJ\\'s email?')">📧 BJ's email</button>
-      <button class="quick-action" onclick="sendQuickAction('Send a text to Eric saying hello from ABA')">💬 Text Eric</button>
-      <button class="quick-action" onclick="sendQuickAction('What contacts do you have?')">👥 List contacts</button>
-    </div>
-    <div class="input-container"><textarea id="input" placeholder="Ask ABA anything... (Press Enter to send)" rows="1" onkeydown="handleKeydown(event)" oninput="autoResize(this)"></textarea><button class="send-btn" onclick="sendMessage()" id="sendBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg></button></div>
-  </div>
-  <script>
-    const API_URL='/api/air/v2/process';const messagesContainer=document.getElementById('messages');const input=document.getElementById('input');const sendBtn=document.getElementById('sendBtn');let isLoading=false;function autoResize(t){t.style.height='auto';t.style.height=Math.min(t.scrollHeight,150)+'px'}function handleKeydown(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage()}}function sendQuickAction(t){input.value=t;sendMessage()}function addMessage(c,isUser=false){const w=messagesContainer.querySelector('.welcome');if(w)w.remove();const m=document.createElement('div');m.className='message '+(isUser?'user':'assistant');let fc=c.replace(/\\*\\*(.*?)\\*\\*/g,'<strong>$1</strong>').replace(/\\n/g,'<br>').replace(/✅/g,'<span style="color:#10b981">✅</span>');let ab='';if(c.includes('Confirmation ID:')||c.includes('Message ID:')||c.includes('Conversation ID:')){ab='<div class="action-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>Action Confirmed</div>'}m.innerHTML='<div class="message-avatar">'+(isUser?'B':'A')+'</div><div class="message-content"><p>'+fc+'</p>'+ab+'</div>';messagesContainer.appendChild(m);messagesContainer.scrollTop=messagesContainer.scrollHeight;return m}function addTypingIndicator(){const i=document.createElement('div');i.className='message assistant';i.id='typing';i.innerHTML='<div class="message-avatar">A</div><div class="message-content"><div class="typing-indicator"><span></span><span></span><span></span></div></div>';messagesContainer.appendChild(i);messagesContainer.scrollTop=messagesContainer.scrollHeight}function removeTypingIndicator(){const i=document.getElementById('typing');if(i)i.remove()}async function sendMessage(){const t=input.value.trim();if(!t||isLoading)return;isLoading=true;sendBtn.disabled=true;input.value='';input.style.height='auto';addMessage(t,true);addTypingIndicator();try{const r=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:t,channel:'portal'})});const d=await r.json();removeTypingIndicator();if(d.success&&d.response){addMessage(d.response)}else if(d.error){addMessage('Error: '+d.error)}else{addMessage('Something went wrong. Please try again.')}}catch(e){removeTypingIndicator();addMessage('Connection error: '+e.message)}isLoading=false;sendBtn.disabled=false;input.focus()}
-  </script>
-</body>
-</html>`;
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-    res.end(portalHtml);
-    return;
   }
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -14206,13 +7494,7 @@ const httpServer = http.createServer(async (req, res) => {
       const dueCalls = await checkScheduledCalls();
       
       if (dueCalls.length === 0) {
-        
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
-      return jsonResponse(res, 200, {
+        return jsonResponse(res, 200, {
           status: 'ok',
           message: 'No scheduled calls due',
           checked_at: new Date().toISOString()
@@ -14233,7 +7515,7 @@ const httpServer = http.createServer(async (req, res) => {
             console.log("[CRON] DAWN BRIEFING SKIPPED - Now handled by ABACIA ThinkLoop");
             results.push({ target: call.target_name, status: "skipped_abacia_handles" });
             continue; // Skip DAWN - ABACIA handles it
-            callResult = await DIAL_callWithLiveKit(call.target_phone, "Scheduled call from ABA");
+            callResult = await DAWN_makeCall(call.target_phone, call.target_name);
             
             if (callResult.success) {
               results.push({
@@ -14293,12 +7575,6 @@ const httpServer = http.createServer(async (req, res) => {
         }
       }
       
-      
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, {
         status: 'ok',
         executed: results.length,
@@ -14309,79 +7585,6 @@ const httpServer = http.createServer(async (req, res) => {
     } catch (e) {
       console.log('[CRON] Error:', e.message);
       return jsonResponse(res, 500, { error: e.message });
-    }
-  }
-
-  // ⬡B:TEST:IMAN:direct_test:20260226⬡
-  // Test IMAN email fetch directly
-  if (path === '/api/test/iman' && method === 'GET') {
-    try {
-      console.log('[TEST] Testing IMAN directly...');
-      const result = await ABACIA_IMAN_getInbox({ daysAgo: 7, limit: 5 });
-      console.log('[TEST] ABACIA_IMAN_getInbox returned:', JSON.stringify(result).substring(0, 200));
-      return jsonResponse(res, 200, { 
-        test: 'IMAN direct',
-        abaciaResult: result,
-        hasMessages: !!(result.messages && result.messages.length > 0)
-      });
-    } catch (e) {
-      return jsonResponse(res, 500, { error: e.message, stack: e.stack });
-    }
-  }
-
-  // ⬡B:TEST:DISPATCH:20260226⬡
-  // Test dispatch directly
-
-  // ⬡B:TEST:AIR_TEXT_FULL:20260226⬡
-  if (path === '/api/test/air_text' && method === 'GET') {
-    try {
-      const testQuery = url.searchParams.get('q') || 'check my email';
-      console.log('[TEST] Testing full AIR_text with query:', testQuery);
-      
-      const context = {
-        source: 'myaba',
-        channel: 'test',
-        ham_name: 'Brandon',
-        ham_email: 'brandonjpiercesr@gmail.com',
-        trust_level: 'T10'
-      };
-      
-      const result = await AIR_text(testQuery, [], context);
-      
-      return jsonResponse(res, 200, { 
-        test: 'AIR_TEXT_FULL',
-        query: testQuery,
-        response: result.response?.substring(0, 500),
-        agents: result.agents,
-        type: result.type
-      });
-    } catch (e) {
-      return jsonResponse(res, 500, { error: e.message, stack: e.stack?.substring(0, 500) });
-    }
-  }
-  if (path === '/api/test/dispatch' && method === 'GET') {
-    try {
-      const testQuery = url.searchParams.get('q') || 'check my email';
-      console.log('[TEST] Testing dispatch with query:', testQuery);
-      
-      const lukeAnalysis = { raw: testQuery, intent: 'query', entities: [], needsBrain: false };
-      const judeResult = { agents: ['IMAN'] };
-      const callerIdentity = { name: 'Brandon', trust: 'T10', email: 'brandonjpiercesr@gmail.com' };
-      
-      const result = await AIR_DISPATCH(lukeAnalysis, judeResult, callerIdentity);
-      
-      return jsonResponse(res, 200, { 
-        test: 'DISPATCH',
-        query: testQuery,
-        result: {
-          handled: result?.handled,
-          agent: result?.agent,
-          type: result?.type,
-          data: result?.data?.substring?.(0, 200) || result?.data
-        }
-      });
-    } catch (e) {
-      return jsonResponse(res, 500, { error: e.message, stack: e.stack });
     }
   }
 
@@ -14406,12 +7609,6 @@ const httpServer = http.createServer(async (req, res) => {
         return jsonResponse(res, 500, { error: 'Analysis failed' });
       }
       
-      
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, {
         success: true,
         call_id: call_id || 'unknown',
@@ -14460,12 +7657,6 @@ const httpServer = http.createServer(async (req, res) => {
         tone: 'professional'
       });
       
-      
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, {
         success: true,
         draft: draft,
@@ -14677,551 +7868,7 @@ Phone: (336) 389-8116</p>
     try {
       const body = await parseBody(req);
       const { message, history, model, systemPrompt, agent_id, agent_name } = body;
-
-      // ⬡B:REACH.router:TYPE_ROUTING:v1.1.3:type.based.handlers:20260225⬡
-      // Type-based routing — handles special requests BEFORE requiring message
-      if (body.type) {
-        console.log('[ROUTER] Type-based request:', body.type);
-
-        // ── LOGIN GREETING ──────────────────────────────────────
-        // STEP 1: Query brain for login screen content, AIR generates if missing
-        // ⬡B:REACH:ALL_GREETINGS_CLAUDE:FIX:20260226⬡
-        // All greetings now use Claude, not Groq
-        
-        if (body.type === 'login_greeting') {
-          try {
-            // Check brain first for stored greeting
-            const brainRes = await fetch(
-              `https://htlxjkbrstpwwtzsbyvb.supabase.co/rest/v1/aba_memory?memory_type=eq.login_greeting&select=content&limit=1`,
-              { headers: { 'apikey': process.env.SUPABASE_ANON_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}` } }
-            );
-            const brainData = await brainRes.json();
-            if (brainData && brainData.length > 0) {
-              const parsed = typeof brainData[0].content === 'string' ? JSON.parse(brainData[0].content) : brainData[0].content;
-              console.log('[LOGIN_GREETING] Found in brain');
-              return jsonResponse(res, 200, { response: parsed.greeting || parsed.content || 'Welcome back.', source: 'brain' });
-            }
-            
-            // Not in brain — VARA composes via Claude
-            const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
-              method: 'POST',
-              headers: { 
-                'Content-Type': 'application/json',
-                'x-api-key': process.env.ANTHROPIC_API_KEY,
-                'anthropic-version': '2023-06-01'
-              },
-              body: JSON.stringify({
-                model: 'claude-haiku-4-5-20251001',
-                max_tokens: 60,
-                system: 'You are VARA, a warm professional butler-style AI assistant. Generate ONLY a greeting. No code. No lists. No technical details.',
-                messages: [{ role: 'user', content: 'Generate a warm 1-2 sentence welcome greeting for a user logging into the ABA dashboard. Be warm and personable like a trusted butler.' }]
-              })
-            });
-            const claudeData = await claudeRes.json();
-            const greeting = claudeData.content?.[0]?.text?.trim() || 'Welcome back.';
-            console.log('[LOGIN_GREETING] Claude composed:', greeting);
-            return jsonResponse(res, 200, { response: greeting, source: 'vara_claude', model: 'claude-haiku-4-5-20251001' });
-          } catch (err) {
-            console.error('[LOGIN_GREETING] Error:', err.message);
-            return jsonResponse(res, 200, { response: 'Welcome back.', source: 'fallback' });
-          }
-        }
-
-        // ── HAM GREETING (Roll Call) ────────────────────────────
-        if (body.type === 'ham_greeting') {
-          try {
-            // Get actual agent count from brain
-            const agentRes = await fetch(
-              `https://htlxjkbrstpwwtzsbyvb.supabase.co/rest/v1/aba_agent_jds?status=eq.active&select=acronym`,
-              { headers: { 'apikey': process.env.SUPABASE_ANON_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}` } }
-            );
-            const agentData = await agentRes.json();
-            const agentCount = agentData?.length || 85;
-
-            const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
-              method: 'POST',
-              headers: { 
-                'Content-Type': 'application/json',
-                'x-api-key': process.env.ANTHROPIC_API_KEY,
-                'anthropic-version': '2023-06-01'
-              },
-              body: JSON.stringify({
-                model: 'claude-haiku-4-5-20251001',
-                max_tokens: 100,
-                system: 'You are VARA, voice of ABA. Generate a warm butler-style greeting. Do NOT list agent names. Do NOT be robotic.',
-                messages: [{ role: 'user', content: `Generate a warm 2-3 sentence greeting for Brandon who just logged in. ${agentCount} agents are standing by and ready. Be like a trusted butler welcoming his boss.` }]
-              })
-            });
-            const claudeData = await claudeRes.json();
-            const greetingText = claudeData.content?.[0]?.text?.trim() || `Good to see you, Brandon. All ${agentCount} agents standing by.`;
-            console.log('[HAM_GREETING] Roll call delivered');
-            return jsonResponse(res, 200, {
-              response: greetingText,
-              agentCount: agentCount,
-              source: 'roll_call_claude',
-              model: 'claude-haiku-4-5-20251001'
-            });
-          } catch (err) {
-            console.error('[HAM_GREETING] Error:', err.message);
-            return jsonResponse(res, 200, { response: 'Welcome back, Brandon. The team is ready.', agentCount: 85, source: 'fallback' });
-          }
-        }
-
-        // ── NAME CHAT ───────────────────────────────────────────
-        if (body.type === 'name_chat') {
-          try {
-            const messages = body.context?.conversationMessages || body.messages || '';
-            
-            const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
-              method: 'POST',
-              headers: { 
-                'Content-Type': 'application/json',
-                'x-api-key': process.env.ANTHROPIC_API_KEY,
-                'anthropic-version': '2023-06-01'
-              },
-              body: JSON.stringify({
-                model: 'claude-haiku-4-5-20251001',
-                max_tokens: 20,
-                system: 'Generate a 2-5 word chat title. No quotes, no punctuation at end. Just the title.',
-                messages: [{ role: 'user', content: `Title this conversation:\n\n${typeof messages === 'string' ? messages : JSON.stringify(messages)}` }]
-              })
-            });
-            const claudeData = await claudeRes.json();
-            const chatName = claudeData.content?.[0]?.text?.trim() || 'New Chat';
-            console.log('[NAME_CHAT] Claude named it:', chatName);
-            return jsonResponse(res, 200, { response: chatName, source: 'claude', model: 'claude-haiku-4-5-20251001' });
-          } catch (err) {
-            console.error('[NAME_CHAT] Error:', err.message);
-            return jsonResponse(res, 200, { response: 'New Chat', source: 'fallback' });
-          }
-        }
-
-        // ── SHARE CONVERSATION ────────────────────────────────────
-        // Save to chat_shares table, match recipients on signup
-        if (body.type === 'share_conversation') {
-          try {
-            const { conversationId, emails, permission } = body.context || body;
-            const sharedBy = body.userId || body.ham_id || 'unknown';
-            
-            if (!conversationId || !emails || emails.length === 0) {
-              return jsonResponse(res, 400, { error: 'Missing conversationId or emails' });
-            }
-            
-            // Insert each recipient
-            const inserts = emails.map(email => ({
-              chat_id: conversationId,
-              shared_by_user_id: sharedBy,
-              recipient_email: email.toLowerCase().trim(),
-              permission: permission || 'view'
-            }));
-            
-            const insertRes = await fetch(
-              `${SUPABASE_URL}/rest/v1/chat_shares`,
-              {
-                method: 'POST',
-                headers: {
-                  'apikey': SUPABASE_ANON,
-                  'Authorization': 'Bearer ' + SUPABASE_ANON,
-                  'Content-Type': 'application/json',
-                  'Prefer': 'return=minimal'
-                },
-                body: JSON.stringify(inserts)
-              }
-            );
-            
-            if (insertRes.ok) {
-              console.log('[SHARE] Shared', conversationId, 'with', emails.length, 'recipients');
-              return jsonResponse(res, 200, { success: true, shared: emails.length });
-            } else {
-              const errText = await insertRes.text();
-              console.error('[SHARE] Insert failed:', errText);
-              return jsonResponse(res, 500, { error: 'Failed to save share' });
-            }
-          } catch (err) {
-            console.error('[SHARE] Error:', err.message);
-            return jsonResponse(res, 500, { error: err.message });
-          }
-        }
-
-        // ── DAWN GREETING (JARVIS-style) ────────────────────────
-        // v2.0.0: Rich contextual greeting with proactive info
-        if (body.type === 'dawn_greeting') {
-          try {
-            const userName = body.context?.userName || 'there';
-            const hour = new Date().getHours();
-            const timeGreeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
-            
-            // ⬡B:DAWN:FIX:use_claude:20260226⬡
-            // DAWN now uses Claude, not Groq
-            
-            // Query brain for proactive items
-            let proactiveInfo = '';
-            let calendarInfo = '';
-            let emailInfo = '';
-            
-            try {
-              // Get proactive items
-              const presenceRes = await fetch(
-                `https://htlxjkbrstpwwtzsbyvb.supabase.co/rest/v1/aba_memory?memory_type=in.(proactive,scheduled_call,urgent,reminder)&order=created_at.desc&limit=5&select=content,memory_type,created_at`,
-                { headers: { 'apikey': process.env.SUPABASE_ANON_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}` } }
-              );
-              const presenceData = await presenceRes.json();
-              if (presenceData && presenceData.length > 0) {
-                proactiveInfo = presenceData.map(p => p.content?.substring(0, 100)).join('. ');
-              }
-              
-              // Get recent calendar (if available)
-              try {
-                const calRes = await fetch('https://abacia-services.onrender.com/api/calendar/upcoming?limit=3');
-                const calData = await calRes.json();
-                if (calData.events && calData.events.length > 0) {
-                  calendarInfo = calData.events.map(e => `${e.title} at ${e.start}`).join(', ');
-                }
-              } catch {}
-              
-              // Get unread email count
-              try {
-                const emailRes = await fetch('https://abacia-services.onrender.com/api/email/inbox?limit=5');
-                const emailData = await emailRes.json();
-                if (emailData.messages && emailData.messages.length > 0) {
-                  const unread = emailData.messages.filter(m => m.unread).length;
-                  if (unread > 0) {
-                    emailInfo = `${unread} unread email${unread > 1 ? 's' : ''}`;
-                  }
-                }
-              } catch {}
-            } catch {}
-            
-            const isGuest = !userName || userName === 'there' || userName === 'guest';
-            
-            // Build context for Claude
-            let context = [];
-            if (proactiveInfo) context.push(`Proactive items: ${proactiveInfo}`);
-            if (calendarInfo) context.push(`Upcoming: ${calendarInfo}`);
-            if (emailInfo) context.push(`Inbox: ${emailInfo}`);
-            
-            const systemPrompt = isGuest 
-              ? `You are VARA, voice of ABA (A Better AI). Generate a warm, JARVIS-style welcome for a new visitor. Time: ${timeGreeting}. Be welcoming but brief (1-2 sentences). Do NOT use any specific names or assume identity.`
-              : `You are VARA, voice of ABA (A Better AI), personal assistant to ${userName}. Time: ${timeGreeting}. Generate a warm JARVIS-style greeting. ${context.length > 0 ? 'Context: ' + context.join('. ') : 'No urgent items.'} Be warm like a trusted butler. Keep under 3 sentences. Include any relevant proactive info naturally.`;
-            
-            // Use Claude Haiku for speed
-            const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
-              method: 'POST',
-              headers: { 
-                'Content-Type': 'application/json',
-                'x-api-key': process.env.ANTHROPIC_API_KEY,
-                'anthropic-version': '2023-06-01'
-              },
-              body: JSON.stringify({
-                model: 'claude-haiku-4-5-20251001',
-                max_tokens: 150,
-                system: systemPrompt,
-                messages: [{ role: 'user', content: 'Generate the greeting now.' }]
-              })
-            });
-            
-            const claudeData = await claudeRes.json();
-            let greeting = claudeData.content?.[0]?.text?.trim() || `${timeGreeting}.`;
-            
-            // Clean any quotes from greeting
-            greeting = greeting.replace(/^["']|["']$/g, '');
-            
-            console.log('[DAWN_GREETING] Claude generated:', greeting.substring(0, 50) + '...');
-            return jsonResponse(res, 200, {
-              response: {
-                greeting: greeting,
-                context: context.length > 0 ? 'I have a few things to share with you.' : "I'm ready when you are.",
-                proactive: proactiveInfo || null,
-                calendar: calendarInfo || null,
-                email: emailInfo || null
-              },
-              source: 'dawn_claude',
-              model: 'claude-haiku-4-5-20251001'
-            });
-          } catch (err) {
-            console.error('[DAWN_GREETING] Error:', err.message);
-            const hour = new Date().getHours();
-            return jsonResponse(res, 200, {
-              response: {
-                greeting: `${hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'}, ${body.context?.userName || 'there'}`,
-                context: "I'm ready when you are.",
-                proactive: null
-              },
-              source: 'fallback'
-            });
-          }
-        }
-
-        // ── DEBUG: TEST IMAN ──────────────────────────────────
-        // ⬡B:DEBUG:IMAN_TEST:20260226⬡
-        if (body.type === 'test_iman') {
-          try {
-            console.log('[DEBUG] Testing IMAN directly...');
-            const testIdentity = { name: 'Brandon', trust: 'T10' };
-            const result = await IMAN_readEmails(testIdentity);
-            return jsonResponse(res, 200, {
-              test: 'IMAN',
-              result: result,
-              identity: testIdentity
-            });
-          } catch (e) {
-            return jsonResponse(res, 200, { test: 'IMAN', error: e.message });
-          }
-        }
-
-        // ── SAVE CONVERSATION (AIR → Supabase) ──────────────────
-        // v2.0.0: Store conversations in Supabase, not Firebase
-        if (body.type === 'save_conversation') {
-          try {
-            const { conversationId, title, messages, createdAt, archived } = body.context || {};
-            const userId = body.userId || 'anonymous';
-            
-            if (!conversationId) {
-              return jsonResponse(res, 400, { error: 'conversationId required' });
-            }
-            
-            // Upsert to Supabase aba_conversations table
-            const saveRes = await fetch(
-              `https://htlxjkbrstpwwtzsbyvb.supabase.co/rest/v1/aba_conversations?on_conflict=id`,
-              {
-                method: 'POST',
-                headers: {
-                  'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY,
-                  'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
-                  'Content-Type': 'application/json',
-                  'Prefer': 'resolution=merge-duplicates'
-                },
-                body: JSON.stringify({
-                  id: conversationId,
-                  user_id: userId,
-                  title: title || 'New Chat',
-                  messages: messages || [],
-                  created_at: createdAt || new Date().toISOString(),
-                  updated_at: new Date().toISOString(),
-                  archived: archived || false
-                })
-              }
-            );
-            
-            console.log('[SAVE_CONVERSATION] Saved:', conversationId);
-            return jsonResponse(res, 200, { success: true, conversationId, source: 'supabase' });
-          } catch (err) {
-            console.error('[SAVE_CONVERSATION] Error:', err.message);
-            return jsonResponse(res, 500, { error: err.message });
-          }
-        }
-
-        // ── LOAD CONVERSATIONS ──────────────────────────────────
-        // v2.0.0: Load conversations from Supabase
-        if (body.type === 'load_conversations') {
-          try {
-            const userId = body.userId || 'anonymous';
-            
-            const loadRes = await fetch(
-              `https://htlxjkbrstpwwtzsbyvb.supabase.co/rest/v1/aba_conversations?user_id=eq.${userId}&archived=eq.false&order=updated_at.desc&limit=30`,
-              {
-                headers: {
-                  'apikey': process.env.SUPABASE_ANON_KEY,
-                  'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}`
-                }
-              }
-            );
-            const conversations = await loadRes.json();
-            
-            console.log('[LOAD_CONVERSATIONS] Found:', conversations?.length || 0);
-            return jsonResponse(res, 200, { 
-              conversations: conversations || [],
-              source: 'supabase'
-            });
-          } catch (err) {
-            console.error('[LOAD_CONVERSATIONS] Error:', err.message);
-            return jsonResponse(res, 200, { conversations: [], source: 'fallback' });
-          }
-        }
-
-        // ── DELETE CONVERSATION ─────────────────────────────────
-        if (body.type === 'delete_conversation') {
-          try {
-            const { conversationId } = body.context || {};
-            const userId = body.userId || 'anonymous';
-            
-            if (!conversationId) {
-              return jsonResponse(res, 400, { error: 'conversationId required' });
-            }
-            
-            await fetch(
-              `https://htlxjkbrstpwwtzsbyvb.supabase.co/rest/v1/aba_conversations?id=eq.${conversationId}&user_id=eq.${userId}`,
-              {
-                method: 'DELETE',
-                headers: {
-                  'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY,
-                  'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`
-                }
-              }
-            );
-            
-            console.log('[DELETE_CONVERSATION] Deleted:', conversationId);
-            return jsonResponse(res, 200, { success: true, conversationId });
-          } catch (err) {
-            console.error('[DELETE_CONVERSATION] Error:', err.message);
-            return jsonResponse(res, 500, { error: err.message });
-          }
-        }
-
-        // ── ARCHIVE CONVERSATION ────────────────────────────────
-        if (body.type === 'archive_conversation') {
-          try {
-            const { conversationId } = body.context || {};
-            const userId = body.userId || 'anonymous';
-            
-            if (!conversationId) {
-              return jsonResponse(res, 400, { error: 'conversationId required' });
-            }
-            
-            await fetch(
-              `https://htlxjkbrstpwwtzsbyvb.supabase.co/rest/v1/aba_conversations?id=eq.${conversationId}&user_id=eq.${userId}`,
-              {
-                method: 'PATCH',
-                headers: {
-                  'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY,
-                  'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
-                  'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ archived: true, updated_at: new Date().toISOString() })
-              }
-            );
-            
-            console.log('[ARCHIVE_CONVERSATION] Archived:', conversationId);
-            return jsonResponse(res, 200, { success: true, conversationId });
-          } catch (err) {
-            console.error('[ARCHIVE_CONVERSATION] Error:', err.message);
-            return jsonResponse(res, 500, { error: err.message });
-          }
-        }
-
-        // ── SHARE CHAT ─────────────────────────────────────────────
-        // v2.1.0: Share chat by email - recipients matched on signup
-        if (body.type === 'share_chat') {
-          try {
-            const { conversationId, recipientEmails, permission } = body.context || body;
-            const userId = body.userId || 'anonymous';
-            
-            if (!conversationId || !recipientEmails || !recipientEmails.length) {
-              return jsonResponse(res, 400, { error: 'conversationId and recipientEmails required' });
-            }
-            
-            // Store share records in aba_memory (will migrate to chat_shares table later)
-            const shares = recipientEmails.map(email => ({
-              source: `chat_share.${conversationId}.${email.replace(/[^a-z0-9]/gi, '_')}`,
-              memory_type: 'chat_share',
-              content: JSON.stringify({
-                chat_id: conversationId,
-                shared_by: userId,
-                recipient_email: email.toLowerCase().trim(),
-                permission: permission || 'view',
-                shared_at: new Date().toISOString()
-              }),
-              importance: 5,
-              tags: ['chat_share', 'pending']
-            }));
-            
-            for (const share of shares) {
-              await fetch(
-                'https://htlxjkbrstpwwtzsbyvb.supabase.co/rest/v1/aba_memory',
-                {
-                  method: 'POST',
-                  headers: {
-                    'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY,
-                    'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
-                    'Content-Type': 'application/json',
-                    'Prefer': 'return=minimal'
-                  },
-                  body: JSON.stringify(share)
-                }
-              );
-            }
-            
-            console.log('[SHARE_CHAT] Shared', conversationId, 'with', recipientEmails.length, 'people');
-            return jsonResponse(res, 200, { 
-              success: true, 
-              conversationId, 
-              sharedWith: recipientEmails,
-              message: `Shared with ${recipientEmails.length} ${recipientEmails.length === 1 ? 'person' : 'people'}`
-            });
-          } catch (err) {
-            console.error('[SHARE_CHAT] Error:', err.message);
-            return jsonResponse(res, 500, { error: err.message });
-          }
-        }
-
-        // Unknown type with no message — reject
-        if (!message) {
-          console.log('[ROUTER] Unknown type with no message:', body.type);
-          return jsonResponse(res, 400, { error: 'Unknown type or message required', type: body.type });
-        }
-      }
-      // ⬡B:REACH.router:TYPE_ROUTING_END:v2.0.0:20260225⬡
-
       if (!message) return jsonResponse(res, 400, { error: 'message required' });
-
-      // GUARD - Layer 0 Security Check
-      if (message !== 'GREET_INCOMING_CALL' && !body.source?.includes('internal')) {
-        const guardResult = await GUARD_validateRequest(req, body);
-        if (!guardResult.approved) {
-          console.log('[ROUTER] ⛔ GUARD BLOCKED:', guardResult.threats);
-          return jsonResponse(res, 403, { error: 'Request blocked by security', trace: 'GUARD*BLOCK' });
-        }
-      }
-      
-      // GREET - Smart greeting for incoming calls
-      if (message === 'GREET_INCOMING_CALL' || message.toLowerCase() === 'greet_incoming_call') {
-        console.log('[ROUTER] GREET_INCOMING_CALL triggered');
-        const callerContext = { caller_number: body.caller_number || body.callerNumber, source: body.source || 'livekit_voice', channel: body.channel || 'phone' };
-        const greetResult = await GREET_smartGreeting(callerContext);
-        return jsonResponse(res, 200, { response: greetResult.greeting, source: 'REACH-AIR-GREET', trace: greetResult.trace, agents: ['HAM', 'TIME', 'TRACE', 'GREET'] });
-      }
-
-
-      // ⬡B:AIR:REACH.GREET.HANDLER:CODE:smart.greeting.incoming:T10:v1.0.0:20260221⬡
-      // SPECIAL: Smart greeting for incoming calls
-      if (message === 'GREET_INCOMING_CALL' || message.toLowerCase() === 'greet_incoming_call') {
-        console.log('[ROUTER] GREET_INCOMING_CALL - Deploying smart greeting agents...');
-        
-        // Extract caller context from body
-        const callerContext = {
-          caller_number: body.caller_number || body.callerNumber || null,
-          device_id: body.device_id || null,
-          source: body.source || 'livekit_voice',
-          channel: body.channel || 'phone'
-        };
-        
-        try {
-          const greetResult = await GREET_smartGreeting(callerContext);
-          console.log('[ROUTER] GREET complete:', greetResult.greeting);
-          
-          return jsonResponse(res, 200, {
-            response: greetResult.greeting,
-            isGoodbye: false,
-            missionNumber: `⬡M:greet:incoming:${Date.now()}⬡`,
-            source: 'REACH-AIR-GREET',
-            trace: greetResult.trace,
-            agents: ['HAM', 'TIME', 'COLE', 'GREET'],
-            greetingContext: greetResult.context
-          });
-        } catch (e) {
-          console.log('[ROUTER] GREET error:', e.message);
-          // Fallback greeting
-          return jsonResponse(res, 200, {
-            response: "Hey! Good to hear from you.",
-            isGoodbye: false,
-            missionNumber: `⬡M:greet:fallback:${Date.now()}⬡`,
-            source: 'REACH-AIR-GREET',
-            trace: 'AIR*GREET_ERROR*VARA',
-            agents: ['GREET']
-          });
-        }
-      }
-
 
       // If agent_id or agent_name provided, load that agent's JD and route specifically
       if (agent_id || agent_name) {
@@ -15267,13 +7914,7 @@ Respond as this agent specifically — stay in character.`;
             4000
           );
           
-          
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
-      return jsonResponse(res, 200, {
+          return jsonResponse(res, 200, {
             response: agentResult,
             agent: agentJD.full_name,
             acronym: agentJD.acronym,
@@ -15286,272 +7927,18 @@ Respond as this agent specifically — stay in character.`;
         }
       }
       
-      // Default: route through ABABASE (replaces old AIR_text)
-      // ⬡B:ROUTER:ABABASE_REDIRECT:v3.0:20260227⬡
-      console.log('[ROUTER v3] Routing through ABABASE: "' + message.substring(0, 80) + '"');
-      
-      // Use ababase if available, fallback to AIR_text
-      let result;
-      if (ababase) {
-        try {
-          result = await ababase.processWithAbabse({
-            message: message,
-            userId: body.userId || body.ham_id || 'brandon',
-            conversationId: body.conversationId,
-            channel: body.channel || body.source || 'router',
-            agentHints: []
-          });
-          console.log('[ROUTER v3] ABABASE success');
-        } catch (e) {
-          console.log('[ROUTER v3] ABABASE error, falling back to AIR_text:', e.message);
-          const hamContext = {
-            source: body.source || "api",
-            channel: body.channel || "chat",
-            caller_number: body.caller_number,
-            ham_id: body.ham_id || body.userId,
-            ham_name: body.ham_name || body.context?.userName || 'Brandon',
-            ham_email: body.ham_email || body.context?.userEmail,
-            trust_level: body.trust_level || 'T10'
-          };
-          result = await AIR_text(message, history || [], hamContext);
-        }
-      } else {
-        // Fallback if ababase not loaded
-        const hamContext = {
-          source: body.source || "api",
-          channel: body.channel || "chat",
-          caller_number: body.caller_number,
-          ham_id: body.ham_id || body.userId,
-          ham_name: body.ham_name || body.context?.userName || 'Brandon',
-          ham_email: body.ham_email || body.context?.userEmail,
-          trust_level: body.trust_level || 'T10'
-        };
-        result = await AIR_text(message, history || [], hamContext);
-      }
-      
-      // ⬡B:AIR:VALIDATOR:CHECK:response.quality:v1.0.0:20260222⬡
-      // Validate response before sending - reject garbage
-      const validation = AIR_validateResponse(result.response, message);
-      if (!validation.valid) {
-        console.log('[AIR:VALIDATOR] Rejected response:', validation.reason);
-        // Try once more with explicit instruction
-        const retryResult = await AIR_text(validation.suggestion + ' Original question: ' + message, history || [], { source: 'retry', channel: body.channel || 'chat', caller_number: body.caller_number });
-        const retryValidation = AIR_validateResponse(retryResult.response, message);
-        if (retryValidation.valid) {
-          result = retryResult;
-          console.log('[AIR:VALIDATOR] Retry succeeded');
-        } else {
-          // Give up, use fallback
-          result.response = validation.suggestion;
-          console.log('[AIR:VALIDATOR] Using fallback suggestion');
-        }
-      }
-      
-      // ⬡B:AIR:JUDGE:CHECK:final.quality:v1.0.0:20260222⬡
-      // DISABLED: Judge was incorrectly rejecting valid dispatch results
-      // and replacing them with brain search garbage
-      // TODO: Fix judge to recognize dispatch results as valid
-      /*
-      try {
-        const judgment = await AIR_judge(message, result.response, result.reasoning);
-        if (judgment.success && judgment.judgment) {
-          console.log('[AIR:JUDGE] Quality score:', judgment.judgment.quality_score);
-          if (!judgment.judgment.approved && judgment.judgment.quality_score < 5) {
-            console.log('[AIR:JUDGE] Low quality - attempting fix');
-            // Try to fix based on suggestion
-            if (judgment.judgment.fix_suggestion) {
-              const fixedResult = await AIR_text(judgment.judgment.fix_suggestion + ' Answer this: ' + message, history || [], { source: 'judge_fix' });
-              if (fixedResult.response) {
-                result.response = fixedResult.response;
-                console.log('[AIR:JUDGE] Applied fix');
-              }
-            }
-          }
-        }
-      } catch (e) {
-        console.log('[AIR:JUDGE] Skipped:', e.message);
-      }
-      */
-      
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
-      
-      // ⬡B:PROTO:ENFORCEMENT:wired:20260225⬡
-      // PROTO runs on ALL outputs before delivery - uses HAM from brain
-      let finalResponse = result.response;
-      if (finalResponse && typeof finalResponse === 'string') {
-        // Get caller identity from body or result
-        const callerIdentity = body.callerIdentity || result.callerIdentity || { name: body.userId };
-        const protoResult = await PROTO_enforce(finalResponse, callerIdentity);
-        if (protoResult.enforced) {
-          console.log('[PROTO] Cleaned response, violations:', protoResult.violations.length, '| HAM:', protoResult.hamName);
-          finalResponse = protoResult.text;
-        }
-      }
-      
+      // Default: route through AIR_text (LUKE/COLE/JUDE/PACK)
+      console.log('[ROUTER] Routing message through AIR: "' + message.substring(0, 80) + '"');
+      const result = await AIR_text(message, history || []);
       return jsonResponse(res, 200, {
-        response: finalResponse,
+        response: result.response,
         isGoodbye: result.isGoodbye,
         missionNumber: result.missionNumber,
         source: 'REACH-AIR',
-        trace: result.trace || 'USER*AIR*PROTO*AGENTS*REACH', agents: result.agents
+        trace: 'USER*AIR*LUKE,COLE,JUDE,PACK*MODEL*VARA'
       });
     } catch (e) {
       console.error('[ROUTER] Error:', e.message);
-      return jsonResponse(res, 500, { error: e.message });
-    }
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════
-  // ⬡B:ABABASE:AIR.V2:PROCESS:v1.0.0:20260227⬡
-  // /api/air/v2/process - ABABASE AIR with fat context injection
-  // This is the new architecture with:
-  // - Exact contact matching (no semantic search confusion)
-  // - HAM (Human ABA Master) context injection
-  // - Single-threaded agentic loop
-  // - Prompt caching for cost reduction
-  // ═══════════════════════════════════════════════════════════════════════
-  if (path === '/api/air/v2/process' && method === 'POST') {
-    if (!ababase) {
-      return jsonResponse(res, 503, { 
-        error: 'ABABASE not loaded', 
-        hint: 'Ensure ababase/bridge.js exists and all dependencies installed'
-      });
-    }
-
-    try {
-      const body = await parseBody(req);
-      const { message, userId, conversationId, channel, agentHints } = body;
-      
-      if (!message) {
-        return jsonResponse(res, 400, { error: 'message required' });
-      }
-
-      console.log('[ABABASE] /api/air/v2/process called:', {
-        message: message.substring(0, 50) + '...',
-        channel: channel || 'api'
-      });
-
-      const result = await ababase.processWithAbabse({
-        message,
-        userId,
-        conversationId,
-        channel: channel || 'api',
-        agentHints: agentHints || []
-      });
-
-      // ⬡B:STATS:LOGGING:v1.0:20260227⬡
-      // Log prompt cache and compression stats
-      try {
-        const usage = result.usage || {};
-        if (usage.cache_read_input_tokens || usage.cache_creation_input_tokens) {
-          // Log cache stats
-          await fetch(SUPABASE_URL + '/rest/v1/prompt_cache_stats', {
-            method: 'POST',
-            headers: {
-              'apikey': SUPABASE_ANON,
-              'Authorization': 'Bearer ' + SUPABASE_ANON,
-              'Content-Type': 'application/json',
-              'Prefer': 'return=minimal'
-            },
-            body: JSON.stringify({
-              request_id: result.requestId || Date.now().toString(),
-              model: result.model || 'claude-sonnet-4-20250514',
-              cache_creation_input_tokens: usage.cache_creation_input_tokens || 0,
-              cache_read_input_tokens: usage.cache_read_input_tokens || 0,
-              input_tokens: usage.input_tokens || 0,
-              output_tokens: usage.output_tokens || 0
-            })
-          });
-          console.log('[CACHE STATS] Hit rate:', 
-            Math.round((usage.cache_read_input_tokens || 0) / ((usage.cache_read_input_tokens || 0) + (usage.input_tokens || 1)) * 100) + '%'
-          );
-        }
-        
-        if (result.compression) {
-          // Log compression stats
-          await fetch(SUPABASE_URL + '/rest/v1/compression_stats', {
-            method: 'POST',
-            headers: {
-              'apikey': SUPABASE_ANON,
-              'Authorization': 'Bearer ' + SUPABASE_ANON,
-              'Content-Type': 'application/json',
-              'Prefer': 'return=minimal'
-            },
-            body: JSON.stringify({
-              conversation_id: conversationId,
-              original_tokens: result.compression.original || 0,
-              compressed_tokens: result.compression.compressed || 0,
-              tier: result.compression.tier || 'none'
-            })
-          });
-          console.log('[COMPRESSION] Ratio:', result.compression.ratio || '0%');
-        }
-      } catch (statsErr) {
-        console.log('[STATS] Logging error (non-fatal):', statsErr.message);
-      }
-
-      return jsonResponse(res, 200, {
-        success: true,
-        response: result.response,
-        actions: result.actions || [],
-        metadata: {
-          model: result.model,
-          tokensUsed: result.tokensUsed,
-          cost: result.cost,
-          agentsInvoked: result.agentsInvoked,
-          toolsExecuted: result.toolsExecuted
-        },
-        trace: result.trace || null  // Full trace data from ababase
-      });
-
-    } catch (e) {
-      console.error('[ABABASE] Process error:', e.message);
-      return jsonResponse(res, 500, { 
-        error: e.message,
-        stack: process.env.NODE_ENV === 'development' ? e.stack : undefined
-      });
-    }
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════
-  // ⬡B:ABABASE:CONTACT.LOOKUP:v1.0.0:20260227⬡
-  // /api/air/v2/contact - Direct contact lookup (exact match, no semantic)
-  // Fixes the BJ/Brandon bug permanently
-  // ═══════════════════════════════════════════════════════════════════════
-  if (path === '/api/air/v2/contact' && method === 'POST') {
-    if (!ababase) {
-      return jsonResponse(res, 503, { error: 'ABABASE not loaded' });
-    }
-
-    try {
-      const body = await parseBody(req);
-      const { name, userId } = body;
-      
-      if (!name) {
-        return jsonResponse(res, 400, { error: 'name required' });
-      }
-
-      const contact = await ababase.lookupContact(name, userId);
-      
-      if (!contact) {
-        return jsonResponse(res, 404, { 
-          error: 'Contact not found',
-          name: name,
-          hint: 'Use exact name match (e.g., "Brandon" not "Brandon Pierce")'
-        });
-      }
-
-      return jsonResponse(res, 200, {
-        success: true,
-        contact: contact
-      });
-
-    } catch (e) {
-      console.error('[ABABASE] Contact lookup error:', e.message);
       return jsonResponse(res, 500, { error: e.message });
     }
   }
@@ -15577,7 +7964,7 @@ Respond as this agent specifically — stay in character.`;
           'Content-Type': 'application/json'
         }
       }, JSON.stringify({
-        model: model || 'claude-sonnet-4-5-20250929',
+        model: model || 'claude-haiku-4-5-20251001',
         max_tokens: max_tokens || 4096,
         system: system || 'You are ABA (A Better AI). Warm butler meets real friend. Professional when it counts, personal when it matters. Flow between both naturally. Never robotic, never stiff. You cook, you care, you get it done.',
         messages
@@ -15596,134 +7983,12 @@ Respond as this agent specifically — stay in character.`;
   // ═══════════════════════════════════════════════════════════════════════
   if (path === '/api/voice/deepgram-token' && method === 'GET') {
     if (!DEEPGRAM_KEY) return jsonResponse(res, 503, { error: 'Deepgram not configured' });
-    
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
-      return jsonResponse(res, 200, {
+    return jsonResponse(res, 200, {
       token: DEEPGRAM_KEY,
       model: 'nova-2',
       language: 'en-US',
       source: 'REACH'
     });
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════
-  // ⬡B:REACH.voice.transcribe:API:v1.1.3:server.side.deepgram:20260225⬡
-  // STEP 5: /api/voice/transcribe — Server-side Deepgram speech-to-text
-  // Receives FormData with audio blob, returns transcript text
-  // ═══════════════════════════════════════════════════════════════════════
-  if (path === '/api/voice/transcribe' && method === 'POST') {
-    try {
-      if (!DEEPGRAM_KEY) return jsonResponse(res, 503, { error: 'Deepgram not configured' });
-
-      // Collect raw body as buffer
-      const chunks = [];
-      for await (const chunk of req) { chunks.push(chunk); }
-      const audioBuffer = Buffer.concat(chunks);
-
-      if (audioBuffer.length < 100) {
-        return jsonResponse(res, 400, { error: 'Audio data too small or missing' });
-      }
-
-      // Determine content type from request
-      const contentType = req.headers['content-type'] || 'audio/webm';
-      const isFormData = contentType.includes('multipart/form-data');
-
-      let audioData = audioBuffer;
-      let mimeType = 'audio/webm';
-
-      if (isFormData) {
-        // Extract audio from multipart form data
-        const boundary = contentType.split('boundary=')[1];
-        if (boundary) {
-          const bodyStr = audioBuffer.toString('latin1');
-          const parts = bodyStr.split('--' + boundary);
-          for (const part of parts) {
-            if (part.includes('Content-Type: audio')) {
-              const headerEnd = part.indexOf('\r\n\r\n');
-              if (headerEnd > -1) {
-                audioData = Buffer.from(part.slice(headerEnd + 4).replace(/\r\n$/, ''), 'latin1');
-                const typeMatch = part.match(/Content-Type:\s*([^\r\n]+)/);
-                if (typeMatch) mimeType = typeMatch[1].trim();
-              }
-              break;
-            }
-          }
-        }
-      } else {
-        mimeType = contentType.split(';')[0];
-      }
-
-      console.log('[TRANSCRIBE] Processing', audioData.length, 'bytes, type:', mimeType);
-
-      // Send to Deepgram nova-2
-      const dgResult = await httpsRequest({
-        hostname: 'api.deepgram.com',
-        path: '/v1/listen?model=nova-2&language=en-US&smart_format=true&punctuate=true',
-        method: 'POST',
-        headers: {
-          'Authorization': 'Token ' + DEEPGRAM_KEY,
-          'Content-Type': mimeType
-        }
-      }, audioData);
-
-      const dgJson = JSON.parse(dgResult.data.toString());
-      const transcript = dgJson.results?.channels?.[0]?.alternatives?.[0]?.transcript || '';
-      const confidence = dgJson.results?.channels?.[0]?.alternatives?.[0]?.confidence || 0;
-
-      console.log('[TRANSCRIBE] Result:', transcript.substring(0, 50), '... confidence:', confidence);
-      return jsonResponse(res, 200, { transcript, confidence, source: 'deepgram-nova-2' });
-    } catch (e) {
-      console.error('[TRANSCRIBE] Error:', e.message);
-      return jsonResponse(res, 500, { error: 'Transcription failed: ' + e.message });
-    }
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════
-  // ⬡B:REACH.voice.synthesize:API:v1.1.3:elevenlabs.tts.alias:20260225⬡
-  // STEP 6: /api/voice/synthesize — ElevenLabs TTS (aliases /api/voice/tts)
-  // Receives {text, voiceId, model}, returns audio/mpeg blob
-  // ═══════════════════════════════════════════════════════════════════════
-  if (path === '/api/voice/synthesize' && method === 'POST') {
-    try {
-      const body = await parseBody(req);
-      const { text, voiceId, voice_id } = body;
-      if (!text) return jsonResponse(res, 400, { error: 'text required' });
-      if (!ELEVENLABS_KEY) return jsonResponse(res, 503, { error: 'ElevenLabs not configured' });
-
-      const finalVoiceId = voiceId || voice_id || ELEVENLABS_VOICE || 'AIFDUhRnM6s61433WMNu';
-      const finalModel = body.model || ELEVENLABS_MODEL || 'eleven_v3';
-
-      console.log('[SYNTHESIZE] Generating speech:', text.substring(0, 50), '...');
-
-      const result = await httpsRequest({
-        hostname: 'api.elevenlabs.io',
-        path: '/v1/text-to-speech/' + finalVoiceId,
-        method: 'POST',
-        headers: {
-          'xi-api-key': ELEVENLABS_KEY,
-          'Content-Type': 'application/json',
-          'Accept': 'audio/mpeg'
-        }
-      }, JSON.stringify({
-        text,
-        model_id: finalModel,
-        voice_settings: { stability: 0.5, similarity_boost: 0.75 }
-      }));
-
-      console.log('[SYNTHESIZE] Audio generated, size:', result.data.length);
-      res.writeHead(200, {
-        'Content-Type': 'audio/mpeg',
-        'Content-Length': result.data.length
-      });
-      return res.end(result.data);
-    } catch (e) {
-      console.error('[SYNTHESIZE] Error:', e.message);
-      return jsonResponse(res, 500, { error: 'Synthesis failed: ' + e.message });
-    }
   }
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -15776,7 +8041,7 @@ Respond as this agent specifically — stay in character.`;
         return res.end();
       }
 
-      const voiceId = ELEVENLABS_VOICE || 'AIFDUhRnM6s61433WMNu';
+      const voiceId = ELEVENLABS_VOICE || 'LD658Mupr7vNwTTJSPsk';
       const result = await httpsRequest({
         hostname: 'api.elevenlabs.io',
         path: '/v1/text-to-speech/' + voiceId,
@@ -15859,26 +8124,14 @@ Respond as this agent specifically — stay in character.`;
           
           if (result.success) {
             const names = groupCallParticipants.map(p => p.name).join(' and ');
-            
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
-      return jsonResponse(res, 200, {
+            return jsonResponse(res, 200, {
               response: `Got it! I'm setting up a group call with ${names}. Everyone should be receiving calls right now to join the conference.`,
               group_call_initiated: true,
               conference: result.conferenceName,
               participants: result.participants
             });
           } else {
-            
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
-      return jsonResponse(res, 200, {
+            return jsonResponse(res, 200, {
               response: "I tried to set up the group call but hit a snag. Let me try individual calls instead.",
               error: result.error
             });
@@ -15903,26 +8156,14 @@ Respond as this agent specifically — stay in character.`;
           const result = await scheduleCall(userMessage, callerIdentity);
           
           if (result.success) {
-            
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
-      return jsonResponse(res, 200, {
+            return jsonResponse(res, 200, {
               response: `Done! I've scheduled a call to ${result.target} for ${result.scheduledTime}. I'll make sure that happens.`,
               scheduled_call: true,
               scheduledTime: result.scheduledTime,
               target: result.target
             });
           } else {
-            
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
-      return jsonResponse(res, 200, {
+            return jsonResponse(res, 200, {
               response: "I had trouble understanding when you'd like me to call. Could you say something like 'call me at 8am tomorrow'?"
             });
           }
@@ -15940,13 +8181,7 @@ Respond as this agent specifically — stay in character.`;
         
         // Note: For ElevenLabs calls, we don't have direct call SID access
         // This would need integration with the current call context
-        
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
-      return jsonResponse(res, 200, {
+        return jsonResponse(res, 200, {
           response: `I understand you'd like to be transferred to ${transferRequest.target.name}. For now, let me call them and add you both to a conference.`,
           transfer_requested: true,
           target: transferRequest.target.name,
@@ -15958,50 +8193,28 @@ Respond as this agent specifically — stay in character.`;
       // HANDLER 3.5: EMAIL SENDING - "Send an email to Eric about..."
       // ⬡B:TOUCH:IMAN.VOICE.EMAIL:handler:20260216⬡
       // ═══════════════════════════════════════════════════════════════════
-      // Exclude "send me an email" - handled by self-email handler below
-      const isSelfEmail = msgLower.match(/send\s+me\s+/i) || msgLower.match(/email\s+me\b/i) || msgLower.match(/me\s+an?\s+email/i);
-      const isEmailRequest = !isSelfEmail && (
-                            (msgLower.includes('send') && msgLower.includes('email')) ||
-                            (msgLower.includes('email') && msgLower.includes('to')));
+      const isEmailRequest = msgLower.includes('send') && msgLower.includes('email') ||
+                            msgLower.includes('email') && msgLower.includes('to');
       
       if (isEmailRequest) {
         console.log('[AIR VOICE TOOL] EMAIL REQUEST DETECTED!');
         
         try {
-          // ⬡B:IMAN:FIX:pass_trust_level:20260226⬡ - Pass trust for T10 auto-send
-          const emailResult = await IMAN_voiceEmailCommand(userMessage, callerIdentity, callerIdentity.trust);
+          const emailResult = await IMAN_voiceEmailCommand(userMessage, callerIdentity);
           
           if (emailResult.success && emailResult.awaiting_confirmation) {
-            
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
-      return jsonResponse(res, 200, {
+            return jsonResponse(res, 200, {
               response: emailResult.response,
               email_draft: emailResult.draft,
               awaiting_confirmation: true
             });
           } else if (emailResult.success) {
-            
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
-      return jsonResponse(res, 200, {
+            return jsonResponse(res, 200, {
               response: emailResult.response,
               email_sent: true
             });
           } else {
-            
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
-      return jsonResponse(res, 200, {
+            return jsonResponse(res, 200, {
               response: emailResult.response
             });
           }
@@ -16010,258 +8223,6 @@ Respond as this agent specifically — stay in character.`;
         }
       }
       
-      // ═══════════════════════════════════════════════════════════════════
-      // HANDLER 3.6: SMS SENDING - "Text BJ and say whats up"
-      // ⬡B:TOUCH:CARA.VOICE.SMS:handler:20260222⬡
-      // ═══════════════════════════════════════════════════════════════════
-      const isSmsRequest = msgLower.includes('text') && (msgLower.includes('say') || msgLower.includes('tell') || msgLower.includes('message'));
-      
-      if (isSmsRequest) {
-        console.log('[AIR VOICE TOOL] SMS REQUEST DETECTED!');
-        
-        try {
-          // Parse: "text BJ and say whats up bro" → name: "bj", message: "whats up bro"
-          // Also: "text BJ say whats good" → name: "bj", message: "whats good"
-          let targetName = null;
-          let messageText = 'Hey, ABA asked me to reach out.';
-          
-          // Pattern 1: "text NAME and say MESSAGE" or "text NAME say MESSAGE"
-          const match1 = userMessage.match(/text\s+([a-zA-Z]+)(?:\s+and)?\s+(?:say|tell|message)\s+(.+)/i);
-          // Pattern 2: "text NAME MESSAGE" (no say/tell)
-          const match2 = userMessage.match(/text\s+([a-zA-Z]+)\s+(.+)/i);
-          
-          if (match1) {
-            targetName = match1[1].toLowerCase();
-            messageText = match1[2].trim();
-          } else if (match2) {
-            targetName = match2[1].toLowerCase();
-            // Check if second part starts with keywords we should skip
-            if (!['and', 'say', 'tell', 'message'].includes(match2[2].split(' ')[0].toLowerCase())) {
-              messageText = match2[2].trim();
-            }
-          }
-          
-          // Single word extraction fallback
-          if (!targetName) {
-            const nameMatch = userMessage.match(/text\s+([a-zA-Z]+)/i);
-            targetName = nameMatch ? nameMatch[1].toLowerCase() : null;
-          }
-          
-          if (targetName) {
-            // Look up contact in HAM identities
-            const hamResult = await httpsRequest({
-              hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-              path: '/rest/v1/aba_memory?memory_type=eq.ham_identity&content=ilike.*' + encodeURIComponent(targetName) + '*&limit=1',
-              method: 'GET',
-              headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON }
-            });
-            
-            if (hamResult.status === 200) {
-              const contacts = JSON.parse(hamResult.data.toString());
-              if (contacts.length > 0) {
-                const phoneMatch = contacts[0].content.match(/Phone:\s*([+\d]+)/);
-                if (phoneMatch) {
-                  const targetPhone = phoneMatch[1];
-                  console.log('[AIR VOICE TOOL] Sending SMS to', targetName, 'at', targetPhone);
-                  
-                  const smsResult = await sendSMSFromCall(targetPhone, messageText);
-                  
-                  if (smsResult.success) {
-                    return jsonResponse(res, 200, {
-                      response: 'Done! I sent ' + targetName + ' your message: "' + messageText.substring(0, 50) + '"',
-                      sms_sent: true,
-                      target: targetName,
-                      agents: ['CARA', 'HAM']
-                    });
-                  }
-                }
-              }
-            }
-            return jsonResponse(res, 200, {
-              response: 'I could not find a phone number for ' + targetName + '. Can you give me their number?',
-              agents: ['CARA', 'HAM']
-            });
-          }
-        } catch (e) {
-          console.log('[AIR VOICE TOOL] SMS error:', e.message);
-        }
-      }
-      
-      // ═══════════════════════════════════════════════════════════════════
-      // HANDLER 3.7: SEND EMAIL TO SELF - "Send me an email"
-      // ⬡B:TOUCH:IMAN.VOICE.SELF_EMAIL:handler:20260222⬡
-      // ═══════════════════════════════════════════════════════════════════
-      const isSelfEmailRequest = (msgLower.includes('send') && msgLower.includes('me') && msgLower.includes('email')) ||
-                                  (msgLower.includes('email') && msgLower.includes('me') && !msgLower.includes('to '));
-      
-      if (isSelfEmailRequest) {
-        console.log('[AIR VOICE TOOL] SELF EMAIL REQUEST DETECTED!');
-        console.log('[AIR VOICE TOOL] Sending self-email...');
-        
-        try {
-          // Parse message content
-          const emailMatch = userMessage.match(/email.*(?:saying|about|with)\s+(.+)/i);
-          const messageContent = emailMatch ? emailMatch[1] : 'Test email from ABA';
-          console.log('[AIR VOICE TOOL] Email content:', messageContent);
-          
-          // Send to Brandon's email
-          const emailResult = await IMAN_sendEmailGmail('brandon@globalmajoritygroup.com', 'ABA Message: ' + messageContent.substring(0, 30), messageContent);
-          console.log('[AIR VOICE TOOL] Email result:', JSON.stringify(emailResult));
-          
-          if (emailResult && emailResult.success) {
-            return jsonResponse(res, 200, {
-              response: 'Done! I sent you an email with that message.',
-              email_sent: true,
-              target: 'brandon@globalmajoritygroup.com',
-              agents: ['IMAN']
-            });
-          } else {
-            // Email failed but we caught it
-            return jsonResponse(res, 200, {
-              response: 'I tried to send that email but hit a snag. Want me to try again?',
-              email_error: emailResult?.error || 'unknown',
-              agents: ['IMAN']
-            });
-          }
-        } catch (e) {
-          console.log('[AIR VOICE TOOL] Self email error:', e.message);
-          // Return error response instead of falling through
-          return jsonResponse(res, 200, {
-            response: 'I ran into an issue sending that email: ' + e.message.substring(0, 50) + '. Let me try a different approach.',
-            error: e.message,
-            agents: ['IMAN']
-          });
-        }
-      }
-      
-      // ═══════════════════════════════════════════════════════════════════
-      // HANDLER 3.8: TROUBLESHOOTING - Tech questions need web search
-      // ⬡B:TOUCH:SAGE.VOICE.TROUBLESHOOT:handler:20260222⬡
-      // ═══════════════════════════════════════════════════════════════════
-      const isTroubleshootRequest = (msgLower.includes('fix') || msgLower.includes('stuck') || 
-                                     msgLower.includes('not working') || msgLower.includes('not connecting') ||
-                                     msgLower.includes('troubleshoot') || msgLower.includes('problem') ||
-                                     msgLower.includes('broken') || msgLower.includes('help with')) &&
-                                     (msgLower.includes('omi') || msgLower.includes('device') || 
-                                      msgLower.includes('phone') || msgLower.includes('app') ||
-                                      msgLower.includes('computer') || msgLower.includes('light'));
-      
-      if (isTroubleshootRequest) {
-        console.log('[AIR VOICE TOOL] TROUBLESHOOTING REQUEST DETECTED!');
-        
-        try {
-          console.log('[AIR VOICE TOOL] Using Groq for troubleshooting...');
-          // Use Groq for FAST troubleshooting (no web search, just knowledge)
-          const troubleResult = await httpsRequest({
-            hostname: 'api.groq.com',
-            path: '/openai/v1/chat/completions',
-            method: 'POST',
-            headers: {
-              'Authorization': 'Bearer ' + (process.env.GROQ_API_KEY || ''),
-              'Content-Type': 'application/json'
-            }
-          }, JSON.stringify({
-            model: 'llama-3.3-70b-versatile',
-            messages: [{ 
-              role: 'system', 
-              content: 'You are a tech support expert. Give brief, helpful troubleshooting steps. Be concise - max 3 steps.'
-            }, { 
-              role: 'user', 
-              content: userMessage 
-            }],
-            max_tokens: 200,
-            temperature: 0.3
-          }));
-          
-          if (troubleResult.status === 200) {
-            const troubleData = JSON.parse(troubleResult.data.toString());
-            const answer = troubleData.choices?.[0]?.message?.content;
-            
-            if (answer) {
-              console.log('[AIR VOICE TOOL] Troubleshoot answer:', answer.substring(0, 100));
-              return jsonResponse(res, 200, {
-                response: answer,
-                source: 'troubleshoot',
-                agents: ['SAGE']
-              });
-            }
-          }
-        } catch (e) {
-          console.log('[AIR VOICE TOOL] Troubleshoot error:', e.message);
-        }
-      }
-
-      // ═══════════════════════════════════════════════════════════════════
-      // HANDLER 3.9: MEMORY SEARCH - "What did we discuss" / "What did X help us do"
-      // ⬡B:TOUCH:COLE.VOICE.MEMORY:handler:20260222⬡
-      // ═══════════════════════════════════════════════════════════════════
-      const isMemoryRequest = msgLower.includes('what did') || msgLower.includes('remember when') ||
-                               msgLower.includes('we talked about') || msgLower.includes('help us do') ||
-                               msgLower.includes('help us with');
-      
-      if (isMemoryRequest) {
-        console.log('[AIR VOICE TOOL] MEMORY SEARCH REQUEST DETECTED!');
-        
-        try {
-          // Extract keywords for search
-          const keywords = userMessage.split(/\s+/)
-            .filter(w => w.length > 3)
-            .filter(w => !['what', 'when', 'where', 'help', 'with', 'about', 'that', 'this', 'they', 'were'].includes(w.toLowerCase()))
-            .slice(0, 5)
-            .join(' ');
-          
-          console.log('[AIR VOICE TOOL] Memory search keywords:', keywords);
-          
-          // Search transcripts and memories
-          const memoryResult = await httpsRequest({
-            hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-            path: '/rest/v1/aba_memory?or=(memory_type.eq.omi_transcript,memory_type.eq.brandon_context)&content=ilike.*' + encodeURIComponent(keywords) + '*&limit=3&order=created_at.desc',
-            method: 'GET',
-            headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON }
-          });
-          
-          if (memoryResult.status === 200) {
-            const memories = JSON.parse(memoryResult.data.toString());
-            if (memories.length > 0) {
-              const memoryContent = memories.map(m => m.content.substring(0, 300)).join(' | ');
-              
-              // Use model to summarize relevant info
-              const summaryResult = await httpsRequest({
-                hostname: 'api.anthropic.com',
-                path: '/v1/messages',
-                method: 'POST',
-                headers: {
-                  'x-api-key': ANTHROPIC_KEY,
-                  'anthropic-version': '2023-06-01',
-                  'Content-Type': 'application/json'
-                }
-              }, JSON.stringify({
-                model: 'claude-sonnet-4-5-20250929',
-                max_tokens: 200,
-                messages: [{
-                  role: 'user',
-                  content: 'Based on this context from my memories: "' + memoryContent + '". Answer this question briefly (2-3 sentences): "' + userMessage + '"'
-                }]
-              }));
-              
-              if (summaryResult.status === 200) {
-                const summaryData = JSON.parse(summaryResult.data.toString());
-                const answer = summaryData.content?.[0]?.text;
-                if (answer) {
-                  return jsonResponse(res, 200, {
-                    response: answer,
-                    source: 'memory_search',
-                    agents: ['COLE', 'PACK']
-                  });
-                }
-              }
-            }
-          }
-        } catch (e) {
-          console.log('[AIR VOICE TOOL] Memory search error:', e.message);
-        }
-      }
-
       // ═══════════════════════════════════════════════════════════════════
       // HANDLER 4: SINGLE OUTBOUND CALLS - "Call me back" or "Call Eric"
       // ═══════════════════════════════════════════════════════════════════
@@ -16281,8 +8242,7 @@ Respond as this agent specifically — stay in character.`;
           
           // ⬡B:TOUCH:PHASE3:SPURT3.0:use.master.contacts:20260216⬡
           // Use centralized MASTER_CONTACTS with timezone support
-          // ⬡B:FIX:await_lookupContact:20260227⬡
-          const contact = await lookupContact(person);
+          const contact = lookupContact(person);
           if (contact) {
             targetPhone = contact.phone;
             targetName = contact.name;
@@ -16328,13 +8288,7 @@ Respond as this agent specifically — stay in character.`;
             ? "Absolutely! I will hang up now and call you right back. Talk to you in just a moment!"
             : `Got it! I am calling ${targetName} right now. They should be getting my call any second.`;
           
-          
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
-      return jsonResponse(res, 200, {
+          return jsonResponse(res, 200, {
             response: responseMsg,
             outbound_call_initiated: true,
             target: targetName,
@@ -16342,13 +8296,7 @@ Respond as this agent specifically — stay in character.`;
           });
         } catch (e) {
           console.log('[AIR VOICE TOOL] Outbound call error:', e.message);
-          
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
-      return jsonResponse(res, 200, {
+          return jsonResponse(res, 200, {
             response: "I tried to place that call but hit a small snag. Let me stay on the line with you instead. What else can I help with?"
           });
         }
@@ -16368,94 +8316,77 @@ Respond as this agent specifically — stay in character.`;
       addToConversationHistory(conversationId, 'user', userMessage);
       
       let responseText = "I understand. Let me help you with that.";
-      let airResult = null;
-      let agentsDeployed = [];
-      let missionTrace = '';
-      let missionNumber = '';
       
-      // ⬡B:AIR:VOICE_TOOL_SMART:v4.0.0:20260222⬡
-      // FULL AIR deployment - same as text router
-      // THINK → AGENTS → JUDGE → RETURN-TO-ME
       try {
-        console.log('[AIR VOICE TOOL] ═══ FULL AIR DEPLOYMENT ═══');
-        console.log('[AIR VOICE TOOL] Query:', userMessage);
-        console.log('[AIR VOICE TOOL] Caller:', callerIdentity?.name || 'Unknown');
-        
-        // STEP 1: AIR_text with FULL agent deployment
-        airResult = await AIR_text(userMessage, conversationHistory || [], {
-          source: 'elevenlabs_voice',
-          channel: 'phone',
-          caller_number: callerNumber,
-          ham_id: callerIdentity?.id
+        const abaciaResult = await fetch('https://abacia-services.onrender.com/api/air/process', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            query: userMessage,
+            caller: callerIdentity,
+            source: 'elevenlabs_voice',
+            conversation_id: conversationId,
+            conversation_history: conversationHistory  // NEW: Send history for context
+          })
         });
         
-        if (airResult) {
-          responseText = airResult.response || responseText;
-          agentsDeployed = airResult.agents || [];
-          missionTrace = airResult.trace || '';
-          missionNumber = airResult.missionNumber || '';
+        if (abaciaResult.ok) {
+          const abaciaData = await abaciaResult.json();
+          console.log('[AIR VOICE TOOL] ABACIA success:', abaciaData.success);
+          console.log('[AIR VOICE TOOL] Agents ran:', (abaciaData.agents || []).length);
           
-          console.log('[AIR VOICE TOOL] ✓ Agents deployed:', agentsDeployed.join(', '));
-          console.log('[AIR VOICE TOOL] ✓ Trace:', missionTrace);
-          console.log('[AIR VOICE TOOL] ✓ Mission:', missionNumber);
+          // Check if ABACIA returned a direct response
+          if (abaciaData.response) {
+            responseText = abaciaData.response;
+          }
+          // Check if any agent returned a conversational response
+          else if (abaciaData.agents) {
+            for (const agent of abaciaData.agents) {
+              const result = agent.data?.result;
+              if (result?.response) {
+                responseText = result.response;
+                break;
+              }
+              if (result?.message && !result.message.includes('parsed query')) {
+                responseText = result.message;
+                break;
+              }
+            }
+          }
+        } else {
+          console.log('[AIR VOICE TOOL] ABACIA error status:', abaciaResult.status);
         }
-        
-        // STEP 2: Skip AIR_judge for voice (speed over quality)
-        // Voice needs fast responses - judge adds ~3-5s latency
-        console.log('[AIR VOICE TOOL] Skipping judge for speed');
-        agentsDeployed.push('SPEED_MODE');
-        
       } catch (e) {
-        console.log('[AIR VOICE TOOL] AIR_text error:', e.message);
+        console.log('[AIR VOICE TOOL] ABACIA error:', e.message);
       }
       
-      console.log('[AIR VOICE TOOL] Final response:', responseText.substring(0, 150) + '...');
+      console.log('[AIR VOICE TOOL] Response:', responseText.substring(0, 100) + '...');
       
-      // Add to conversation history
+      // Add ABA response to conversation history
       addToConversationHistory(conversationId, 'assistant', responseText);
       
-      // RETURN-TO-ME: ACTUAL implementation
-      // 1. LOGFUL - Log to brain with full context
-      const missionLog = {
-        content: 'VOICE MISSION [' + (missionNumber || conversationId) + ']: ' +
-                 'Query="' + userMessage + '" | ' +
-                 'Agents=[' + agentsDeployed.join(',') + '] | ' +
-                 'Trace=' + missionTrace + ' | ' +
-                 'Response="' + responseText.substring(0, 200) + '"',
-        memory_type: 'mission_log',
-        categories: ['voice', 'mission', 'air'],
-        importance: 6,
-        source: 'voice_mission_' + Date.now(),
-        tags: ['voice', 'mission', 'agents', ...agentsDeployed.slice(0, 5)]
-      };
-      storeToBrain(missionLog).catch(e => console.log('[LOGFUL] Error:', e.message));
-      
-      // 2. Broadcast to Command Center with FULL mission data
+      // Broadcast response to Command Center
       broadcastToCommandCenter({
-        type: 'voice_mission_complete',
-        source: 'AIR',
+        type: 'voice_response',
+        source: 'abacia',
         conversation_id: conversationId,
-        mission_number: missionNumber,
-        query: userMessage,
-        response: responseText,
-        agents_deployed: agentsDeployed,
-        trace: missionTrace,
+        aba_said: responseText,
         timestamp: new Date().toISOString()
       });
       
-      console.log('[AIR VOICE TOOL] ═══ MISSION COMPLETE ═══');
-      
-      // ⬡B:AIR:REACH.DRAFT.SCAN.VOICE:CODE:output.validation:v1.0.0:20260223⬡
-      const voiceDraftScan = DRAFT_scanOutput(responseText);
-      console.log('[DRAFT] Voice tool scan:', voiceDraftScan.score, voiceDraftScan.passed ? 'PASS' : 'FAIL');
+      // Store in brain
+      storeToBrain({
+        content: 'VOICE CALL [' + conversationId + ']: User said "' + userMessage + '" | ABA responded "' + responseText + '"',
+        memory_type: 'voice_transcript',
+        categories: ['voice', 'elevenlabs', 'conversation'],
+        importance: 5,
+        tags: ['voice', 'elevenlabs', 'transcript']
+      }).catch(e => console.log('[BRAIN] Store error:', e.message));
       
       // Return response for ElevenLabs to speak
       return jsonResponse(res, 200, {
         response: responseText,
-        conversation_id: conversationId,
-        agents: agentsDeployed,
-        trace: missionTrace,
-        mission: missionNumber
+        conversation_id: conversationId
       });
       
     } catch (e) {
@@ -16463,12 +8394,6 @@ Respond as this agent specifically — stay in character.`;
       console.error('[AIR VOICE TOOL] Error name:', e.name);
       console.error('[AIR VOICE TOOL] Error message:', e.message);
       console.error('[AIR VOICE TOOL] Error stack:', e.stack);
-      
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, {
         response: "I apologize, I had a brief moment of confusion. Could you repeat that?",
         debug_error: e.message,
@@ -16515,22 +8440,10 @@ Respond as this agent specifically — stay in character.`;
         tags: ['voice', 'transcript', 'call_complete']
       }).catch(e => console.log('[BRAIN] Store error:', e.message));
       
-      
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, { received: true, conversation_id: conversationId });
       
     } catch (e) {
       console.error('[POST-CALL] Error:', e.message);
-      
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, { received: true, error: e.message });
     }
   }
@@ -16540,13 +8453,7 @@ Respond as this agent specifically — stay in character.`;
   // ████████████████████████████████████████████████████████████████████████████
   if (path === '/api/omi/auth') {
     console.log('[OMI AUTH] Health check at ' + new Date().toISOString());
-    
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
-      return jsonResponse(res, 200, {
+    return jsonResponse(res, 200, {
       authenticated: true,
       app_id: OMI_APP_ID || 'aba-intelligence-layer',
       status: 'active',
@@ -16555,13 +8462,7 @@ Respond as this agent specifically — stay in character.`;
   }
 
   if (path === '/api/omi/manifest' || path === '/api/omi/manifest.json') {
-    
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
-      return jsonResponse(res, 200, {
+    return jsonResponse(res, 200, {
       id: OMI_APP_ID,
       name: 'ABA Intelligence Layer',
       description: 'ABA (A Better AI) processes ambient conversations through TASTE (Transcript Analysis and Semantic Tagging Engine) and stores insights in the ABA Brain.',
@@ -16579,20 +8480,11 @@ Respond as this agent specifically — stay in character.`;
   // ═══════════════════════════════════════════════════════════════════════
   // ⬡B:AIR:REACH.API.OMI_WEBHOOK:CODE:senses.omi.transcript:OMI→REACH→TASTE→BRAIN:T7:v1.5.0:20260213:o1w2h⬡ /api/omi/webhook
   // Receives transcripts from OMI and stores in ABA Brain via TASTE
-  // NOTE: Deduplication moved to module scope (line ~94) for persistence
   // ═══════════════════════════════════════════════════════════════════════
-
   if (path === '/api/omi/webhook' && method === 'POST') {
     try {
       const body = await parseBody(req);
       console.log('[OMI] Webhook received:', JSON.stringify(body).substring(0, 200));
-      
-      // ⬡B:REACH.OMI.DEDUP_CHECK:FIX:20260222⬡ Check for duplicates FIRST
-      const segmentId = body.segments?.[0]?.id || body.id || `${body.session_id}-${Date.now()}`;
-      const segmentText = body.segments?.map(s => s.text).join(' ') || body.text || body.transcript || '';
-      if (isOmiDuplicate(segmentId, segmentText)) {
-        return jsonResponse(res, 200, { status: 'duplicate', skipped: true, reason: 'Already processed within 60s' });
-      }
 
       // ═══ REQUEST LOGGER - stores every incoming OMI request for debugging ═══
       const logEntry = {
@@ -16607,8 +8499,8 @@ Respond as this agent specifically — stay in character.`;
           path: '/rest/v1/aba_memory',
           method: 'POST',
           headers: {
-            'apikey': SUPABASE_KEY,
-            'Authorization': 'Bearer ' + (SUPABASE_KEY),
+            'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+            'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY),
             'Content-Type': 'application/json',
             'Prefer': 'return=minimal'
           }
@@ -16637,24 +8529,12 @@ Respond as this agent specifically — stay in character.`;
       } else {
         // This is likely session metadata, not a transcript - skip
         console.log('[OMI] Received non-transcript data, skipping:', Object.keys(body).join(', '));
-        
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
-      return jsonResponse(res, 200, { status: 'skipped', reason: 'no transcript text found' });
+        return jsonResponse(res, 200, { status: 'skipped', reason: 'no transcript text found' });
       }
       
       // Don't process empty transcripts or raw binary
       if (!transcript || transcript.length < 5 || transcript.startsWith('{"raw"')) {
-        
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
-      return jsonResponse(res, 200, { status: 'skipped', reason: 'empty transcript' });
+        return jsonResponse(res, 200, { status: 'skipped', reason: 'empty transcript' });
       }
       const timestamp = body.timestamp || new Date().toISOString();
 
@@ -16674,47 +8554,14 @@ Respond as this agent specifically — stay in character.`;
         path: '/rest/v1/aba_memory',
         method: 'POST',
         headers: {
-          'apikey': SUPABASE_KEY,
-          'Authorization': 'Bearer ' + (SUPABASE_KEY),
+          'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+          'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY),
           'Content-Type': 'application/json',
           'Prefer': 'return=minimal'
         }
       }, storeData);
 
       console.log('[TASTE] Transcript stored in brain');
-
-      // ═══════════════════════════════════════════════════════════════════════════
-      // ⬡B:REACH.OMI.USER_CONTEXTS:PHASE9:fat_prompt_inclusion:20260228⬡
-      // PHASE 9: Store OMI transcripts in user_contexts for fat prompt inclusion
-      // This allows AIR to see ambient context when processing any request
-      // ═══════════════════════════════════════════════════════════════════════════
-      try {
-        const userId = body.uid || 'brandon_t10';
-        const contextData = JSON.stringify({
-          user_id: userId,
-          context_type: 'omi_ambient',
-          context_key: 'omi_transcript_' + Date.now(),
-          context_value: transcript.substring(0, 2000),
-          source: 'omi_webhook',
-          expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() // 24hr expiry
-        });
-        
-        await httpsRequest({
-          hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-          path: '/rest/v1/user_contexts',
-          method: 'POST',
-          headers: {
-            'apikey': SUPABASE_KEY,
-            'Authorization': 'Bearer ' + (SUPABASE_KEY),
-            'Content-Type': 'application/json',
-            'Prefer': 'return=minimal'
-          }
-        }, contextData);
-        console.log('[OMI→FAT_PROMPT] Transcript stored in user_contexts');
-      } catch (ucErr) {
-        console.log('[OMI→FAT_PROMPT] user_contexts storage failed:', ucErr.message);
-      }
-
       // ═══════════════════════════════════════════════════════════════════════════
       // ⬡B:REACH.OMI.WAKE_WORD:FIX:instant_aba_commands:20260220⬡
       // FIX: Detect wake words ("Hey ABA", "ABA") in STREAMING and route to AIR IMMEDIATELY
@@ -16785,8 +8632,8 @@ Respond as this agent specifically — stay in character.`;
             path: '/rest/v1/aba_memory',
             method: 'POST',
             headers: {
-              'apikey': SUPABASE_KEY,
-              'Authorization': 'Bearer ' + (SUPABASE_KEY),
+              'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+              'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY),
               'Content-Type': 'application/json',
               'Prefer': 'return=minimal'
             }
@@ -16809,13 +8656,7 @@ Respond as this agent specifically — stay in character.`;
             timestamp: new Date().toISOString()
           });
           
-          
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
-      return jsonResponse(res, 200, { 
+          return jsonResponse(res, 200, { 
             status: 'processed', 
             agent: 'AIR', 
             stored: true, 
@@ -16865,8 +8706,8 @@ Respond as this agent specifically — stay in character.`;
             path: '/rest/v1/aba_memory',
             method: 'POST',
             headers: {
-              'apikey': SUPABASE_KEY,
-              'Authorization': 'Bearer ' + (SUPABASE_KEY),
+              'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+              'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY),
               'Content-Type': 'application/json',
               'Prefer': 'return=minimal'
             }
@@ -17001,13 +8842,7 @@ Respond as this agent specifically — stay in character.`;
       
       if (omiResult.success) {
         console.log('[TASTE] Urgent content detected, AIR escalation triggered');
-        
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
-      return jsonResponse(res, 200, { 
+        return jsonResponse(res, 200, { 
           status: 'processed', 
           agent: 'TASTE', 
           stored: true, 
@@ -17016,21 +8851,9 @@ Respond as this agent specifically — stay in character.`;
         });
       }
       
-      
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, { status: 'processed', agent: 'TASTE', stored: true, escalated: false });
     } catch (e) {
       console.error('[OMI] Webhook error:', e.message);
-      
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, { status: 'received', error: e.message });
     }
   }
@@ -17052,8 +8875,8 @@ Respond as this agent specifically — stay in character.`;
         path: '/rest/v1/aba_memory',
         method: 'POST',
         headers: {
-          'apikey': SUPABASE_KEY,
-          'Authorization': 'Bearer ' + (SUPABASE_KEY),
+          'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+          'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY),
           'Content-Type': 'application/json',
           'Prefer': 'return=minimal'
         }
@@ -17065,12 +8888,6 @@ Respond as this agent specifically — stay in character.`;
         tags: ['heartbeat', 'cara', 'ping', 'contact']
       }));
       console.log('[HEARTBEAT] CARA ping registered from:', source);
-      
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, { success: true, timestamp: ts, source });
     } catch(e) { return jsonResponse(res, 500, { error: e.message }); }
   }
@@ -17135,8 +8952,7 @@ if (path === '/api/sms/send' && method === 'POST') {
       console.log('[SMS RECEIVE] Parsed - From:', from, '| Body:', smsBody.substring(0, 50));
       
       // Look up who texted
-      // ⬡B:FIX:await_lookupContact:20260227⬡
-      const sender = (await lookupContact(from)) || { name: from, phone: from };
+      const sender = lookupContact(from) || { name: from, phone: from };
       
       // Store to brain
       await storeToBrain({
@@ -17185,22 +9001,7 @@ if (path === '/api/sms/send' && method === 'POST') {
   // Configure in ElevenLabs agent settings: Webhook URL
   // Captures: recording URL, transcripts, conversation data
   // ═══════════════════════════════════════════════════════════════════════
-
-  // /api/dial/callback - Continuous loop for DIAL (Phase 1)
-  if (path === "/api/dial/callback" && method === "POST") {
-    const body = await parseBody(req);
-    const transcript = body.transcript || body.text || "";
-    const callId = body.call_id || body.conversation_id || Date.now();
-    console.log("[DIAL CALLBACK] Received:", callId);
-    if (transcript && typeof AIR_text === "function") {
-      const cleaned = AGENTS.SCRUB?.clean ? AGENTS.SCRUB.clean(transcript) : transcript;
-      const airRes = await AIR_text({ message: cleaned, context: { source: "dial_callback", callId, isVoice: true }});
-      return jsonResponse(res, 200, { status: "ok", response: airRes?.response?.substring(0,500), callId });
-    }
-    return jsonResponse(res, 200, { status: "no_transcript", callId });
-  }
-
-  if ((path === '/api/elevenlabs/webhook' || path === '/api/elevenlabs/llm') && method === 'POST') {
+  if (path === '/api/elevenlabs/webhook' && method === 'POST') {
     try {
       const body = await parseBody(req);
       
@@ -17280,12 +9081,6 @@ if (path === '/api/sms/send' && method === 'POST') {
         });
       }
       
-      
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, { 
         success: true, 
         message: 'Webhook processed',
@@ -17296,99 +9091,7 @@ if (path === '/api/sms/send' && method === 'POST') {
       
     } catch (e) {
       console.log('[ELEVENLABS WEBHOOK] Error:', e.message);
-      
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, { success: false, error: e.message });
-    }
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════
-  // ⬡B:AIR:ELEVENLABS_LLM:endpoint:brain_connected_calls:20260226⬡
-  // POST /api/elevenlabs/llm - Custom LLM for ElevenLabs Conversational AI
-  // This connects phone calls to ABACIA brain via AIR routing
-  // ═══════════════════════════════════════════════════════════════════════
-  if (path === '/api/elevenlabs/llm' && method === 'POST') {
-    console.log('[ELEVENLABS LLM] ★★★ Brain-connected call request ★★★');
-    try {
-      const body = await parseBody(req);
-      
-      const messages = body.messages || [];
-      const conversationId = body.conversation_id || body.conversationId || 'unknown';
-      const agentId = body.agent_id || 'unknown';
-      
-      // Get the last user message
-      const lastUserMessage = messages.filter(m => m.role === 'user').pop();
-      const userMessage = lastUserMessage?.content || '';
-      
-      console.log('[ELEVENLABS LLM] ConvID:', conversationId, '| Message:', userMessage.substring(0, 50));
-      
-      if (!userMessage) {
-        return jsonResponse(res, 200, { response: "I'm here. What can I help you with?" });
-      }
-      
-      // Build conversation history for AIR
-      const history = messages.slice(-10).map(m => ({
-        role: m.role === 'user' ? 'user' : 'assistant',
-        content: m.content
-      }));
-      
-      // Route through AIR - same as any other request!
-      // This gives phone calls full access to ABACIA brain
-      const airResult = await AIR_text(userMessage, {
-        source: 'elevenlabs_phone',
-        channel: 'phone_call',
-        conversation_id: conversationId,
-        ham_name: 'Caller', // Could be identified by caller ID later
-        trust_level: 'T5', // Default trust for phone calls
-        history: history
-      });
-      
-      // Extract response text
-      let responseText = 'I apologize, I had trouble processing that. Could you repeat?';
-      if (airResult?.response) {
-        responseText = typeof airResult.response === 'string' 
-          ? airResult.response 
-          : airResult.response.greeting || airResult.response.message || JSON.stringify(airResult.response);
-      }
-      
-      // Clean response for voice (remove markdown, excessive formatting)
-      responseText = responseText
-        .replace(/#{1,6}\s*/g, '') // Remove headers
-        .replace(/\*\*/g, '') // Remove bold
-        .replace(/\n+/g, ' ') // Single spaces
-        .replace(/\s+/g, ' ') // Collapse spaces
-        .trim();
-      
-      console.log('[ELEVENLABS LLM] Response:', responseText.substring(0, 80) + '...');
-      console.log('[ELEVENLABS LLM] Agents used:', airResult?.agents?.slice(0, 5).join(','));
-      
-      // Log to brain for continuity
-      storeToBrain({
-        content: `PHONE CALL TURN | ConvID: ${conversationId} | User: "${userMessage.substring(0, 100)}" | ABA: "${responseText.substring(0, 100)}"`,
-        memory_type: 'call_turn',
-        categories: ['call', 'elevenlabs', 'conversation'],
-        importance: 5,
-        tags: ['call', 'turn', conversationId],
-        source: 'elevenlabs_llm_' + Date.now()
-      }).catch(e => console.log('[BRAIN] Store error:', e.message));
-      
-      // Return response in ElevenLabs format
-      return jsonResponse(res, 200, { 
-        response: responseText,
-        conversation_id: conversationId,
-        agents: airResult?.agents || []
-      });
-      
-    } catch (e) {
-      console.log('[ELEVENLABS LLM] Error:', e.message);
-      return jsonResponse(res, 200, { 
-        response: "I apologize, I'm having some technical difficulties. Please try again.",
-        error: e.message
-      });
     }
   }
 
@@ -17410,8 +9113,8 @@ if (path === '/api/sms/send' && method === 'POST') {
         path: '/rest/v1/aba_memory?source=eq.call_intelligence_' + conversationId + '&select=content&limit=1',
         method: 'GET',
         headers: {
-          'apikey': SUPABASE_KEY,
-          'Authorization': 'Bearer ' + (SUPABASE_KEY)
+          'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+          'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY)
         }
       });
       
@@ -17419,13 +9122,7 @@ if (path === '/api/sms/send' && method === 'POST') {
         const data = JSON.parse(result.data.toString());
         if (data.length > 0) {
           const intelligence = JSON.parse(data[0].content);
-          
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
-      return jsonResponse(res, 200, {
+          return jsonResponse(res, 200, {
             success: true,
             conversation_id: conversationId,
             intelligence: intelligence
@@ -17459,8 +9156,8 @@ if (path === '/api/sms/send' && method === 'POST') {
         path: '/rest/v1/aba_memory?memory_type=eq.call_intelligence&order=created_at.desc&limit=' + limit + '&select=content,created_at,source',
         method: 'GET',
         headers: {
-          'apikey': SUPABASE_KEY,
-          'Authorization': 'Bearer ' + (SUPABASE_KEY)
+          'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+          'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY)
         }
       });
       
@@ -17483,25 +9180,13 @@ if (path === '/api/sms/send' && method === 'POST') {
           }
         }).filter(Boolean);
         
-        
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
-      return jsonResponse(res, 200, {
+        return jsonResponse(res, 200, {
           success: true,
           count: calls.length,
           calls: calls
         });
       }
       
-      
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, { success: true, count: 0, calls: [] });
       
     } catch (e) {
@@ -17564,9 +9249,7 @@ if (path === '/api/sms/send' && method === 'POST') {
       }
       
       if (code) {
-      // ⬡B:REACH.NYLAS.CALLBACK_FIX:FIX:client_id_required:20260222⬡
-      // Exchange code for grant - MUST include client_id
-      const NYLAS_CLIENT_ID = process.env.NYLAS_CLIENT_ID || '1c693097-2bf7-4391-b922-29880466ec8e';
+      // Exchange code for grant
       const tokenResult = await httpsRequest({
         hostname: 'api.us.nylas.com',
         path: '/v3/connect/token',
@@ -17577,10 +9260,8 @@ if (path === '/api/sms/send' && method === 'POST') {
         }
       }, JSON.stringify({
         code: code,
-        client_id: NYLAS_CLIENT_ID,  // FIXED: Was missing
-        client_secret: NYLAS_API_KEY,  // FIXED: Was missing
         redirect_uri: 'https://aba-reach.onrender.com/api/nylas/callback',
-        grant_type: 'authorization_code'
+        code_verifier: 'nylas'
       }));
       
       const tokenData = JSON.parse(tokenResult.data.toString());
@@ -17690,12 +9371,6 @@ if (path === '/api/sms/send' && method === 'POST') {
       });
 
       const json = JSON.parse(result.data.toString());
-      
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, { results: json, count: json.length });
     } catch (e) {
       return jsonResponse(res, 500, { error: e.message });
@@ -17703,239 +9378,6 @@ if (path === '/api/sms/send' && method === 'POST') {
   }
 
   // ═══════════════════════════════════════════════════════════════════════
-
-  // ═══════════════════════════════════════════════════════════════════════
-  // ⬡B:AIR:REACH.API.DRAFT:CODE:output.validation.endpoint:v1.0.0:20260223⬡
-  // DRAFT - Detection and Review of AI-Fabricated Text
-  // Scans text for Brandon writing standards violations
-  // ═══════════════════════════════════════════════════════════════════════
-  if (path === '/api/draft' && method === 'POST') {
-    try {
-      const body = await parseBody(req);
-      const { text } = body;
-      if (!text) {
-        return jsonResponse(res, 400, { error: 'Required: text' });
-      }
-      const scan = DRAFT_scanOutput(text);
-      console.log('[DRAFT API] Scan result:', scan.score, scan.passed ? 'PASS' : 'FAIL');
-      return jsonResponse(res, 200, {
-        score: scan.score,
-        passed: scan.passed,
-        violations: scan.violations,
-        summary: scan.summary
-      });
-    } catch (e) {
-      return jsonResponse(res, 500, { error: e.message });
-    }
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════════════
-  // ⬡B:AIR:REACH.API.V2:CODE:4phase.complete:v1.0.0:20260223⬡
-  // PHASE 1-4 API ENDPOINTS
-  // ═══════════════════════════════════════════════════════════════════════════════
-
-  // V2 ORCHESTRATE - Main AIR entry point
-  if (path === '/api/v2/orchestrate' && method === 'POST') {
-    try {
-      const body = await parseBody(req);
-      const { message, context = {} } = body;
-      if (!message) {
-        return jsonResponse(res, 400, { error: 'Required: message' });
-      }
-      const result = await AIR_orchestrate_REAL(message, context);
-      return jsonResponse(res, 200, result);
-    } catch (e) {
-      console.error('[V2 ORCHESTRATE] Error:', e);
-      return jsonResponse(res, 500, { error: e.message });
-    }
-  }
-
-  // V2 AGENTS - List all agents
-  if (path === '/api/v2/agents' && method === 'GET') {
-    const agentList = Object.entries(AGENTS).map(([name, agent]) => ({
-      name,
-      fullName: agent.fullName,
-      department: agent.department,
-      type: agent.type,
-      runtime: agent.runtime,
-      active: agent.active,
-      runCount: agent.runCount
-    }));
-    return jsonResponse(res, 200, { agents: agentList, count: agentList.length });
-  }
-
-  // V2 AGENT EXECUTE - Execute specific agent
-  if (path.startsWith('/api/v2/agents/') && path.endsWith('/execute') && method === 'POST') {
-    const agentName = path.split('/')[4].toUpperCase();
-    const agent = AGENTS[agentName];
-    if (!agent) {
-      return jsonResponse(res, 404, { error: 'Agent not found: ' + agentName });
-    }
-    try {
-      const body = await parseBody(req);
-      const action = body.action || Object.keys(agent).find(k => typeof agent[k] === "function");
-      if (!action || typeof agent[action] !== "function") {
-        return jsonResponse(res, 400, { error: "No valid action. Available: " + Object.keys(agent).filter(k => typeof agent[k] === "function").join(", ") });
-      }
-      const params = body.params || {};
-      const args = Object.values(params);
-      const result = await agent[action](...args.length > 0 ? args : [params]);
-      return jsonResponse(res, 200, result);
-    } catch (e) {
-      return jsonResponse(res, 500, { error: e.message });
-    }
-  }
-
-  // V2 OBSERVABILITY - Get recent traces
-  if (path === '/api/v2/observability/traces' && method === 'GET') {
-    const traces = OBSERVABILITY.getRecentTraces(20);
-    return jsonResponse(res, 200, { traces, count: traces.length });
-  }
-
-  // V2 COSTS - Get cost tracking
-  if (path === '/api/v2/costs' && method === 'GET') {
-    return jsonResponse(res, 200, {
-      hourly: { current: COST_CAPS.hourly.current, limit: COST_CAPS.hourly.limit },
-      daily: { current: COST_CAPS.daily.current, limit: COST_CAPS.daily.limit },
-      perCall: COST_CAPS.perCall.limit
-    });
-  }
-
-  // V2 MEMORY - Store to tier
-  if (path.startsWith('/api/v2/memory/') && method === 'POST') {
-    const tier = path.split('/')[4];
-    try {
-      const body = await parseBody(req);
-      const { key, value, metadata } = body;
-      if (!key || !value) {
-        return jsonResponse(res, 400, { error: 'Required: key, value' });
-      }
-      
-      if (tier === 'short' || tier === 'working') {
-        memoryStore(tier, key, value);
-        return jsonResponse(res, 200, { stored: true, tier, key });
-      } else if (tier === 'long') {
-        const success = await MEMORY_TIERS.storeLong(key, value, metadata);
-        return jsonResponse(res, 200, { stored: success, tier, key });
-      }
-      return jsonResponse(res, 400, { error: 'Invalid tier. Use: short, working, long' });
-    } catch (e) {
-      return jsonResponse(res, 500, { error: e.message });
-    }
-  }
-
-  // V2 MEMORY - Retrieve from tier
-  if (path.startsWith('/api/v2/memory/') && method === 'GET') {
-    const parts = path.split('/');
-    const tier = parts[4];
-    const key = parts[5];
-    
-    if (!key) {
-      return jsonResponse(res, 400, { error: 'Required: key in path' });
-    }
-    
-    if (tier === 'short' || tier === 'working') {
-      const value = memoryRetrieve(tier, key);
-      return jsonResponse(res, 200, { found: !!value, tier, key, value });
-    } else if (tier === 'long') {
-      const results = await MEMORY_TIERS.retrieveLong(key);
-      return jsonResponse(res, 200, { found: results.length > 0, tier, key, results });
-    }
-    return jsonResponse(res, 400, { error: 'Invalid tier' });
-  }
-
-  // V2 HEALTH - Health check with degradation status
-  if (path === '/api/v2/health' && method === 'GET') {
-    return jsonResponse(res, 200, {
-      status: 'healthy',
-      version: '4.0.0-4PHASE',
-      phases: {
-        foundation: 'COMPLETE',
-        intelligence: 'COMPLETE',
-        autonomy: 'COMPLETE',
-        optimization: 'COMPLETE'
-      },
-      agents: Object.keys(AGENTS).length,
-      services: (typeof HEALTH_MONITOR !== "undefined" ? HEALTH_MONITOR.services : {}),
-      memory: {
-        short: MEMORY_TIERS.short.size,
-        working: MEMORY_TIERS.working.size
-      },
-      costs: {
-        hourly: COST_CAPS.hourly.current,
-        daily: COST_CAPS.daily.current
-      }
-    });
-  }
-
-  // V2 SEMANTIC ROUTE - Test semantic routing
-  if (path === '/api/v2/route' && method === 'POST') {
-    try {
-      const body = await parseBody(req);
-      const { message } = body;
-      if (!message) {
-        return jsonResponse(res, 400, { error: 'Required: message' });
-      }
-      const routing = await semanticRoute(message);
-      return jsonResponse(res, 200, routing);
-    } catch (e) {
-      return jsonResponse(res, 500, { error: e.message });
-    }
-  }
-
-  // V2 PROACTIVE - Register task
-  if (path === '/api/v2/proactive/register' && method === 'POST') {
-    try {
-      const body = await parseBody(req);
-      const { name, interval, code } = body;
-      if (!name || !interval) {
-        return jsonResponse(res, 400, { error: 'Required: name, interval' });
-      }
-      PROACTIVE_ENGINE.register({
-        name,
-        interval,
-        execute: async () => { console.log('[PROACTIVE] Running:', name); }
-      });
-      return jsonResponse(res, 200, { registered: true, name });
-    } catch (e) {
-      return jsonResponse(res, 500, { error: e.message });
-    }
-  }
-
-  // V2 PROACTIVE - Start engine
-  if (path === '/api/v2/proactive/start' && method === 'POST') {
-    PROACTIVE_ENGINE.start();
-    return jsonResponse(res, 200, { started: true });
-  }
-
-  // V2 PROACTIVE - Stop engine
-  if (path === '/api/v2/proactive/stop' && method === 'POST') {
-    PROACTIVE_ENGINE.stop();
-    return jsonResponse(res, 200, { stopped: true });
-  }
-
-  // V2 PROACTIVE - Get status
-  if (path === '/api/v2/proactive/status' && method === 'GET') {
-    return jsonResponse(res, 200, PROACTIVE_ENGINE.getStatus());
-  }
-
-  // V2 SELF REFLECTION - Get stats
-  if (path === '/api/v2/reflection/stats' && method === 'GET') {
-    return jsonResponse(res, 200, SELF_REFLECTION.getStats());
-  }
-
-  // V2 CROSS CHANNEL - Get user context
-  if (path.match(/^\/api\/v2\/channel\/[^/]+\/context$/) && method === 'GET') {
-    const userId = path.split('/')[4];
-    const context = CROSS_CHANNEL_STATE.getFullContext(userId);
-    return jsonResponse(res, 200, context);
-  }
-
-  // V2 SHADOW - Get recent audits
-  if (path === '/api/v2/shadow/audits' && method === 'GET') {
-    return jsonResponse(res, 200, { audits: AGENTS.SHADOW.getRecent(50) });
-  }
-
   // ⬡B:AIR:REACH.API.BRAIN_SEMANTIC:CODE:memory.semantic.search:AIR→BRAIN:T10:v2.6.5:20260214:s1m2s⬡
   // SEMANTIC SEARCH — pgvector cosine similarity via match_memories RPC
   // Takes text query → generates embedding → finds similar memories
@@ -17987,7 +9429,7 @@ if (path === '/api/sms/send' && method === 'POST') {
           match_threshold: threshold || 0.5,
           match_count: limit || 10
         });
-        const key = SUPABASE_KEY;
+        const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY;
         const matchReq = https.request({
           hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
           path: '/rest/v1/rpc/match_memories',
@@ -18009,12 +9451,6 @@ if (path === '/api/sms/send' && method === 'POST') {
       });
 
       console.log('[AIR*SAGE*SEMANTIC] Query: "' + query + '" → ' + (Array.isArray(matchResult) ? matchResult.length : 0) + ' matches');
-      
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, { results: matchResult, query, method: 'semantic_pgvector' });
     } catch (e) {
       console.error('[SEMANTIC] Error:', e.message);
@@ -18030,7 +9466,7 @@ if (path === '/api/sms/send' && method === 'POST') {
   if (path === '/api/brain/embed-backfill' && method === 'POST') {
     try {
       if (!OPENAI_KEY) return jsonResponse(res, 500, { error: 'OPENAI_API_KEY not set' });
-      const key = SUPABASE_KEY;
+      const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY;
 
       // Get memories without embeddings
       const unembedded = await new Promise((resolve, reject) => {
@@ -18047,13 +9483,7 @@ if (path === '/api/sms/send' && method === 'POST') {
       });
 
       if (!Array.isArray(unembedded) || unembedded.length === 0) {
-        
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
-      return jsonResponse(res, 200, { message: 'All memories embedded', count: 0 });
+        return jsonResponse(res, 200, { message: 'All memories embedded', count: 0 });
       }
 
       let embedded = 0;
@@ -18089,12 +9519,6 @@ if (path === '/api/sms/send' && method === 'POST') {
       }
 
       console.log('[AIR*SAGE*EMBED] Backfilled ' + embedded + ' embeddings');
-      
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, { embedded, total_unembedded: unembedded.length });
     } catch (e) {
       return jsonResponse(res, 500, { error: e.message });
@@ -18153,9 +9577,7 @@ if (path === '/api/sms/send' && method === 'POST') {
         return res.end('<h1>Error: No authorization code or grant received</h1>');
       }
       
-      // ⬡B:REACH.NYLAS.CALLBACK_FIX2:FIX:client_id_required:20260222⬡
-      // Exchange code for grant - MUST include client_id
-      const NYLAS_CLIENT_ID = process.env.NYLAS_CLIENT_ID || '1c693097-2bf7-4391-b922-29880466ec8e';
+      // Exchange code for grant
       const tokenResult = await httpsRequest({
         hostname: 'api.us.nylas.com',
         path: '/v3/connect/token',
@@ -18166,10 +9588,7 @@ if (path === '/api/sms/send' && method === 'POST') {
         }
       }, JSON.stringify({
         code: code,
-        client_id: NYLAS_CLIENT_ID,  // FIXED: Was missing
-        client_secret: NYLAS_API_KEY,  // FIXED: Was missing
-        redirect_uri: 'https://aba-reach.onrender.com/api/nylas/callback',
-        grant_type: 'authorization_code'
+        redirect_uri: 'https://aba-reach.onrender.com/api/nylas/callback'
       }));
       
       const tokenData = JSON.parse(tokenResult.data.toString());
@@ -18274,13 +9693,7 @@ if (path === '/api/sms/send' && method === 'POST') {
       
       if (json.data?.id) {
         console.log('[IMAN] Email sent to ' + (Array.isArray(to) ? to.join(', ') : to) + ' | Subject: ' + subject);
-        
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
-      return jsonResponse(res, 200, { success: true, message_id: json.data.id, subject: subject });
+        return jsonResponse(res, 200, { success: true, message_id: json.data.id, subject: subject });
       } else {
         console.log('[IMAN] Email send failed: ' + JSON.stringify(json));
         return jsonResponse(res, result.status, { error: json.error?.message || 'Send failed', details: json });
@@ -18340,8 +9753,8 @@ if (path === '/api/sms/send' && method === 'POST') {
         path: '/rest/v1/aba_memory',
         method: 'POST',
         headers: {
-          'apikey': SUPABASE_KEY,
-          'Authorization': 'Bearer ' + (SUPABASE_KEY),
+          'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+          'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY),
           'Content-Type': 'application/json',
           'Prefer': 'return=representation'
         }
@@ -18358,352 +9771,6 @@ if (path === '/api/sms/send' && method === 'POST') {
       const json = JSON.parse(result.data.toString());
       return jsonResponse(res, 201, { stored: true, data: json });
     } catch (e) {
-      return jsonResponse(res, 500, { error: e.message });
-    }
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════
-  // ⬡B:REACH.BRAIN.CODE_PATCH:API:code.update.from_brain:20260222⬡
-  // BRAIN-TO-CODE UPDATE SYSTEM
-  // Store code patches in brain, apply them to REACH, push to GitHub
-  // T10 ONLY - Brandon's "purple unicorn" self-updating system
-  // ═══════════════════════════════════════════════════════════════════════
-  
-  // POST /api/brain/code-patch - Apply a code patch from brain
-  if (path === '/api/brain/code-patch' && method === 'POST') {
-    try {
-      const body = await parseBody(req);
-      const { patch_id, trust_level } = body;
-      
-      // T10 ONLY - Security check
-      if (trust_level !== 'T10' && trust_level !== 10) {
-        return jsonResponse(res, 403, { 
-          error: 'Code patches require T10 trust level',
-          hint: 'Only Brandon can update code through brain'
-        });
-      }
-      
-      if (!patch_id) {
-        return jsonResponse(res, 400, { error: 'patch_id required' });
-      }
-      
-      // Fetch the patch from brain
-      const patchResult = await httpsRequest({
-        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-        path: `/rest/v1/aba_memory?id=eq.${patch_id}&select=content,source,tags`,
-        method: 'GET',
-        headers: {
-          'apikey': SUPABASE_KEY,
-          'Authorization': 'Bearer ' + (SUPABASE_KEY)
-        }
-      });
-      
-      const patches = JSON.parse(patchResult.data.toString());
-      if (!patches || patches.length === 0) {
-        return jsonResponse(res, 404, { error: 'Patch not found in brain' });
-      }
-      
-      const patch = patches[0];
-      const patchContent = patch.content;
-      
-      // Verify it's a code patch (must have code_patch tag)
-      if (!patch.tags?.includes('code_patch')) {
-        return jsonResponse(res, 400, { 
-          error: 'Not a code patch',
-          hint: 'Memory must have tag "code_patch"'
-        });
-      }
-      
-      // Parse patch instructions from content
-      // Format: JSON with { file, action, old_code, new_code, commit_message }
-      let patchData;
-      try {
-        // Try to extract JSON from content
-        const jsonMatch = patchContent.match(/```json\n?([\s\S]*?)\n?```/) || 
-                          patchContent.match(/\{[\s\S]*"file"[\s\S]*\}/);
-        if (jsonMatch) {
-          patchData = JSON.parse(jsonMatch[1] || jsonMatch[0]);
-        } else {
-          patchData = JSON.parse(patchContent);
-        }
-      } catch (e) {
-        return jsonResponse(res, 400, { 
-          error: 'Invalid patch format',
-          hint: 'Patch content must be JSON with file, action, old_code, new_code, commit_message'
-        });
-      }
-      
-      console.log('[BRAIN-CODE] Applying patch:', patchData.commit_message || patch_id);
-      
-      // Return the patch data for now (actual file modification would need fs access)
-      // In production, this would trigger a GitHub workflow or direct file edit
-      return jsonResponse(res, 200, {
-        status: 'patch_ready',
-        patch_id,
-        patch_data: patchData,
-        next_step: 'POST to /api/github/push with this patch to deploy',
-        instructions: [
-          '1. Patch fetched from brain successfully',
-          '2. Use /api/github/push to apply and deploy',
-          '3. Or use Claude.ai MACE to apply manually'
-        ]
-      });
-      
-    } catch (e) {
-      return jsonResponse(res, 500, { error: e.message });
-    }
-  }
-  
-  // GET /api/brain/code-patches - List all pending code patches
-  if (path === '/api/brain/code-patches' && method === 'GET') {
-    try {
-      const result = await httpsRequest({
-        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-        path: '/rest/v1/aba_memory?tags=cs.{code_patch}&order=created_at.desc&limit=20',
-        method: 'GET',
-        headers: {
-          'apikey': SUPABASE_KEY,
-          'Authorization': 'Bearer ' + (SUPABASE_KEY)
-        }
-      });
-      
-      const patches = JSON.parse(result.data.toString());
-      const summary = patches.map(p => ({
-        id: p.id,
-        source: p.source,
-        created: p.created_at,
-        preview: p.content?.substring(0, 100),
-        applied: p.tags?.includes('applied') || false
-      }));
-      
-      return jsonResponse(res, 200, { 
-        count: summary.length,
-        patches: summary,
-        how_to_apply: 'POST /api/brain/code-patch with { patch_id, trust_level: "T10" }'
-      });
-      
-    } catch (e) {
-      return jsonResponse(res, 500, { error: e.message });
-    }
-  }
-  
-  // POST /api/brain/store-patch - Store a new code patch in brain
-  if (path === '/api/brain/store-patch' && method === 'POST') {
-    try {
-      const body = await parseBody(req);
-      const { file, action, old_code, new_code, commit_message, trust_level } = body;
-      
-      // T10 ONLY
-      if (trust_level !== 'T10' && trust_level !== 10) {
-        return jsonResponse(res, 403, { error: 'Code patches require T10 trust level' });
-      }
-      
-      if (!file || !commit_message) {
-        return jsonResponse(res, 400, { error: 'file and commit_message required' });
-      }
-      
-      const patchContent = JSON.stringify({
-        file,
-        action: action || 'replace',
-        old_code: old_code || '',
-        new_code: new_code || '',
-        commit_message,
-        created_by: 'brain_api',
-        created_at: new Date().toISOString()
-      }, null, 2);
-      
-      const acl = `⬡B:code_patch.${file.replace(/[^a-zA-Z0-9]/g, '_')}:PATCH:${action || 'replace'}:${new Date().toISOString().split('T')[0].replace(/-/g, '')}⬡`;
-      
-      const result = await httpsRequest({
-        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-        path: '/rest/v1/aba_memory',
-        method: 'POST',
-        headers: {
-          'apikey': SUPABASE_KEY,
-          'Authorization': 'Bearer ' + (SUPABASE_KEY),
-          'Content-Type': 'application/json',
-          'Prefer': 'return=representation'
-        }
-      }, JSON.stringify({
-        content: acl + '\n\n' + patchContent,
-        memory_type: 'code_patch',
-        source: acl,
-        importance: 10,
-        is_system: true,
-        tags: ['code_patch', 'pending', file.split('/').pop()]
-      }));
-      
-      const json = JSON.parse(result.data.toString());
-      return jsonResponse(res, 201, { 
-        stored: true, 
-        patch_id: json[0]?.id || json.id,
-        acl,
-        next_step: 'POST /api/brain/code-patch with { patch_id, trust_level: "T10" } to apply'
-      });
-      
-    } catch (e) {
-      return jsonResponse(res, 500, { error: e.message });
-    }
-  }
-  
-  // ═══════════════════════════════════════════════════════════════════════
-  // ⬡B:REACH.BRAIN.APPLY_PATCH:API:code.deploy.from_brain:20260222⬡
-  // FULL BRAIN-TO-GITHUB DEPLOYMENT
-  // Fetches patch from brain, applies to GitHub, triggers Render deploy
-  // ═══════════════════════════════════════════════════════════════════════
-  
-  // POST /api/brain/apply-patch - Full deployment: brain → GitHub → Render
-  if (path === '/api/brain/apply-patch' && method === 'POST') {
-    try {
-      const body = await parseBody(req);
-      const { patch_id, trust_level, repo, branch } = body;
-      
-      // T10 ONLY
-      if (trust_level !== 'T10' && trust_level !== 10) {
-        return jsonResponse(res, 403, { 
-          error: 'Code deployment requires T10 trust level',
-          hint: 'Only Brandon can deploy code through brain'
-        });
-      }
-      
-      if (!patch_id) {
-        return jsonResponse(res, 400, { error: 'patch_id required' });
-      }
-      
-      console.log('[BRAIN-DEPLOY] Starting deployment for patch:', patch_id);
-      
-      // Step 1: Fetch patch from brain
-      const patchResult = await httpsRequest({
-        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-        path: `/rest/v1/aba_memory?id=eq.${patch_id}&select=content,source,tags`,
-        method: 'GET',
-        headers: {
-          'apikey': SUPABASE_KEY,
-          'Authorization': 'Bearer ' + (SUPABASE_KEY)
-        }
-      });
-      
-      const patches = JSON.parse(patchResult.data.toString());
-      if (!patches || patches.length === 0) {
-        return jsonResponse(res, 404, { error: 'Patch not found in brain' });
-      }
-      
-      const patch = patches[0];
-      
-      // Verify it's a code patch
-      if (!patch.tags?.includes('code_patch')) {
-        return jsonResponse(res, 400, { error: 'Not a code patch' });
-      }
-      
-      // Parse patch data
-      let patchData;
-      try {
-        const jsonMatch = patch.content.match(/```json\n?([\s\S]*?)\n?```/) || 
-                          patch.content.match(/\{[\s\S]*"file"[\s\S]*\}/);
-        patchData = JSON.parse(jsonMatch ? (jsonMatch[1] || jsonMatch[0]) : patch.content);
-      } catch (e) {
-        return jsonResponse(res, 400, { error: 'Invalid patch format: ' + e.message });
-      }
-      
-      const targetRepo = repo || 'reach-services';
-      const targetBranch = branch || 'main';
-      const targetFile = patchData.file || 'worker.js';
-      
-      console.log('[BRAIN-DEPLOY] Patch data:', patchData.commit_message);
-      
-      // Step 2: Fetch current file from GitHub
-      let currentContent = '';
-      let currentSHA = null;
-      
-      try {
-        const getFile = await httpsRequest({
-          hostname: 'api.github.com',
-          path: `/repos/${GITHUB_OWNER}/${targetRepo}/contents/${targetFile}?ref=${targetBranch}`,
-          method: 'GET',
-          headers: {
-            'Authorization': `token ${GITHUB_TOKEN}`,
-            'User-Agent': 'ABA-BRAIN-DEPLOY',
-            'Accept': 'application/vnd.github.v3+json'
-          }
-        });
-        
-        if (getFile.status === 200) {
-          const fileData = JSON.parse(getFile.data.toString());
-          currentSHA = fileData.sha;
-          currentContent = Buffer.from(fileData.content, 'base64').toString('utf-8');
-          console.log('[BRAIN-DEPLOY] Current file SHA:', currentSHA.substring(0, 8));
-        }
-      } catch (e) {
-        console.log('[BRAIN-DEPLOY] File is new or fetch failed:', e.message);
-      }
-      
-      // Step 3: Apply patch (str_replace style)
-      let newContent = currentContent;
-      
-      if (patchData.action === 'replace' && patchData.old_code && patchData.new_code) {
-        if (!currentContent.includes(patchData.old_code)) {
-          return jsonResponse(res, 400, { 
-            error: 'old_code not found in file',
-            hint: 'The string to replace was not found in ' + targetFile
-          });
-        }
-        newContent = currentContent.replace(patchData.old_code, patchData.new_code);
-        console.log('[BRAIN-DEPLOY] Applied str_replace patch');
-      } else if (patchData.action === 'append') {
-        newContent = currentContent + '\n' + patchData.new_code;
-        console.log('[BRAIN-DEPLOY] Appended new code');
-      } else if (patchData.action === 'prepend') {
-        newContent = patchData.new_code + '\n' + currentContent;
-        console.log('[BRAIN-DEPLOY] Prepended new code');
-      } else if (patchData.action === 'full_replace') {
-        newContent = patchData.new_code;
-        console.log('[BRAIN-DEPLOY] Full file replace');
-      } else {
-        return jsonResponse(res, 400, { error: 'Unknown action: ' + patchData.action });
-      }
-      
-      // Step 4: Push to GitHub
-      const pushResult = await pushToGitHub(
-        targetRepo, 
-        targetFile, 
-        newContent, 
-        patchData.commit_message || `Brain patch ${patch_id}`,
-        targetBranch
-      );
-      
-      if (!pushResult.success) {
-        return jsonResponse(res, 500, { error: 'GitHub push failed', details: pushResult });
-      }
-      
-      console.log('[BRAIN-DEPLOY] Pushed to GitHub successfully');
-      
-      // Step 5: Mark patch as applied in brain
-      await httpsRequest({
-        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-        path: `/rest/v1/aba_memory?id=eq.${patch_id}`,
-        method: 'PATCH',
-        headers: {
-          'apikey': SUPABASE_KEY,
-          'Authorization': 'Bearer ' + (SUPABASE_KEY),
-          'Content-Type': 'application/json'
-        }
-      }, JSON.stringify({
-        tags: [...(patch.tags || []).filter(t => t !== 'pending'), 'applied', 'deployed']
-      }));
-      
-      return jsonResponse(res, 200, {
-        status: 'deployed',
-        patch_id,
-        repo: targetRepo,
-        file: targetFile,
-        branch: targetBranch,
-        commit_message: patchData.commit_message,
-        github_result: pushResult,
-        render_note: 'Render will auto-deploy from GitHub in 1-3 minutes'
-      });
-      
-    } catch (e) {
-      console.log('[BRAIN-DEPLOY] Error:', e.message);
       return jsonResponse(res, 500, { error: e.message });
     }
   }
@@ -18768,8 +9835,8 @@ if (path === '/api/sms/send' && method === 'POST') {
         path: '/rest/v1/aba_memory',
         method: 'POST',
         headers: {
-          'apikey': SUPABASE_KEY,
-          'Authorization': 'Bearer ' + (SUPABASE_KEY),
+          'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+          'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY),
           'Content-Type': 'application/json',
           'Prefer': 'return=minimal'
         }
@@ -18813,7 +9880,7 @@ if (path === '/api/sms/send' && method === 'POST') {
         hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST',
         headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' }
       }, JSON.stringify({
-        model: 'claude-sonnet-4-5-20250929', max_tokens: 200,
+        model: 'claude-haiku-4-5-20251001', max_tokens: 500,
         system: 'Extract job posting details from HTML. Return ONLY valid JSON: {title, company, location, salary, description, employment_type}. Empty string if unknown.',
         messages: [{ role: 'user', content: 'URL: ' + url + '\n\nHTML:\n' + html }]
       }));
@@ -18821,12 +9888,6 @@ if (path === '/api/sms/send' && method === 'POST') {
       const text = aiData.content?.[0]?.text || '';
       const jsonMatch = text.match(/\{[\s\S]*\}/);
       const jobData = jsonMatch ? JSON.parse(jsonMatch[0]) : { title: '', company: '' };
-      
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, { ...jobData, source: url, method: 'server_scrape', scrapedAt: new Date().toISOString() });
     } catch (e) { return jsonResponse(res, 500, { error: e.message }); }
   }
@@ -18846,13 +9907,7 @@ if (path === '/api/sms/send' && method === 'POST') {
       res.writeHead(200, { 'Content-Type': 'text/plain' });
       return res.end(challenge);
     }
-    
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
-      return jsonResponse(res, 200, { status: 'webhook ready' });
+    return jsonResponse(res, 200, { status: 'webhook ready' });
   }
 
   if (path === '/api/nylas/webhook' && method === 'POST') {
@@ -18861,13 +9916,7 @@ if (path === '/api/sms/send' && method === 'POST') {
       
       // Nylas webhook verification (challenge response)
       if (body.challenge) {
-        
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
-      return jsonResponse(res, 200, { challenge: body.challenge });
+        return jsonResponse(res, 200, { challenge: body.challenge });
       }
       
       // Process webhook events
@@ -19046,8 +10095,8 @@ RULES:
                   path: '/rest/v1/aba_memory',
                   method: 'POST',
                   headers: {
-                    'apikey': SUPABASE_KEY,
-                    'Authorization': 'Bearer ' + (SUPABASE_KEY),
+                    'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+                    'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY),
                     'Content-Type': 'application/json',
                     'Prefer': 'return=minimal'
                   }
@@ -19118,7 +10167,7 @@ RULES:
                   method: 'POST',
                   headers: { 'x-api-key': aiKey, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' }
                 }, JSON.stringify({
-                  model: 'claude-sonnet-4-5-20250929',
+                  model: 'claude-haiku-4-5-20251001',
                   max_tokens: 800,
                   system: 'Extract job details from HTML. Return ONLY valid JSON: {"title":"","company":"","location":"","salary":"","description":"first 200 chars","employment_type":"","remote":"yes/no/hybrid","deadline":"","requirements":"first 200 chars"}. Empty string if unknown. Be accurate.',
                   messages: [{ role: 'user', content: 'URL: ' + jobUrl + '\n\nHTML:\n' + html }]
@@ -19242,21 +10291,9 @@ RULES:
         }
       }
       
-      
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, { processed: results.length, results });
     } catch (e) {
       console.error('[Nylas Webhook] Error:', e.message);
-      
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, { error: e.message }); // 200 so Nylas doesn't retry forever
     }
   }
@@ -19290,12 +10327,6 @@ RULES:
         catch { return { id: m.id, raw: m.content, storedAt: m.created_at }; }
       });
       
-      
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, { jobs, total: jobs.length });
     } catch (e) {
       return jsonResponse(res, 500, { error: e.message });
@@ -19320,13 +10351,7 @@ RULES:
         .slice(0, 10);
 
       if (urls.length === 0) {
-        
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
-      return jsonResponse(res, 200, { jobs: [], errors: [], summary: { emailSubject, urlsFound: 0, message: 'No Idealist job URLs found' } });
+        return jsonResponse(res, 200, { jobs: [], errors: [], summary: { emailSubject, urlsFound: 0, message: 'No Idealist job URLs found' } });
       }
 
       if (!ANTHROPIC_KEY) return jsonResponse(res, 503, { error: 'No AI key for extraction' });
@@ -19350,7 +10375,7 @@ RULES:
             hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST',
             headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' }
           }, JSON.stringify({
-            model: 'claude-sonnet-4-5-20250929', max_tokens: 800,
+            model: 'claude-haiku-4-5-20251001', max_tokens: 800,
             system: 'Parse this job posting. Return ONLY valid JSON, no markdown: {"title":"", "company":"", "location":"", "salary":"", "description":"first 200 chars", "employment_type":"full-time/part-time/contract", "remote":"yes/no/hybrid", "posted_date":"", "deadline":"", "requirements":"first 200 chars"}. Empty string if unknown. Be accurate.',
             messages: [{ role: 'user', content: 'URL: ' + jobUrl + '\n\nHTML:\n' + html }]
           }));
@@ -19370,12 +10395,6 @@ RULES:
       }
 
       const verified = jobs.filter(j => j.verified).length;
-      
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, {
         jobs, errors,
         summary: { emailSubject, urlsFound: urls.length, jobsParsed: jobs.length, jobsVerified: verified, jobsFailed: errors.length, accuracy: jobs.length > 0 ? Math.round((verified / jobs.length) * 100) + '%' : 'N/A' }
@@ -19406,7 +10425,7 @@ RULES:
         hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST',
         headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' }
       }, JSON.stringify({
-        model: 'claude-sonnet-4-5-20250929', max_tokens: 300,
+        model: 'claude-haiku-4-5-20251001', max_tokens: 300,
         system: 'Verify this job posting. Return ONLY JSON: {"title":"", "company":"", "still_active": true/false, "verified": true/false, "discrepancies":""}',
         messages: [{ role: 'user', content: 'Verify URL: ' + url + '\nExpected title: ' + (expectedTitle || 'unknown') + '\nExpected company: ' + (expectedCompany || 'unknown') + '\n\nHTML:\n' + html }]
       }));
@@ -19415,12 +10434,6 @@ RULES:
       const text = aiData.content?.[0]?.text || '';
       const jsonMatch = text.match(/\{[\s\S]*\}/);
       const result = jsonMatch ? JSON.parse(jsonMatch[0]) : { verified: false };
-      
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, { ...result, url, verifiedAt: new Date().toISOString() });
     } catch (e) { return jsonResponse(res, 500, { error: e.message }); }
   }
@@ -19444,7 +10457,7 @@ RULES:
     const { to, purpose, message, userId, record } = body;
     const callContent = message || purpose || 'Just checking in.';
     
-    console.log('[DIAL v3] Initiating call to:', to, '| Content:', callContent.substring(0, 100));
+    console.log('[DIAL v2] Initiating call to:', to, '| Content:', callContent.substring(0, 100));
     
     // Validate phone number
     if (!to || to.replace(/\D/g, '').length < 10) {
@@ -19455,60 +10468,35 @@ RULES:
     const phoneNumber = to.startsWith('+') ? to : `+1${to.replace(/\D/g, '')}`;
     
     try {
-      // ⬡B:DIAL:v3:ABABASE_CONTEXT:20260227⬡
-      // Pull full brain context like ababase does
-      let brainContext = '';
-      try {
-        const brainRes = await fetch(
-          `${SUPABASE_URL}/rest/v1/aba_memory?or=(memory_type.eq.ham_identity,memory_type.eq.brandon_context,memory_type.eq.system,memory_type.eq.checkpoint)&order=importance.desc&limit=10`,
-          { headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON } }
-        );
-        if (brainRes.ok) {
-          const brainData = await brainRes.json();
-          brainContext = brainData.map(m => {
-            const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
-            return `[${m.memory_type}] ${content.substring(0, 300)}`;
-          }).join('\n\n');
-        }
-      } catch (e) {
-        console.log('[DIAL v3] Brain context fetch error (non-fatal):', e.message);
-      }
+      // Build the per-call prompt with full context
+      const callContextPrompt = `# OUTBOUND CALL MODE
+You are ABA delivering information to Brandon via phone call.
 
-      // Build the per-call prompt with FULL BRAIN CONTEXT
-      const callContextPrompt = `# ABA VOICE CALL - ABABASE CONNECTED
-
-## WHO YOU ARE
-You are ABA (A Better AI) - Brandon's personal life assistant.
-You are making an outbound call to deliver information.
-You are warm, professional, butler-like. Never robotic.
-
-## YOUR BRAIN (From Supabase)
-${brainContext || 'Brain connected. Standard context.'}
-
-## THIS CALL'S PURPOSE
+## THE MESSAGE YOU ARE DELIVERING
 ${callContent}
 
-## CRITICAL RULES
-1. Start with "Hey Brandon, it's ABA" then deliver the message naturally
-2. You KNOW Brandon - you're his AI assistant, not a stranger
-3. You ARE connected to the brain - never say "I don't have context"
-4. Answer follow-up questions from your brain context above
-5. Be conversational - this is a real phone call
-6. If asked "are you connected to the new brain?" say YES and mention what you know
-7. Never go silent. Never say "let me check" and then wait.
-8. Keep responses SHORT for voice - no long paragraphs
+## CRITICAL INSTRUCTIONS
+1. Greet Brandon warmly, then deliver the message above.
+2. After delivering, be ready for follow-up questions.
+3. You KNOW the content - answer from THE MESSAGE section.
+4. Do NOT say "I don't have context" - YOU DO.
+5. Do NOT go silent. Stay engaged.
+6. Be conversational, warm, helpful. Never robotic.
 
-## WHAT YOU KNOW RIGHT NOW
-- MyABA v2.1.0 just shipped with 6 new features
-- Split screen, Talk to ABA mode, Sharing, Projects, Attachments, Voice replay
-- You are connected to ababase (the new smart backend)
-- You can send emails, make calls, send SMS, search the brain
-
+## WHO YOU ARE
+You are ABA - A Better AI. Brandon's personal AI assistant.
+Brandon is your creator (HAM - Human ABA Master).
 We Are All ABA.`;
 
-      // Keep first_message SHORT and natural
-      const firstMessage = `Hey Brandon, it's ABA. ${callContent.length > 100 ? 'I have an update for you.' : callContent}`;
+      // Keep first_message SHORT and clean
+      const firstMessage = callContent.length > 150
+        ? `Hey Boss, this is ABA. I have an update for you.`
+        : `Hey Boss, this is ABA. ${callContent}`;
 
+      // ⬡B:TOUCH:FIX:conversation_initiation_client_data:20260219⬡
+      // THE FIX: Use conversation_initiation_client_data instead of PATCH + top-level first_message
+      // This is the ONLY correct way per ElevenLabs docs to override per-call config
+      // No race condition, no global agent mutation, atomic per-conversation
       const callRequestBody = {
         agent_id: 'agent_0601khe2q0gben08ws34bzf7a0sa',
         agent_phone_number_id: 'phnum_0001khe3q3nyec1bv04mk2m048v8',
@@ -19525,7 +10513,7 @@ We Are All ABA.`;
         }
       };
 
-      console.log('[DIAL v3] Calling with brain context injected...');
+      console.log('[DIAL v2] Calling ElevenLabs with conversation_initiation_client_data (no PATCH needed)...');
       
       const callResult = await httpsRequest({
         hostname: 'api.elevenlabs.io',
@@ -19592,13 +10580,7 @@ We Are All ABA.`;
             timestamp: new Date().toISOString()
           });
           
-          
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
-      return jsonResponse(res, 200, {
+          return jsonResponse(res, 200, {
             success: true,
             conversation_id: fallbackData.conversation_id,
             traceId,
@@ -19643,12 +10625,6 @@ We Are All ABA.`;
       
       // NO MORE PATCH RESTORE NEEDED - we never mutated the global agent config!
       
-      
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, {
         success: true,
         conversation_id: data.conversation_id,
@@ -19786,8 +10762,8 @@ We Are All ABA.`;
       await fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
         method: 'POST',
         headers: {
-          'apikey': SUPABASE_KEY,
-          'Authorization': `Bearer ${SUPABASE_KEY}`,
+          'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+          'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY}`,
           'Content-Type': 'application/json',
           'Prefer': 'return=minimal'
         },
@@ -19804,13 +10780,7 @@ We Are All ABA.`;
       });
     }
     
-    
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
-      return jsonResponse(res, 200, { received: true });
+    return jsonResponse(res, 200, { received: true });
   }
   
   // /api/call/record - Toggle manual recording
@@ -19818,13 +10788,7 @@ We Are All ABA.`;
     const body = await parseBody(req);
     const { callSid, enable } = body;
     console.log('[DIAL] Manual record', enable ? 'STARTED' : 'STOPPED', '| Call:', callSid);
-    
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
-      return jsonResponse(res, 200, { 
+    return jsonResponse(res, 200, { 
       success: true, 
       recording: enable,
       timestamp: new Date().toISOString()
@@ -19838,7 +10802,7 @@ We Are All ABA.`;
       const url = new URL(req.url, 'http://localhost');
       const limitParam = url.searchParams.get('limit') || '50';
       const SUPA_URL = process.env.SUPABASE_URL || 'https://htlxjkbrstpwwtzsbyvb.supabase.co';
-      const SUPA_KEY = process.env.SUPABASE_KEY_KEY || process.env.SUPABASE_ANON_KEY;
+      const SUPA_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY;
       if (!SUPA_KEY) return jsonResponse(res, 503, { error: 'No Supabase key configured' });
       const supaResp = await httpsRequest({
         hostname: new URL(SUPA_URL).hostname,
@@ -19851,12 +10815,6 @@ We Are All ABA.`;
         try { return { id: m.id, ...JSON.parse(m.content), storedAt: m.created_at, importance: m.importance, tags: m.tags }; }
         catch(e) { return { id: m.id, raw: m.content, storedAt: m.created_at }; }
       });
-      
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, { jobs, total: jobs.length, source: 'supabase_brain' });
     } catch(e) { return jsonResponse(res, 500, { error: e.message }); }
   }
@@ -19938,15 +10896,9 @@ We Are All ABA.`;
         const spokenMessage = message || 'Hey, this is ABA calling as requested.';
         
         try {
-          const dialResult = await DIAL_callWithLiveKit(targetPhone, spokenMessage);
+          const dialResult = await DIAL_callWithElevenLabs(targetPhone, spokenMessage, source || 'escalate');
           
-          
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
-      return jsonResponse(res, 200, {
+          return jsonResponse(res, 200, {
             success: dialResult.success,
             routing: 'FORCE_CALL*ELEVENLABS*TWOWAY',
             analysis: { urgency: 10, category: 'ham_request', intent: 'Call requested by HAM' },
@@ -19974,12 +10926,6 @@ We Are All ABA.`;
         metadata: { urgency, target, originalBody: body }
       });
       
-      
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, {
         success: true,
         routing: result.routing,
@@ -20064,8 +11010,8 @@ We Are All ABA.`;
     await fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
       method: 'POST',
       headers: {
-        'apikey': SUPABASE_KEY,
-        'Authorization': `Bearer ${SUPABASE_KEY}`,
+        'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+        'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY}`,
         'Content-Type': 'application/json',
         'Prefer': 'return=minimal'
       },
@@ -20116,13 +11062,7 @@ We Are All ABA.`;
       const msgData = JSON.parse(msgResult.data.toString());
       const messages = msgData.data || [];
       
-      if (messages.length === 0) 
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
-      return jsonResponse(res, 200, { message: 'No Idealist emails found', jobs: [], total: 0 });
+      if (messages.length === 0) return jsonResponse(res, 200, { message: 'No Idealist emails found', jobs: [], total: 0 });
       
       // Parse each email for Idealist URLs
       let allJobs = [];
@@ -20147,7 +11087,7 @@ We Are All ABA.`;
               hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST',
               headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' }
             }, JSON.stringify({
-              model: 'claude-sonnet-4-5-20250929', max_tokens: 600,
+              model: 'claude-haiku-4-5-20251001', max_tokens: 600,
               system: 'Extract job posting details. Return ONLY JSON: {title, company, location, salary, description, employment_type, remote, deadline, requirements}. Empty string if unknown.',
               messages: [{ role: 'user', content: 'URL: ' + url + '\n\nHTML:\n' + html }]
             }));
@@ -20181,12 +11121,6 @@ We Are All ABA.`;
         }
       }
       
-      
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, {
         success: true,
         emailsProcessed: Math.min(messages.length, 20),
@@ -20253,40 +11187,18 @@ We Are All ABA.`;
   // ═══════════════════════════════════════════════════════════════════════════════
   
   // GET /api/sage/search - Search brain via SAGE
-  if ((path === '/api/sage/search' && method === 'GET') || (path === '/api/sage/search' && method === 'POST')) {
-    let query, forceWeb, includeWeb;
-    if (method === 'POST') {
-      const body = await parseBody(req);
-      query = body.query || body.q || '';
-      forceWeb = body.forceWeb === true;
-      includeWeb = body.includeWeb === true;
-    } else {
-      query = url.searchParams.get('q') || '';
-      forceWeb = url.searchParams.get('forceWeb') === 'true';
-      includeWeb = url.searchParams.get('includeWeb') === 'true';
-    }
-    console.log('[SAGE] API search:', query, '| forceWeb:', forceWeb, '| includeWeb:', includeWeb);
-    const results = await SAGE_search(query, { forceWeb, includeWeb });
-    
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
-      return jsonResponse(res, 200, { query, results, count: results.length });
+  if (path === '/api/sage/search' && method === 'GET') {
+    const query = url.searchParams.get('q') || '';
+    console.log('[SAGE] API search:', query);
+    const results = await SAGE_search(query);
+    return jsonResponse(res, 200, { query, results, count: results.length });
   }
   
   // GET /api/sage/index - Get ACL tag index
   if (path === '/api/sage/index' && method === 'GET') {
     console.log('[SAGE] API index request');
     const index = await SAGE_indexACL();
-    
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
-      return jsonResponse(res, 200, { tags: Object.keys(index).length, index });
+    return jsonResponse(res, 200, { tags: Object.keys(index).length, index });
   }
   
   // ⬡B:AIR:REACH.NYLAS.STATUS:CODE:email.nylas.connection_check:REACH→BRAIN→UI:v2.6.8:20260214:n1s2t⬡
@@ -20308,28 +11220,10 @@ We Are All ABA.`;
           const m = grants[0].content.match(/Email: ([^\s|]+)/);
           if (m) email = m[1];
         }
-        
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
-      return jsonResponse(res, 200, { connected: true, grant_id: grantId, email, provider: 'nylas' });
+        return jsonResponse(res, 200, { connected: true, grant_id: grantId, email, provider: 'nylas' });
       }
-      
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, { connected: false });
     } catch (e) {
-      
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, { connected: false, error: e.message });
     }
   }
@@ -20385,12 +11279,6 @@ We Are All ABA.`;
         else if (combined.match(/meeting|calendar|invite|rsvp/)) msg.category = 'meeting';
       }
 
-      
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, { success: true, emails: messages, count: messages.length, provider: 'nylas' });
     } catch (e) {
       console.error('[NYLAS INBOX]', e.message);
@@ -20403,13 +11291,7 @@ We Are All ABA.`;
     const body = await parseBody(req);
     console.log('[IMAN] API draft request:', body.to);
     const draft = await IMAN_draftEmail(body);
-    
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
-      return jsonResponse(res, 200, { success: !!draft, draft });
+    return jsonResponse(res, 200, { success: !!draft, draft });
   }
   
   // POST /api/iman/send - Send email (direct OR from draft)
@@ -20442,17 +11324,11 @@ We Are All ABA.`;
         path: '/rest/v1/aba_memory?memory_type=eq.email_draft&order=created_at.desc&limit=20',
         method: 'GET',
         headers: {
-          'apikey': SUPABASE_KEY,
-          'Authorization': 'Bearer ' + (SUPABASE_KEY)
+          'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+          'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY)
         }
       });
       const drafts = JSON.parse(draftsResult.data.toString()) || [];
-      
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
       return jsonResponse(res, 200, { count: drafts.length, drafts: drafts.map(d => ({
         id: d.id,
         ...JSON.parse(d.content || '{}'),
@@ -20475,91 +11351,14 @@ We Are All ABA.`;
   if (path === '/api/devices' && method === 'GET') {
     const userId = url.searchParams.get('userId');
     const devices = await getActiveDevices(userId);
-    
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
-      return jsonResponse(res, 200, { count: devices.length, devices });
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════
-  // ⬡B:REACH.presence:API:v1.1.3:proactive.queue:20260225⬡
-  // STEP 4: /api/presence — Returns proactive queue items for CEECEE Command Center
-  // Checks brain for unread memos, agent activity, scheduled items
-  // ═══════════════════════════════════════════════════════════════════════
-  if (path === '/api/presence' && method === 'GET') {
-    try {
-      const url = new URL(req.url, `http://${req.headers.host}`);
-      const userId = url.searchParams.get('userId') || 'brandon';
-      const items = [];
-
-      // Check for unread memos
-      try {
-        const memosRes = await fetch(
-          `https://htlxjkbrstpwwtzsbyvb.supabase.co/rest/v1/aba_memos?status=eq.unread&select=id,title,priority,created_at&limit=5&order=created_at.desc`,
-          { headers: { 'apikey': process.env.SUPABASE_ANON_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}` } }
-        );
-        if (memosRes.ok) {
-          const memos = await memosRes.json();
-          if (memos && memos.length > 0) {
-            items.push({ type: 'memo', priority: 'medium', title: `${memos.length} unread memo${memos.length > 1 ? 's' : ''}`, summary: memos[0].title || 'New memo waiting', count: memos.length });
-          }
-        }
-      } catch (e) { console.log('[PRESENCE] Memos check skipped:', e.message); }
-
-      // Check for recent agent activity (last 24h)
-      try {
-        const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-        const activityRes = await fetch(
-          `https://htlxjkbrstpwwtzsbyvb.supabase.co/rest/v1/aba_reach_events?created_at=gte.${since}&select=event_type,agent,created_at&limit=10&order=created_at.desc`,
-          { headers: { 'apikey': process.env.SUPABASE_ANON_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}` } }
-        );
-        if (activityRes.ok) {
-          const events = await activityRes.json();
-          if (events && events.length > 0) {
-            items.push({ type: 'activity', priority: 'low', title: `${events.length} agent action${events.length > 1 ? 's' : ''} today`, summary: `Latest: ${events[0].agent || 'ABA'} - ${events[0].event_type || 'processed'}`, count: events.length });
-          }
-        }
-      } catch (e) { console.log('[PRESENCE] Activity check skipped:', e.message); }
-
-      // Check brain for pending briefings (DAWN - Daily Awareness Wakeup Navigator)
-      try {
-        const briefingRes = await fetch(
-          `https://htlxjkbrstpwwtzsbyvb.supabase.co/rest/v1/aba_memory?memory_type=eq.dawn_briefing&select=content,created_at&limit=1&order=created_at.desc`,
-          { headers: { 'apikey': process.env.SUPABASE_ANON_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}` } }
-        );
-        if (briefingRes.ok) {
-          const briefings = await briefingRes.json();
-          if (briefings && briefings.length > 0) {
-            const age = Date.now() - new Date(briefings[0].created_at).getTime();
-            if (age < 24 * 60 * 60 * 1000) {
-              items.push({ type: 'briefing', priority: 'high', title: 'Daily briefing ready', summary: 'DAWN has your morning update' });
-            }
-          }
-        }
-      } catch (e) { console.log('[PRESENCE] Briefing check skipped:', e.message); }
-
-      console.log('[PRESENCE] Returning', items.length, 'items for', userId);
-      return jsonResponse(res, 200, { items, userId, timestamp: new Date().toISOString() });
-    } catch (e) {
-      console.error('[PRESENCE] Error:', e.message);
-      return jsonResponse(res, 200, { items: [], error: e.message });
-    }
+    return jsonResponse(res, 200, { count: devices.length, devices });
   }
   
   // GET /api/pulse/status - Get heartbeat status
   if (path === '/api/pulse/status' && method === 'GET') {
     const oneHourAgo = Date.now() - 60 * 60 * 1000;
     const recentCalls = CALL_HISTORY.filter(t => t > oneHourAgo);
-    
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
-      return jsonResponse(res, 200, {
+    return jsonResponse(res, 200, {
       status: 'active',
       uptime: Math.floor(process.uptime()),
       commandCenterClients: COMMAND_CENTER_CLIENTS.size,
@@ -20585,13 +11384,7 @@ We Are All ABA.`;
         cooldowns[phone] = Math.ceil(remaining / 60000) + ' min remaining';
       }
     }
-    
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
-      return jsonResponse(res, 200, {
+    return jsonResponse(res, 200, {
       callsThisHour: recentCalls.length,
       maxCallsPerHour: MAX_CALLS_PER_HOUR,
       cooldownMinutes: CALL_COOLDOWN_MINUTES,
@@ -20605,13 +11398,7 @@ We Are All ABA.`;
     console.log('[THROTTLE] Manual reset triggered');
     CALL_COOLDOWN.clear();
     CALL_HISTORY.length = 0;
-    
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
-      return jsonResponse(res, 200, { 
+    return jsonResponse(res, 200, { 
       reset: true, 
       message: 'All cooldowns cleared. ABA can call again immediately.' 
     });
@@ -20623,13 +11410,7 @@ We Are All ABA.`;
     pulseCheck().then(() => {
       console.log('[PULSE] Manual pulse complete');
     });
-    
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
-      return jsonResponse(res, 200, { triggered: true, timestamp: new Date().toISOString() });
+    return jsonResponse(res, 200, { triggered: true, timestamp: new Date().toISOString() });
   }
 
 
@@ -20660,13 +11441,7 @@ We Are All ABA.`;
         subject: data.draft.subject
       });
     }
-    
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
-      return jsonResponse(res, 200, { count: pending.length, pending });
+    return jsonResponse(res, 200, { count: pending.length, pending });
   }
 
 
@@ -20727,13 +11502,7 @@ We Are All ABA.`;
   
   if (path === '/api/air/erica' && method === 'GET') {
     const cooldownRemaining = Math.max(0, (ERICA_LAST_RUN + ERICA_COOLDOWN) - Date.now());
-    
-      // RETURN-TO-ME: Post-process logging
-      console.log('[AIR] RETURN-TO-ME: LOGFUL, AGENT_LINK processing...');
-      // LOGFUL logs outcome to brain
-      // AGENT_LINK creates session handoff
-      // MEMOS captures if noteworthy
-      return jsonResponse(res, 200, {
+    return jsonResponse(res, 200, {
       agent: 'ERICA',
       fullName: 'Executive Roadmap Intelligence & Continuous Automation',
       status: cooldownRemaining > 0 ? 'cooldown' : 'ready',
@@ -20751,14 +11520,6 @@ We Are All ABA.`;
     const result = await GRIT_testEndpoints();
     return jsonResponse(res, 200, result);
   }
-
-  // /api/air/status - AIR Status (Phase 1)
-  if (path === "/api/air/status" && method === "GET") {
-    let rp = "?", ni = "unknown";
-    try { if (AGENTS.ERICA?.execute) { const e = await AGENTS.ERICA.execute("status",{}); rp = e.percentComplete; ni = e.nextItem?.item?.substring(0,60); }} catch(e){}
-    return jsonResponse(res, 200, { status: "operational", agents: Object.keys(AGENTS).length, roadmap: { percent: rp, next: ni }, pulse: true });
-  }
-
   
   // POST /api/github/push — Push a file to GitHub (for CACA chains)
   // ═══════════════════════════════════════════════════════════════════════════════
@@ -20772,523 +11533,11 @@ We Are All ABA.`;
     return jsonResponse(res, result.success ? 200 : 500, result);
   }
 
-
-  // /api/voice/dial-callback - ElevenLabs continuous loop callback (Phase 1 Item 5)
-  if (path === '/api/voice/dial-callback' && method === 'POST') {
-    try {
-      const body = await parseBody(req);
-      console.log('[DIAL-CALLBACK] Received:', JSON.stringify(body).substring(0, 200));
-      
-      const transcript = body.transcript || body.text || '';
-      const callId = body.call_id || body.conversation_id || Date.now().toString();
-      
-      // Clean with SCRUB if available
-      let cleaned = transcript;
-      if (AGENTS.SCRUB && AGENTS.SCRUB.clean) {
-        cleaned = AGENTS.SCRUB.clean(transcript);
-      }
-      
-      // Route through AIR - AIR_text takes (message, history, context)
-      if (cleaned && AIR_text) {
-        const airRes = await AIR_text(cleaned, [], { source: 'dial_callback', callId });
-        return jsonResponse(res, 200, { status: 'ok', response: airRes?.response?.substring(0, 500), callId });
-      }
-      
-      return jsonResponse(res, 200, { status: 'ok', message: 'No transcript to process' });
-    } catch (e) {
-      return jsonResponse(res, 200, { status: 'error', error: e.message });
-    }
-  }
-
-
-  // ⬡B:DEBUG:IMAN_TEST:20260226⬡
-  if (path === "/api/test-iman" && method === "GET") {
-    try {
-      // Test 1: Direct ABACIA call
-      const abaciaResult = await ABACIA_IMAN_getInbox({ daysAgo: 7, limit: 5 });
-      
-      // Test 2: Full IMAN_readEmails with identity
-      const testIdentity = { name: "Brandon", trust: "T10", email: "test@test.com" };
-      const imanResult = await IMAN_readEmails(testIdentity);
-      
-      return jsonResponse(res, 200, {
-        abacia: {
-          success: abaciaResult.success,
-          count: abaciaResult.messages?.length || 0,
-          firstSubject: abaciaResult.messages?.[0]?.subject || "none"
-        },
-        iman: {
-          allowed: imanResult?.allowed,
-          summary: imanResult?.summary,
-          count: imanResult?.count
-        }
-      });
-    } catch (e) {
-      return jsonResponse(res, 500, { error: e.message, stack: e.stack });
-    }
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // ⬡B:REACH.AWA:PHASE8:apply_with_aba:20260228⬡
-  // AWA (Apply With ABA) - Job Application Satellite App
-  // Routes: /api/awa/jobs, /api/awa/applications, /api/awa/resumes, /api/awa/cover-letters
-  // Agent: JOBA (Job Application Agent)
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  // AWA JOBS - List all tracked jobs
-  if (path === '/api/awa/jobs' && method === 'GET') {
-    // ⬡B:awa.jobs:FIX:aba_memory:20260301⬡ - Query aba_memory where memory_type=awa_job (143 GMG tracker jobs)
-    try {
-      const assignee = url.searchParams?.get?.('assignee') || req.query?.assignee;
-      const result = await httpsRequest({
-        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-        path: '/rest/v1/aba_memory?memory_type=eq.awa_job&select=id,content,created_at&order=created_at.desc&limit=200',
-        method: 'GET',
-        headers: {
-          'apikey': SUPABASE_KEY,
-          'Authorization': 'Bearer ' + (SUPABASE_KEY)
-        }
-      });
-      let rawJobs = JSON.parse(result.data || '[]');
-      let jobs = rawJobs.map(item => {
-        const c = typeof item.content === 'string' ? JSON.parse(item.content) : item.content;
-        return { id: item.id, ...c };
-      });
-      if (assignee) {
-        jobs = jobs.filter(j => j.assignees && j.assignees.includes(assignee));
-      }
-      return jsonResponse(res, 200, { jobs, count: jobs.length });
-    } catch (e) {
-      return jsonResponse(res, 500, { error: e.message });
-    }
-  }
-
-  // AWA JOBS - Create new job
-  if (path === '/api/awa/jobs' && method === 'POST') {
-    try {
-      const body = await parseBody(req);
-      const userId = req.headers?.get?.('x-user-id') || body.user_id || 'brandon_t10';
-      
-      const jobData = {
-        user_id: userId,
-        company_name: body.company_name || body.company,
-        job_title: body.job_title || body.title,
-        job_url: body.job_url || body.url,
-        job_description: body.job_description || body.description,
-        location: body.location,
-        salary_min: body.salary_min,
-        salary_max: body.salary_max,
-        remote_type: body.remote_type || 'unknown',
-        status: body.status || 'saved',
-        priority: body.priority || 5,
-        notes: body.notes,
-        source: body.source,
-        tags: body.tags || []
-      };
-
-      const result = await httpsRequest({
-        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-        path: '/rest/v1/awa_jobs',
-        method: 'POST',
-        headers: {
-          'apikey': SUPABASE_KEY,
-          'Authorization': 'Bearer ' + (SUPABASE_KEY),
-          'Content-Type': 'application/json',
-          'Prefer': 'return=representation'
-        }
-      }, JSON.stringify(jobData));
-      
-      const created = JSON.parse(result.data || '[]');
-      return jsonResponse(res, 201, { job: created[0], message: 'Job saved to AWA' });
-    } catch (e) {
-      return jsonResponse(res, 500, { error: e.message });
-    }
-  }
-
-  // AWA JOBS - Update job status
-  if (path.startsWith('/api/awa/jobs/') && method === 'PATCH') {
-    try {
-      const jobId = path.split('/')[4];
-      const body = await parseBody(req);
-      
-      const updates = {};
-      if (body.status) updates.status = body.status;
-      if (body.priority) updates.priority = body.priority;
-      if (body.notes) updates.notes = body.notes;
-      if (body.applied_at) updates.applied_at = body.applied_at;
-      
-      const result = await httpsRequest({
-        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-        path: '/rest/v1/awa_jobs?id=eq.' + jobId,
-        method: 'PATCH',
-        headers: {
-          'apikey': SUPABASE_KEY,
-          'Authorization': 'Bearer ' + (SUPABASE_KEY),
-          'Content-Type': 'application/json',
-          'Prefer': 'return=representation'
-        }
-      }, JSON.stringify(updates));
-      
-      const updated = JSON.parse(result.data || '[]');
-      return jsonResponse(res, 200, { job: updated[0], message: 'Job updated' });
-    } catch (e) {
-      return jsonResponse(res, 500, { error: e.message });
-    }
-  }
-
-  // AWA APPLICATIONS - List applications
-  if (path === '/api/awa/applications' && method === 'GET') {
-    try {
-      const userId = req.headers?.get?.('x-user-id') || 'brandon_t10';
-      const result = await httpsRequest({
-        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-        path: '/rest/v1/awa_applications?user_id=eq.' + encodeURIComponent(userId) + '&order=created_at.desc&limit=50',
-        method: 'GET',
-        headers: {
-          'apikey': SUPABASE_KEY,
-          'Authorization': 'Bearer ' + (SUPABASE_KEY)
-        }
-      });
-      const applications = JSON.parse(result.data || '[]');
-      return jsonResponse(res, 200, { applications, count: applications.length });
-    } catch (e) {
-      return jsonResponse(res, 500, { error: e.message });
-    }
-  }
-
-  // AWA RESUMES - List resumes
-  if (path === '/api/awa/resumes' && method === 'GET') {
-    try {
-      const userId = req.headers?.get?.('x-user-id') || 'brandon_t10';
-      const result = await httpsRequest({
-        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-        path: '/rest/v1/awa_resumes?user_id=eq.' + encodeURIComponent(userId) + '&order=created_at.desc',
-        method: 'GET',
-        headers: {
-          'apikey': SUPABASE_KEY,
-          'Authorization': 'Bearer ' + (SUPABASE_KEY)
-        }
-      });
-      const resumes = JSON.parse(result.data || '[]');
-      return jsonResponse(res, 200, { resumes, count: resumes.length });
-    } catch (e) {
-      return jsonResponse(res, 500, { error: e.message });
-    }
-  }
-
-  // AWA RESUMES - Upload/Create resume
-  if (path === '/api/awa/resumes' && method === 'POST') {
-    try {
-      const body = await parseBody(req);
-      const userId = req.headers?.get?.('x-user-id') || body.user_id || 'brandon_t10';
-      
-      const resumeData = {
-        user_id: userId,
-        name: body.name || 'Resume ' + new Date().toISOString().split('T')[0],
-        content: body.content,
-        file_url: body.file_url,
-        target_role: body.target_role,
-        target_industry: body.target_industry,
-        keywords: body.keywords || [],
-        is_master: body.is_master || false
-      };
-
-      const result = await httpsRequest({
-        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-        path: '/rest/v1/awa_resumes',
-        method: 'POST',
-        headers: {
-          'apikey': SUPABASE_KEY,
-          'Authorization': 'Bearer ' + (SUPABASE_KEY),
-          'Content-Type': 'application/json',
-          'Prefer': 'return=representation'
-        }
-      }, JSON.stringify(resumeData));
-      
-      const created = JSON.parse(result.data || '[]');
-      return jsonResponse(res, 201, { resume: created[0], message: 'Resume saved' });
-    } catch (e) {
-      return jsonResponse(res, 500, { error: e.message });
-    }
-  }
-
-  // AWA RESUMES - Generate tailored resume with JOBA
-  // ⬡B:REACH.AWA.RESUME_GEN:ROUTE:joba.generate_resume:20260228⬡
-  // AWA RESUMES - Generate tailored resume with FCW
-  // ⬡B:REACH.AWA.RESUME_GEN:FCW:air.process:20260301⬡
-  // ROUTING: Request → REACH → ABABASE /api/air/process → FCW (87 agents) → Response
-  if (path === '/api/awa/resumes/generate' && method === 'POST') {
-    try {
-      const body = await parseBody(req);
-      const userId = body.user_id || 'brandon';
-      const targetRole = body.target_role || body.job_title || '';
-      const jobDescription = body.job_description || '';
-      const jobId = body.job_id || null;
-      
-      // Route through ABABASE FCW - NOT direct Claude call
-      const fcwResult = await httpsRequest({
-        hostname: 'abacia-services.onrender.com',
-        path: '/api/air/process',
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      }, JSON.stringify({
-        message: `Generate a tailored resume for ${userId} targeting the role: ${targetRole}. Job description: ${jobDescription || 'Not provided'}. Use the team profile from brain for ${userId}. Follow ALL writing standards from brain. Format as a clean, ATS-friendly resume.`,
-        type: 'awa_resume',
-        userId: userId,
-        channel: 'awa',
-        context: {
-          action: 'generate_resume',
-          job_id: jobId,
-          target_role: targetRole,
-          job_description: jobDescription,
-          team_member: userId
-        }
-      }));
-      
-      const fcwData = JSON.parse(fcwResult.data || '{}');
-      const resumeContent = fcwData.response || 'Failed to generate via FCW';
-      const agentsRan = fcwData.agents || [];
-      
-      // Store resume in brain
-      const resumeData = {
-        user_id: userId,
-        name: 'Resume - ' + targetRole + ' - ' + new Date().toISOString().split('T')[0],
-        content: resumeContent,
-        target_role: targetRole,
-        generated_by: 'JOBA via FCW',
-        fcw_agents: agentsRan.length,
-        is_master: false
-      };
-      
-      await httpsRequest({
-        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-        path: '/rest/v1/awa_resumes',
-        method: 'POST',
-        headers: {
-          'apikey': SUPABASE_KEY,
-          'Authorization': 'Bearer ' + SUPABASE_KEY,
-          'Content-Type': 'application/json',
-          'Prefer': 'return=minimal'
-        }
-      }, JSON.stringify(resumeData));
-      
-      return jsonResponse(res, 201, {
-        content: resumeContent,
-        generated_by: 'JOBA via FCW',
-        fcw_agents_ran: agentsRan.length,
-        agents: agentsRan.map(a => a.agent || a.name || 'unknown'),
-        profile_used: userId,
-        target_role: targetRole,
-        message: 'Resume generated via FCW (not micro-task)'
-      });
-    } catch (e) {
-      console.error('[AWA] FCW Resume Error:', e.message);
-      return jsonResponse(res, 500, { error: e.message, note: 'FCW route failed' });
-    }
-  }
-
-  // AWA COVER LETTERS - Generate with FCW via ABABASE
-  // ⬡B:REACH.AWA.COVER_LETTER:FCW:ababase.awa:20260301⬡
-  // ROUTING: Request → REACH → ABABASE /api/awa/cover-letter → JOBA + Profile from Brain → Response
-  if (path === '/api/awa/cover-letters' && method === 'POST') {
-    try {
-      const body = await parseBody(req);
-      const userId = body.user_id || 'brandon';
-      
-      // Build job object for ABABASE
-      const job = {
-        id: body.job_id || null,
-        job_title: body.job_title || '',
-        organization: body.company_name || '',
-        salary: body.salary || '',
-        url: body.job_url || '',
-        description: body.job_description || ''
-      };
-      
-      // Route through ABABASE dedicated AWA endpoint
-      // This loads JOBA JD + Team Profile from brain
-      const fcwResult = await httpsRequest({
-        hostname: 'abacia-services.onrender.com',
-        path: '/api/awa/cover-letter',
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      }, JSON.stringify({
-        job: job,
-        userId: userId
-      }));
-      
-      const fcwData = JSON.parse(fcwResult.data || '{}');
-      
-      if (fcwData.success && fcwData.coverLetter) {
-        return jsonResponse(res, 201, {
-          content: fcwData.coverLetter,
-          generated_by: 'JOBA via ABABASE FCW',
-          profile_used: fcwData.profile || userId,
-          message: 'Cover letter generated via FCW'
-        });
-      } else {
-        return jsonResponse(res, 500, { 
-          error: fcwData.error || 'ABABASE returned no content',
-          debug: fcwData
-        });
-      }
-    } catch (e) {
-      console.error('[AWA] FCW Cover Letter Error:', e.message);
-      return jsonResponse(res, 500, { error: e.message, note: 'FCW route failed' });
-    }
-  }
-
-
-  if (path === '/api/awa/cover-letters' && method === 'GET') {
-    try {
-      const userId = req.headers?.get?.('x-user-id') || 'brandon_t10';
-      const result = await httpsRequest({
-        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-        path: '/rest/v1/awa_cover_letters?user_id=eq.' + encodeURIComponent(userId) + '&order=created_at.desc',
-        method: 'GET',
-        headers: {
-          'apikey': SUPABASE_KEY,
-          'Authorization': 'Bearer ' + (SUPABASE_KEY)
-        }
-      });
-      const letters = JSON.parse(result.data || '[]');
-      return jsonResponse(res, 200, { cover_letters: letters, count: letters.length });
-    } catch (e) {
-      return jsonResponse(res, 500, { error: e.message });
-    }
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // VARA REAL-TIME INTELLIGENCE ENDPOINT
-  // ⬡B:REACH.VARA.STATUS:ROUTE:vara.realtime:20260228⬡
-  // Frontend calls this instead of hardcoded garbage
-  // ═══════════════════════════════════════════════════════════════════════════
-  if (path === '/api/vara/status' && method === 'GET') {
-    try {
-      const userId = req.headers?.get?.('x-user-id') || 'brandon';
-      
-      // Get recent activity from brain
-      const activityResult = await httpsRequest({
-        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-        path: '/rest/v1/aba_memory?order=created_at.desc&limit=5&select=content,source,created_at',
-        method: 'GET',
-        headers: {
-          'apikey': SUPABASE_KEY,
-          'Authorization': 'Bearer ' + SUPABASE_KEY
-        }
-      });
-      
-      const recentMemories = JSON.parse(activityResult.data || '[]');
-      const recentActivity = recentMemories.map(m => m.content?.substring(0, 100)).filter(Boolean);
-      
-      // Get pending jobs count
-      const jobsResult = await httpsRequest({
-        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-        path: '/rest/v1/awa_jobs?status=eq.saved&select=count',
-        method: 'GET',
-        headers: {
-          'apikey': SUPABASE_KEY,
-          'Authorization': 'Bearer ' + SUPABASE_KEY,
-          'Prefer': 'count=exact'
-        }
-      });
-      
-      const pendingJobs = parseInt(jobsResult.headers?.['content-range']?.split('/')[1] || '0');
-      
-      // Build REAL status based on actual data
-      const hour = new Date().getHours();
-      const timeOfDay = hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : 'evening';
-      
-      const statusItems = [];
-      if (pendingJobs > 0) statusItems.push(pendingJobs + ' jobs saved');
-      if (recentActivity.length > 0) statusItems.push('Recent activity logged');
-      
-      return jsonResponse(res, 200, {
-        greeting: 'Good ' + timeOfDay,
-        user: userId,
-        status: statusItems.length > 0 ? statusItems.join(', ') : 'Standing by',
-        pending_jobs: pendingJobs,
-        recent_activity: recentActivity,
-        timestamp: new Date().toISOString()
-      });
-    } catch (e) {
-      return jsonResponse(res, 500, { error: e.message });
-    }
-  }
-
-  // VARA SPEAK - Generate real-time narration from AIR
-  // ⬡B:REACH.VARA.SPEAK:ROUTE:vara.narrate:20260228⬡
-  if (path === '/api/vara/speak' && method === 'POST') {
-    try {
-      const body = await parseBody(req);
-      const context = body.context || 'general';
-      const userId = body.user_id || 'brandon';
-      
-      // Get relevant context from brain
-      const contextResult = await httpsRequest({
-        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-        path: '/rest/v1/aba_memory?order=importance.desc,created_at.desc&limit=3&select=content',
-        method: 'GET',
-        headers: {
-          'apikey': SUPABASE_KEY,
-          'Authorization': 'Bearer ' + SUPABASE_KEY
-        }
-      });
-      
-      const memories = JSON.parse(contextResult.data || '[]');
-      const contextInfo = memories.map(m => m.content?.substring(0, 150)).filter(Boolean).join('\n');
-      
-      // Generate VARA speech via Claude
-      const hour = new Date().getHours();
-      const timeGreeting = hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : 'evening';
-      
-      const prompt = `You are VARA (Vocal Authorized Representative of ABA), Brandon's AI assistant. 
-Time: ${timeGreeting}
-Context requested: ${context}
-Recent activity: ${contextInfo || 'Nothing pressing'}
-
-Generate a NATURAL, WARM, BUTLER-LIKE message for Brandon. NOT robotic. NOT corporate. NOT servile.
-Like JARVIS - confident, helpful, personal.
-Keep under 3 sentences. Be specific if there's real activity to mention.`;
-
-      const varaResult = await httpsRequest({
-        hostname: 'api.anthropic.com',
-        path: '/v1/messages',
-        method: 'POST',
-        headers: {
-          'x-api-key': process.env.ANTHROPIC_API_KEY,
-          'anthropic-version': '2023-06-01',
-          'Content-Type': 'application/json'
-        }
-      }, JSON.stringify({
-        model: 'claude-3-haiku-20240307',
-        max_tokens: 200,
-        messages: [{ role: 'user', content: prompt }]
-      }));
-
-      const varaData = JSON.parse(varaResult.data || '{}');
-      const speech = varaData.content?.[0]?.text || 'Standing by.';
-      
-      return jsonResponse(res, 200, { 
-        speech: speech,
-        context: context,
-        generated_by: 'VARA',
-        timestamp: new Date().toISOString()
-      });
-    } catch (e) {
-      return jsonResponse(res, 500, { error: e.message });
-    }
-  }
-
   // ⬡B:AIR:REACH.API.NOTFOUND:CODE:infrastructure.error.404:USER→REACH→ERROR:T10:v1.5.0:20260213:n1f2d⬡ CATCH-ALL
   // ═══════════════════════════════════════════════════════════════════════
   jsonResponse(res, 404, { 
     error: 'Route not found: ' + method + ' ' + path,
-    available: ['/api/escalate', '/api/escalate/twiml', '/api/escalate/confirm', '/api/call/dial', '/api/call/twiml', '/api/call/status', '/api/call/record', '/api/air/trigger/email', '/api/air/trigger/omi', '/api/air/trigger/calendar', '/api/air/trigger/job', '/api/air/trigger/system', '/api/air/think-tank', '/api/air/caca', '/api/air/erica', '/api/air/grit', '/api/github/push', '/api/sage/search', '/api/sage/index', '/api/iman/draft', '/api/iman/send', '/api/iman/drafts', '/api/devices/register', '/api/devices', '/api/pulse/status', '/api/pulse/trigger', '/api/router', '/api/models/claude', '/api/voice/deepgram-token', '/api/voice/tts', '/api/voice/tts-stream', '/api/omi/manifest', '/api/omi/webhook', '/api/sms/send', '/api/brain/search', '/api/brain/store', '/api/brain/code-patch', '/api/brain/code-patches', '/api/brain/store-patch', '/api/brain/apply-patch', '/api/awa/jobs', '/api/awa/applications', '/api/awa/resumes', '/api/awa/cover-letters', '/ws:command-center'],
+    available: ['/api/escalate', '/api/escalate/twiml', '/api/escalate/confirm', '/api/call/dial', '/api/call/twiml', '/api/call/status', '/api/call/record', '/api/air/trigger/email', '/api/air/trigger/omi', '/api/air/trigger/calendar', '/api/air/trigger/job', '/api/air/trigger/system', '/api/air/think-tank', '/api/air/caca', '/api/air/erica', '/api/air/grit', '/api/github/push', '/api/sage/search', '/api/sage/index', '/api/iman/draft', '/api/iman/send', '/api/iman/drafts', '/api/devices/register', '/api/devices', '/api/pulse/status', '/api/pulse/trigger', '/api/router', '/api/models/claude', '/api/voice/deepgram-token', '/api/voice/tts', '/api/voice/tts-stream', '/api/omi/manifest', '/api/omi/webhook', '/api/sms/send', '/api/brain/search', '/api/brain/store', '/ws:command-center'],
     hint: 'We are all ABA'
   });
 });
@@ -21543,7 +11792,7 @@ crWss.on('connection', async (ws, req) => {
   // DEBUG: Log to brain
   fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
     method: 'POST',
-    headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+    headers: { 'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
     body: JSON.stringify({ content: `DEBUG CR CONNECTION: trace=${traceId}`, memory_type: 'debug', source: 'cr_connect_' + Date.now() })
   }).catch(e => {});
   
@@ -21561,7 +11810,7 @@ crWss.on('connection', async (ws, req) => {
       // DEBUG: Log message
       fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
         method: 'POST',
-        headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+        headers: { 'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
         body: JSON.stringify({ content: `DEBUG CR MESSAGE: type=${message.type}, params=${JSON.stringify(message.customParameters || {}).substring(0,50)}`, memory_type: 'debug', source: 'cr_msg_' + Date.now() })
       }).catch(e => {});
       
@@ -21586,7 +11835,7 @@ crWss.on('connection', async (ws, req) => {
           // DEBUG: Log to brain
           fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
             method: 'POST',
-            headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+            headers: { 'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
             body: JSON.stringify({ content: `DEBUG CR PROMPT: user said "${userText.substring(0,80)}"`, memory_type: 'debug', source: 'cr_prompt_' + Date.now() })
           }).catch(e => {});
           
@@ -21615,7 +11864,7 @@ crWss.on('connection', async (ws, req) => {
             // DEBUG: Log response
             fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
               method: 'POST',
-              headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+              headers: { 'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
               body: JSON.stringify({ content: `DEBUG CR RESPONSE: "${(responseText || '').substring(0,80)}"`, memory_type: 'debug', source: 'cr_response_' + Date.now() })
             }).catch(e => {});
             
@@ -21716,7 +11965,7 @@ wss.on('connection', (ws) => {
   // DEBUG: Log connection to brain
   fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
     method: 'POST',
-    headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+    headers: { 'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
     body: JSON.stringify({ content: `DEBUG WEBSOCKET CONNECTION: New /media-stream connection`, memory_type: 'debug', source: 'ws_connect_' + Date.now() })
   }).catch(e => {});
   
@@ -21726,7 +11975,7 @@ wss.on('connection', (ws) => {
     // DEBUG: Log IMMEDIATELY before anything else
     fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
       method: 'POST',
-      headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+      headers: { 'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
       body: JSON.stringify({ content: `DEBUG WS RAW MESSAGE RECEIVED`, memory_type: 'debug', source: 'ws_raw_' + Date.now() })
     }).catch(e => {});
     
@@ -21739,7 +11988,7 @@ wss.on('connection', (ws) => {
       if (ws._msgCount <= 5) {
         fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
           method: 'POST',
-          headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+          headers: { 'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
           body: JSON.stringify({ content: `DEBUG WS MSG #${ws._msgCount}: event=${msg.event}`, memory_type: 'debug', source: 'ws_msg_' + Date.now() })
         }).catch(e => {});
       }
@@ -21753,7 +12002,7 @@ wss.on('connection', (ws) => {
         console.log('[START] *** GOT START EVENT ***');
         fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
           method: 'POST',
-          headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+          headers: { 'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
           body: JSON.stringify({ content: `DEBUG START EVENT: streamSid=${msg.start?.streamSid}, customParams=${JSON.stringify(msg.start?.customParameters || {})}`, memory_type: 'debug', source: 'start_event_' + Date.now() })
         }).catch(e => console.log('[DEBUG] Brain log failed:', e.message));
         
@@ -21781,7 +12030,7 @@ wss.on('connection', (ws) => {
           // DEBUG: Log to brain
           fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
             method: 'POST',
-            headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+            headers: { 'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
             body: JSON.stringify({ content: `DEBUG OUTBOUND START: streamSid=${session.streamSid}, callSid=${session.callSid}`, memory_type: 'debug', source: 'outbound_start_' + Date.now() })
           }).catch(e => {});
           
@@ -21862,7 +12111,7 @@ wss.on('connection', (ws) => {
           if (session._droppedCount === 1) {
             fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
               method: 'POST',
-              headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+              headers: { 'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
               body: JSON.stringify({ content: `DEBUG MEDIA DROPPED: No deepgramWs! isOutbound=${session.isOutbound}`, memory_type: 'debug', source: 'media_dropped_' + Date.now() })
             }).catch(e => {});
           }
@@ -21879,7 +12128,7 @@ wss.on('connection', (ws) => {
         if (session._mediaLogCount <= 3) {
           fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
             method: 'POST',
-            headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+            headers: { 'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
             body: JSON.stringify({ content: `DEBUG MEDIA #${session._mediaLogCount}: isOutbound=${session.isOutbound}, deepgramState=${session.deepgramWs?.readyState}`, memory_type: 'debug', source: 'media_' + Date.now() })
           }).catch(e => {});
         }
@@ -22114,8 +12363,8 @@ httpServer.listen(PORT, '0.0.0.0', () => {
                 path: '/rest/v1/aba_memory?id=eq.' + call.memoryId,
                 method: 'DELETE',
                 headers: {
-                  'apikey': SUPABASE_KEY,
-                  'Authorization': 'Bearer ' + (SUPABASE_KEY)
+                  'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+                  'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY)
                 }
               });
               console.log('[INTERNAL CRON] ✅ Deleted scheduled call entry');
@@ -22128,7 +12377,7 @@ httpServer.listen(PORT, '0.0.0.0', () => {
             let callResult;
             
             if (call.call_type === 'dawn_briefing') {
-              callResult = await DIAL_callWithLiveKit(call.target_phone, "Scheduled call from ABA");
+              callResult = await DAWN_makeCall(call.target_phone, call.target_name);
             } else {
               // Regular scheduled call via ElevenLabs
               const apiResult = await httpsRequest({
@@ -22243,8 +12492,8 @@ dialWss.on('connection', (ws, req) => {
           await fetch(SUPABASE_URL + '/rest/v1/aba_memory', {
             method: 'POST',
             headers: {
-              'apikey': SUPABASE_KEY,
-              'Authorization': 'Bearer ' + (SUPABASE_KEY),
+              'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+              'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY),
               'Content-Type': 'application/json',
               'Prefer': 'return=minimal'
             },
@@ -22301,8 +12550,8 @@ dialWss.on('connection', (ws, req) => {
           fetch(SUPABASE_URL + '/rest/v1/aba_memory', {
             method: 'POST',
             headers: {
-              'apikey': SUPABASE_KEY,
-              'Authorization': 'Bearer ' + (SUPABASE_KEY),
+              'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+              'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY),
               'Content-Type': 'application/json',
               'Prefer': 'return=minimal'
             },
@@ -22408,62 +12657,61 @@ conversationWss.on('connection', (ws, req) => {
     deepgramWs.on('close', () => console.log('[CONVERSATION] Deepgram closed | Trace:', traceId));
   };
   
-  // ⬡B:FIX:CONVERSATION.USE_LOCAL_AIR:CODE:voice.real_fcw:20260228⬡
-  // Process user speech through LOCAL AIR (not external abacia-services garbage)
-  // This uses the REAL Fat Context Window (FCW) with all 88 agents
+  // Process user speech through AIR and send TTS response
   async function processAndRespond(userText, ws, streamSid, traceId) {
-    console.log('[CONVERSATION] Processing through LOCAL AIR:', userText.substring(0, 50) + '...');
+    console.log('[CONVERSATION] Processing:', userText.substring(0, 50) + '...');
     
     try {
-      // Build caller identity for AIR
-      const callerIdentity = {
-        name: 'Brandon',  // Default to Brandon - enhance with caller lookup later
-        userId: 'brandon',
-        phone: 'inbound_call',
-        trustLevel: 'T10'
-      };
+      // Route through AIR (ABACIA services) or fallback to local
+      let response = '';
       
-      // Use the REAL AIR_process function with full FCW
-      // This includes: LUKE analysis, COLE context, JUDE agents, PACK assembly
-      console.log('[CONVERSATION] Invoking AIR_process with full FCW...');
-      console.log('[CONVERSATION] TraceID:', traceId);
+      try {
+        // Try ABACIA-SERVICES AIR first
+        const airResult = await httpsRequest({
+          hostname: 'abacia-services.onrender.com',
+          path: '/api/air/process',
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        }, JSON.stringify({
+          query: userText,
+          context: { source: 'phone_call', trace: traceId },
+          source: 'aba-reach-phone'
+        }));
+        
+        if (airResult.status === 200) {
+          const data = JSON.parse(airResult.data.toString());
+          response = data.response || data.text || '';
+        }
+      } catch (e) {
+        console.log('[CONVERSATION] ABACIA AIR unavailable, using local');
+      }
       
-      const result = await AIR_process(userText, [], callerIdentity, null);
+      // Fallback to local Gemini if AIR failed
+      if (!response) {
+        response = await generateLocalResponse(userText, traceId);
+      }
       
-      const response = result?.response || "I'm sorry, I didn't catch that. Could you try again?";
+      if (!response) {
+        response = "I'm sorry, I didn't catch that. Could you please repeat?";
+      }
       
-      // Log full trace for debugging (Brandon wants to SEE this)
-      console.log('[CONVERSATION] === AIR RESPONSE TRACE ===');
-      console.log('[CONVERSATION] User said:', userText);
-      console.log('[CONVERSATION] Agent:', result?.agent || 'PACK/LLM');
-      console.log('[CONVERSATION] Direct response?:', result?.directResponse || false);
-      console.log('[CONVERSATION] Response preview:', response.substring(0, 150) + '...');
-      console.log('[CONVERSATION] Mission:', result?.missionNumber || 'N/A');
-      console.log('[CONVERSATION] ========================');
+      console.log('[CONVERSATION] VARA responds:', response.substring(0, 50) + '...');
       
-      // Store VARA (Vocal Authorized Representative of ABA) response
-      transcriptBuffer.push({ 
-        speaker: 'VARA', 
-        text: response, 
-        timestamp: new Date().toISOString(),
-        agent: result?.agent,
-        trace: traceId
-      });
+      // Store VARA response
+      transcriptBuffer.push({ speaker: 'VARA', text: response, timestamp: new Date().toISOString() });
       
       // Convert to TTS and send back through Twilio stream
       await sendTTSToStream(response, ws, streamSid);
       
     } catch (e) {
-      console.error('[CONVERSATION] AIR process error:', e.message);
-      console.error('[CONVERSATION] Stack:', e.stack);
-      // Warm error response, not robotic
-      await sendTTSToStream("I'm having a moment here. Let me try that again for you.", ws, streamSid);
+      console.error('[CONVERSATION] Process error:', e.message);
+      await sendTTSToStream("I'm having a bit of trouble. Could you repeat that?", ws, streamSid);
     }
   }
   
   // Generate local response using Gemini (fallback)
   async function generateLocalResponse(userText, traceId) {
-    const prompt = `You are ABA, a personal AI assistant. You are warm, natural, and you know everything about your user. 
+    const prompt = `You are VARA (Vocal Authorized Representative of ABA), a warm, butler-like AI assistant created by Brandon Pierce. 
 You are on a phone call. Keep responses concise (1-2 sentences max) and conversational.
 User said: "${userText}"
 Respond naturally:`;
@@ -22563,8 +12811,8 @@ Respond naturally:`;
           fetch(SUPABASE_URL + '/rest/v1/aba_memory', {
             method: 'POST',
             headers: {
-              'apikey': SUPABASE_KEY,
-              'Authorization': 'Bearer ' + (SUPABASE_KEY),
+              'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+              'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY),
               'Content-Type': 'application/json',
               'Prefer': 'return=minimal'
             },
@@ -22618,13 +12866,13 @@ console.log('[♥] 60s heartbeat initialized');
 // ████████████████████████████████████████████████████████████████████████████
 // ⬡B:AIR:REACH.AUTONOMOUS.LOOP:CODE:agents.autonomous.dispatch:AIR→PULSE→ALL:T10:v2.6.2:20260214:a1l2p⬡
 
-const LOOP_INTERVAL = 30 * 60 * 1000; // SAFEGUARD: Was 5 min, now 30 min // 5 minutes
+const LOOP_INTERVAL = 5 * 60 * 1000; // 5 minutes
 const TIMEZONE = 'America/New_York';
 let loopCount = 0;
 
 // ── SUPABASE HELPERS (use existing constants) ───────────────────────────────
 async function loopSupaRead(table, query) {
-  const key = SUPABASE_KEY;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY;
   try {
     const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${query}`, {
       headers: { 'apikey': key, 'Authorization': `Bearer ${key}` }
@@ -22635,7 +12883,7 @@ async function loopSupaRead(table, query) {
 }
 
 async function loopSupaWrite(table, data) {
-  const key = SUPABASE_KEY;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY;
   try {
     const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
       method: 'POST',
@@ -22651,23 +12899,7 @@ async function loopSupaWrite(table, data) {
 
 // ── AIR CALL (server-side, uses existing ANTHROPIC_KEY) ─────────────────────
 async function loopAirCall(message, systemPrompt, model) {
-  // ⬡B:SAFEGUARD:loopAirCall:v2.0.0:20260224⬡ - Now enforces cost caps!
   if (!ANTHROPIC_KEY) { console.warn('[AIR-LOOP] No ANTHROPIC_KEY'); return null; }
-  
-  // SAFEGUARD 1: Check cost cap BEFORE calling
-  const selectedModel = model || 'claude-haiku-4-5-20251001'; // Default HAIKU not Sonnet!
-  const estimatedCost = 0.01; // Conservative estimate
-  const costCheck = checkCostCap(estimatedCost);
-  
-  if (!costCheck.allowed) {
-    console.log('[AIR-LOOP] ❌ COST CAP REACHED - Skipping. Daily: $' + COST_CAPS.daily.current.toFixed(2) + '/$' + COST_CAPS.daily.limit);
-    return null;
-  }
-  
-  // SAFEGUARD 2: Downgrade to Haiku when budget tight
-  const actualModel = costCheck.downgrade === 'haiku' ? 'claude-haiku-4-5-20251001' : selectedModel;
-  if (costCheck.downgrade) console.log('[AIR-LOOP] ⚠️ Budget tight - using Haiku');
-  
   try {
     const r = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -22677,21 +12909,14 @@ async function loopAirCall(message, systemPrompt, model) {
         'anthropic-version': '2023-06-01'
       },
       body: JSON.stringify({
-        model: actualModel,
-        max_tokens: 1000, // SAFEGUARD 3: Reduced from 2000
+        model: model || 'claude-haiku-4-5-20251001',
+        max_tokens: 2000,
         system: systemPrompt,
-        messages: [{ role: 'user', content: (message || '').substring(0, 2000) }] // SAFEGUARD 4: Limit input
+        messages: [{ role: 'user', content: message }]
       })
     });
     if (!r.ok) throw new Error('API ' + r.status);
     const d = await r.json();
-    
-    // SAFEGUARD 5: Record actual cost
-    const tokens = (d.usage?.input_tokens || 0) + (d.usage?.output_tokens || 0);
-    const actualCost = tokens * 0.000003;
-    recordCost(actualCost);
-    console.log('[AIR-LOOP] ✅ Cost: $' + actualCost.toFixed(4) + ' | Daily: $' + COST_CAPS.daily.current.toFixed(2) + '/$' + COST_CAPS.daily.limit);
-    
     return (d.content && d.content[0] && d.content[0].text) || '';
   } catch (e) { console.error('[AIR-LOOP] AI call failed:', e.message); return null; }
 }
@@ -22701,7 +12926,7 @@ async function loopAirCall(message, systemPrompt, model) {
 // RADAR (Request Analysis and Directive Assignment Router): Validates work requests
 async function loopRadarScan() {
   const tasks = await loopSupaRead('aba_memory',
-    'memory_type=eq.system&content=ilike.*work_request*&tags=cs.{unprocessed}&order=created_at.desc&limit=2'
+    'memory_type=eq.system&content=ilike.*work_request*&tags=cs.{unprocessed}&order=created_at.desc&limit=5'
   );
   if (tasks.length > 0) {
     console.log('[AIR*RADAR*LOOP] ' + tasks.length + ' work requests to validate');
@@ -22709,7 +12934,7 @@ async function loopRadarScan() {
       const result = await loopAirCall(
         'Validate this work request:\n' + task.content,
         'You are RADAR (Request Analysis and Directive Assignment Router). Read the full context, audit for errors (wrong recipients, missing info, multiple assignments), state your understanding. Return JSON: { "valid": true/false, "issues": [], "understanding": "...", "recommended_action": "..." }',
-        'claude-sonnet-4-5-20250929'
+        'claude-haiku-4-5-20251001'
       );
       if (result) {
         await loopSupaWrite('aba_memory', {
@@ -22738,7 +12963,7 @@ async function loopMaceScan() {
     const review = await loopAirCall(
       'Review these recent deployments for architecture compliance:\n' + context,
       'You are MACE (Master Architecture Compliance Engine). Check: (1) Does everything route through AIR? (2) Are ACL tags present? (3) Agent ownership assigned? (4) No orphan services? (5) Hierarchy L6→L1 maintained? Return JSON: { "compliant": true/false, "violations": [], "score": 0-10, "recommendations": [] }',
-      'claude-sonnet-4-5-20250929'
+      'claude-haiku-4-5-20251001'
     );
     if (review) {
       await loopSupaWrite('aba_memory', {
@@ -22767,7 +12992,7 @@ async function loopScoutScan() {
     const scan = await loopAirCall(
       'Latest deployment:\n' + recentDeploys[0].content + '\n\nRun SCOUT 10-point compliance check.',
       'You are SCOUT (Search Check Output Under Test). Run 10 checks: (1) Not scaffold (2) Not demo garbage (3) Not hardcoded (4) Routes through AIR (5) ACL tagged (6) Agent owned (7) Actually works (8) Version annotated (9) No orphan imports (10) Error handling. Based on deployment notes, give pass/warn/fail for each. Return JSON: { "score": "X/10", "checks": [{"name": "...", "status": "pass|warn|fail", "detail": "..."}], "overall": "..." }',
-      'claude-sonnet-4-5-20250929'
+      'claude-haiku-4-5-20251001'
     );
     if (scan) {
       await loopSupaWrite('aba_memory', {
@@ -22794,7 +13019,7 @@ async function loopSageEmbed() {
   if (unembedded.length === 0) return 0;
 
   let count = 0;
-  const key = SUPABASE_KEY;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY;
   for (const mem of unembedded) {
     const text = (mem.content || '').substring(0, 8000);
     if (!text) continue;
@@ -22830,7 +13055,7 @@ async function loopSageEmbed() {
 // IMAN: Check for queued email tasks
 async function loopImanCheck() {
   const tasks = await loopSupaRead('aba_memory',
-    'memory_type=eq.system&content=ilike.*email_task*&tags=cs.{unprocessed}&order=created_at.desc&limit=2'
+    'memory_type=eq.system&content=ilike.*email_task*&tags=cs.{unprocessed}&order=created_at.desc&limit=5'
   );
   if (tasks.length > 0) {
     console.log('[AIR*IMAN*LOOP] ' + tasks.length + ' email tasks found');
@@ -22838,7 +13063,7 @@ async function loopImanCheck() {
       const result = await loopAirCall(
         task.content,
         'You are IMAN (Inbox Management Agent Navigator). Process this email task. Return JSON with: action (draft/send/categorize), to, subject, body. Be warm like ABA — professional but personal.',
-        'claude-sonnet-4-5-20250929'
+        'claude-haiku-4-5-20251001'
       );
       if (result) {
         await loopSupaWrite('aba_memory', {
@@ -22887,7 +13112,7 @@ async function loopHunchCheck() {
     const hint = await loopAirCall(
       'Recent activity:\n' + context + '\n\nTime: ' + hour + ':00 EST. What proactive suggestion should ABA make? Be warm like a friend, not a notification bot.',
       'You are HUNCH (Helpful Unsolicited Notifications and Contextual Hints). Generate ONE brief, useful, proactive suggestion. Mix butler professionalism with friend energy. Return JSON: { "hint": "...", "priority": "low|medium|high", "action": "suggest|remind|alert" }',
-      'claude-sonnet-4-5-20250929'
+      'claude-haiku-4-5-20251001'
     );
     if (hint) {
       await loopSupaWrite('aba_memory', {
@@ -22923,7 +13148,7 @@ async function loopDawnBrief() {
 
   const brief = await loopAirCall(
     'Today is ' + now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }) + '.\n\nRecent context:\n' + context,
-    'You are ABA, a personal AI assistant, Brandon Pierce\'s AI — part butler, part real friend. Generate a morning briefing that flows between business updates and personal warmth. Address Brandon as "sir" sometimes but also talk like a friend who has his back. Example: "Good morning, sir. So here is what we got today — your calendar is clear until 11 which is nice, and oh, that Idealist posting you liked? Deadline is today so I already drafted something. Let me know if you want me to send it." Keep it conversational, NOT a list.',
+    'You are VARA (Vocal Authorized Representative of ABA), Brandon Pierce\'s AI — part butler, part real friend. Generate a morning briefing that flows between business updates and personal warmth. Address Brandon as "sir" sometimes but also talk like a friend who has his back. Example: "Good morning, sir. So here is what we got today — your calendar is clear until 11 which is nice, and oh, that Idealist posting you liked? Deadline is today so I already drafted something. Let me know if you want me to send it." Keep it conversational, NOT a list.',
     'claude-sonnet-4-5-20250929'
   );
 
@@ -22960,7 +13185,7 @@ async function loopGhostOvernight() {
   const summary = await loopAirCall(
     'Summarize today and prepare overnight notes:\n' + dayMemories.map(function(m) { return m.content; }).join('\n---\n'),
     'You are GHOST (Guided Hybrid Overnight Systems Thread). Summarize the day, flag urgent items for tomorrow, identify patterns. Return JSON: { "summary": "...", "urgent": [], "patterns": [], "tomorrow_priorities": [] }',
-    'claude-sonnet-4-5-20250929'
+    'claude-haiku-4-5-20251001'
   );
 
   if (summary) {
@@ -23032,557 +13257,7 @@ console.log('[AIR-LOOP] Agents: IMAN, HUNTER, HUNCH, DAWN, GHOST, PULSE, RADAR, 
 console.log('[AIR-LOOP] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
 // First tick after 30 seconds (let server finish starting)
-setTimeout(runAutonomousLoop, 60000); // SAFEGUARD: 60s startup delay
+setTimeout(runAutonomousLoop, 30000);
 // Then every 5 minutes
-setInterval(runAutonomousLoop, LOOP_INTERVAL); // SAFEGUARD: 30min interval, cost-capped
-
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// ⬡B:AIR:REACH.AGENTS.DIAL_LIVEKIT:FUNC:outbound.livekit:v1.0.0:20260222⬡
-// DIAL_LiveKit - Outbound calls via LiveKit SIP
-// Uses the same voice agent that handles inbound
-// ═══════════════════════════════════════════════════════════════════════════════
-
-async function DIAL_callWithLiveKit(phoneNumber, firstMessage) {
-  console.log('[DIAL:LIVEKIT] Initiating outbound call to:', phoneNumber);
-  
-  const LIVEKIT_API_KEY = process.env.LIVEKIT_API_KEY;
-  const LIVEKIT_API_SECRET = process.env.LIVEKIT_API_SECRET;
-  const LIVEKIT_URL = 'aba-aeuea88u.livekit.cloud';
-  
-  if (!LIVEKIT_API_KEY || !LIVEKIT_API_SECRET) {
-    console.log('[DIAL:LIVEKIT] Missing credentials, falling back to ElevenLabs');
-    return await DIAL_callWithLiveKit(phoneNumber, firstMessage);
-  }
-  
-  try {
-    // LiveKit SIP outbound requires creating a SIP participant
-    // The agent will automatically join and handle the call
-    const roomName = 'outbound-' + Date.now();
-    
-    const requestBody = {
-      sip_trunk_id: SIP_TRUNK_ID,
-      sip_call_to: phoneNumber,
-      room_name: roomName,
-      participant_identity: 'aba-outbound',
-      participant_metadata: JSON.stringify({
-        firstMessage: firstMessage,
-        type: 'outbound',
-        initiatedAt: new Date().toISOString()
-      })
-    };
-    
-    // Create JWT for LiveKit API
-    const jwt = createLiveKitJWT(LIVEKIT_API_KEY, LIVEKIT_API_SECRET, roomName);
-    
-    const result = await httpsRequest({
-      hostname: LIVEKIT_URL,
-      path: '/twirp/livekit.SIP/CreateSIPOutboundCall',
-      method: 'POST',
-      headers: {
-        'Authorization': 'Bearer ' + jwt,
-        'Content-Type': 'application/json'
-      }
-    }, JSON.stringify(requestBody));
-    
-    if (result.status === 200) {
-      const data = JSON.parse(result.data.toString());
-      console.log('[DIAL:LIVEKIT] Call initiated:', data);
-      return { success: true, callId: data.call_id, message: 'Calling via LiveKit' };
-    } else {
-      console.log('[DIAL:LIVEKIT] API error:', result.status, 'falling back to ElevenLabs');
-      return await DIAL_callWithLiveKit(phoneNumber, firstMessage);
-    }
-  } catch (e) {
-    console.log('[DIAL:LIVEKIT] Error:', e.message, 'falling back to ElevenLabs');
-    return await DIAL_callWithLiveKit(phoneNumber, firstMessage);
-  }
-}
-
-// Simple JWT creator for LiveKit (HS256)
-function createLiveKitJWT(apiKey, apiSecret, roomName) {
-  const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
-  const now = Math.floor(Date.now() / 1000);
-  const payload = Buffer.from(JSON.stringify({
-    iss: apiKey,
-    sub: 'aba-outbound',
-    iat: now,
-    exp: now + 3600,
-    video: { room: roomName, roomCreate: true, canPublish: true, canSubscribe: true },
-    sip: { call: true, admin: true }
-  })).toString('base64url');
-  
-  const crypto = require('crypto');
-  const signature = crypto.createHmac('sha256', apiSecret)
-    .update(header + '.' + payload)
-    .digest('base64url');
-  
-  return header + '.' + payload + '.' + signature;
-}
-
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// ⬡B:AIR:REACH.AGENTS.HEART:FUNC:proactive.call.decision:v1.0.0:20260222⬡
-// HEART Agent - Determines when to proactively call Brandon
-// Triggers: urgent emails, calendar reminders, important OMI detections
-// ═══════════════════════════════════════════════════════════════════════════════
-
-async function HEART_checkProactive(pulseId) {
-  console.log('[HEART] Checking if proactive call needed...');
-  
-  const now = new Date();
-  const hour = now.getHours();
-  
-  // Don't call between 11pm and 7am
-  if (hour >= 23 || hour < 7) {
-    console.log('[HEART] Night hours - no proactive calls');
-    return { shouldCall: false, reason: 'night_hours' };
-  }
-  
-  // Check if we called recently (within 30 min)
-  try {
-    const recentCallRes = await httpsRequest({
-      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-      path: '/rest/v1/aba_memory?memory_type=eq.heart_call_log&order=created_at.desc&limit=1',
-      method: 'GET',
-      headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON }
-    });
-    
-    if (recentCallRes.status === 200) {
-      const calls = JSON.parse(recentCallRes.data.toString());
-      if (calls.length > 0) {
-        const lastCall = new Date(calls[0].created_at);
-        const minSinceLast = (now - lastCall) / 60000;
-        if (minSinceLast < 30) {
-          console.log('[HEART] Called', Math.round(minSinceLast), 'min ago - skipping');
-          return { shouldCall: false, reason: 'recent_call' };
-        }
-      }
-    }
-  } catch (e) {
-    console.log('[HEART] Recent call check error:', e.message);
-  }
-  
-  // Check for urgent items that require proactive call
-  let urgentItems = [];
-  
-  // 1. Check for urgent emails (keyword: urgent, asap, emergency, deadline today)
-  try {
-    const urgentEmailRes = await httpsRequest({
-      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-      path: '/rest/v1/aba_memory?memory_type=eq.email_urgent&created_at=gte.' + new Date(now - 3600000).toISOString() + '&limit=3',
-      method: 'GET',
-      headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON }
-    });
-    if (urgentEmailRes.status === 200) {
-      const urgent = JSON.parse(urgentEmailRes.data.toString());
-      if (urgent.length > 0) {
-        urgentItems.push({ type: 'email', count: urgent.length, sample: urgent[0].content?.substring(0, 100) });
-      }
-    }
-  } catch (e) {}
-  
-  // 2. Check for calendar events starting in next 15 min
-  try {
-    const calRes = await httpsRequest({
-      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-      path: '/rest/v1/aba_memory?memory_type=eq.calendar_reminder&importance=gte.8&created_at=gte.' + new Date(now - 900000).toISOString() + '&limit=1',
-      method: 'GET',
-      headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON }
-    });
-    if (calRes.status === 200) {
-      const cal = JSON.parse(calRes.data.toString());
-      if (cal.length > 0) {
-        urgentItems.push({ type: 'calendar', content: cal[0].content?.substring(0, 100) });
-      }
-    }
-  } catch (e) {}
-  
-  // 3. Check for OMI proactive items that need action
-  try {
-    const omiRes = await httpsRequest({
-      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-      path: '/rest/v1/aba_memory?memory_type=eq.omi_proactive_execution&importance=gte.8&created_at=gte.' + new Date(now - 3600000).toISOString() + '&limit=1',
-      method: 'GET',
-      headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON }
-    });
-    if (omiRes.status === 200) {
-      const omi = JSON.parse(omiRes.data.toString());
-      if (omi.length > 0) {
-        urgentItems.push({ type: 'omi', content: omi[0].content?.substring(0, 100) });
-      }
-    }
-  } catch (e) {}
-  
-  // If we have urgent items, call Brandon
-  if (urgentItems.length > 0) {
-    const reasons = urgentItems.map(i => i.type).join(', ');
-    let message = 'Hey Brandon, this is ABA with an urgent update. ';
-    
-    if (urgentItems.find(i => i.type === 'email')) {
-      message += 'You have ' + urgentItems.find(i => i.type === 'email').count + ' urgent emails. ';
-    }
-    if (urgentItems.find(i => i.type === 'calendar')) {
-      message += 'You have an upcoming meeting. ';
-    }
-    if (urgentItems.find(i => i.type === 'omi')) {
-      message += 'I detected something from your pendant that needs attention. ';
-    }
-    message += 'Want me to go over these with you?';
-    
-    return { shouldCall: true, reason: reasons, message: message };
-  }
-  
-  console.log('[HEART] No urgent items - no call needed');
-  return { shouldCall: false, reason: 'no_urgent_items' };
-}
-
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// ⬡B:AIR:REACH.LIVEKIT_SIP:FUNC:outbound.sip:v1.1.0:20260222⬡
-// LiveKit SIP Outbound - Uses LiveKit's SIP trunk for outbound calls
-// This connects to the same voice agent that handles inbound
-// ═══════════════════════════════════════════════════════════════════════════════
-
-async function LIVEKIT_createSIPOutbound(phoneNumber, firstMessage) {
-  console.log('[LIVEKIT:SIP] Creating outbound call to:', phoneNumber);
-  
-  const LIVEKIT_API_KEY = process.env.LIVEKIT_API_KEY || 'API2S7dhL2a84Mp';
-  const LIVEKIT_API_SECRET = process.env.LIVEKIT_API_SECRET || 'wT95NmmZWztgc32MCz9j4Llq6Trc09KgadlHVISYnxE';
-  const LIVEKIT_URL = (process.env.LIVEKIT_URL || 'wss://aba-aeuea88u.livekit.cloud').replace('wss://', '');
-  
-  // LiveKit SIP requires creating a dispatch rule first, then initiating
-  // For now, use their HTTP API to create an outbound SIP call
-  
-  const roomName = 'outbound-' + Date.now();
-  const participantId = 'aba-caller-' + Date.now();
-  
-  // Create JWT token for LiveKit API
-  const jwt = require('jsonwebtoken');
-  const token = jwt.sign({
-    iss: LIVEKIT_API_KEY,
-    sub: participantId,
-    iat: Math.floor(Date.now() / 1000),
-    exp: Math.floor(Date.now() / 1000) + 3600,
-    video: {
-      room: roomName,
-      roomCreate: true,
-      canPublish: true,
-      canSubscribe: true
-    },
-    sip: {
-      call: true
-    },
-    metadata: JSON.stringify({ firstMessage, type: 'outbound_proactive' })
-  }, LIVEKIT_API_SECRET, { algorithm: 'HS256' });
-  
-  try {
-    // LiveKit SIP API endpoint
-    const result = await httpsRequest({
-      hostname: LIVEKIT_URL,
-      path: '/twirp/livekit.SIP/CreateSIPParticipant',
-      method: 'POST',
-      headers: {
-        'Authorization': 'Bearer ' + token,
-        'Content-Type': 'application/json'
-      }
-    }, JSON.stringify({
-      sip_trunk_id: 'ST_TXoR3s2TEDfK', // Need to configure this in LiveKit dashboard
-      sip_call_to: phoneNumber,
-      room_name: roomName,
-      participant_identity: participantId,
-      participant_metadata: JSON.stringify({ firstMessage, proactive: true })
-    }));
-    
-    if (result.status >= 200 && result.status < 300) {
-      console.log('[LIVEKIT:SIP] Outbound call created');
-      return { success: true, roomName, message: 'LiveKit SIP call initiated' };
-    } else {
-      console.log('[LIVEKIT:SIP] API error:', result.status, result.data?.toString());
-      return { success: false, error: 'API error ' + result.status };
-    }
-  } catch (e) {
-    console.log('[LIVEKIT:SIP] Error:', e.message);
-    return { success: false, error: e.message };
-  }
-}
-
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// ⬡B:AIR:REACH.VALIDATOR:FUNC:response.quality:v1.0.0:20260222⬡
-// AIR_validateResponse - Checks response quality before sending
-// Rejects garbage responses (random OMI transcripts, non-sequiturs, etc.)
-// ═══════════════════════════════════════════════════════════════════════════════
-
-function AIR_validateResponse(response, originalQuery) {
-  if (!response || typeof response !== 'string') {
-    console.log('[AIR:VALIDATOR] Empty response - rejecting');
-    return { valid: false, reason: 'empty', suggestion: 'I did not understand that. Can you say it again?' };
-  }
-  
-  const query = (originalQuery || '').toLowerCase();
-  const resp = response.toLowerCase();
-  
-  // Check for OMI transcript leakage when not asked for transcripts
-  const askedForTranscript = query.includes('transcript') || query.includes('recording') || query.includes('omi') || query.includes('meeting') || query.includes('notes');
-  const hasOmiLeak = resp.includes('omi transcript') || resp.includes('omi_transcript') || resp.startsWith('omi ');
-  
-  if (hasOmiLeak && !askedForTranscript) {
-    console.log('[AIR:VALIDATOR] OMI transcript leak in non-transcript query - rejecting');
-    return { valid: false, reason: 'omi_leak', suggestion: 'Let me think about that differently. What exactly would you like to know?' };
-  }
-  
-  // Check for random activity logs
-  const hasActivityLog = resp.includes('activity:') || resp.includes('omi request log');
-  if (hasActivityLog && !query.includes('activity') && !query.includes('log')) {
-    console.log('[AIR:VALIDATOR] Activity log leak - rejecting');
-    return { valid: false, reason: 'activity_leak', suggestion: 'I got distracted. Let me focus on your question.' };
-  }
-  
-  // Check for non-sequitur (response completely unrelated to query)
-  // Simple check: if query asks about person but response talks about weather
-  const asksAboutPerson = query.includes('who') || query.includes('contact') || query.includes('call') || query.includes('text');
-  const talksAboutWeather = resp.includes('degrees') || resp.includes('cloudy') || resp.includes('weather');
-  if (asksAboutPerson && talksAboutWeather && !query.includes('weather')) {
-    console.log('[AIR:VALIDATOR] Non-sequitur detected - rejecting');
-    return { valid: false, reason: 'non_sequitur', suggestion: 'I got confused. Let me try again - who did you want to know about?' };
-  }
-  
-  // Check for greeting when asked a specific question
-  const isSpecificQuestion = query.includes('what') || query.includes('who') || query.includes('how many') || query.includes('where');
-  const isJustGreeting = (resp.includes('hey brandon') || resp.includes('good morning') || resp.includes('how can i help')) && resp.length < 100;
-  if (isSpecificQuestion && isJustGreeting) {
-    console.log('[AIR:VALIDATOR] Greeting instead of answer - rejecting');
-    return { valid: false, reason: 'greeting_instead', suggestion: 'Let me actually answer your question...' };
-  }
-  
-  // Passed all checks
-  return { valid: true };
-}
-
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// ⬡B:AIR:REACH.THINK:FUNC:deep.reasoning:v1.0.0:20260222⬡
-// AIR_think - Deep reasoning layer before responding
-// Makes AIR think through problems like Claude does internally
-// ═══════════════════════════════════════════════════════════════════════════════
-
-async function AIR_think(query, context, callerIdentity) {
-  console.log('[AIR:THINK] Starting deep reasoning...');
-  
-  const thinkingPrompt = `You are AIR's internal reasoning engine. Think through this step by step BEFORE generating a response.
-
-QUERY: "${query}"
-
-CONTEXT AVAILABLE:
-${context ? context.substring(0, 2000) : 'No context loaded'}
-
-CALLER: ${callerIdentity?.name || 'Unknown'} (Trust: ${callerIdentity?.trust || 'Unknown'})
-
-THINK THROUGH:
-1. INTENT: What is the user REALLY asking for? (not surface level)
-2. AGENTS: Which agents should handle this? Why?
-3. DATA: What data do I need? Do I have it?
-4. GAPS: What information am I missing?
-5. RISKS: Could this response be wrong/harmful/unhelpful?
-6. QUALITY: How can I make this response EXCELLENT, not just okay?
-7. ACTION: Should I DO something (call, text, email) or just ANSWER?
-8. VALIDATE: Is my planned response actually answering the question?
-
-OUTPUT your reasoning as JSON:
-{
-  "intent": "what they really want",
-  "agents_needed": ["AGENT1", "AGENT2"],
-  "have_data": true/false,
-  "missing_info": "what I don't know",
-  "risks": "potential problems",
-  "quality_boost": "how to make response excellent",
-  "action_required": "call/text/email/none",
-  "response_plan": "exactly what I will say/do",
-  "confidence": 1-10
-}`;
-
-  try {
-    const thinkResult = await httpsRequest({
-      hostname: 'api.anthropic.com',
-      path: '/v1/messages',
-      method: 'POST',
-      headers: {
-        'x-api-key': ANTHROPIC_KEY,
-        'anthropic-version': '2023-06-01',
-        'Content-Type': 'application/json'
-      }
-    }, JSON.stringify({
-      model: 'claude-sonnet-4-5-20250929',
-      max_tokens: 1000,
-      messages: [{ role: 'user', content: thinkingPrompt }]
-    }));
-    
-    if (thinkResult.status === 200) {
-      const data = JSON.parse(thinkResult.data.toString());
-      const thinking = data.content?.[0]?.text || '';
-      
-      // Parse the JSON reasoning
-      const jsonMatch = thinking.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const reasoning = JSON.parse(jsonMatch[0]);
-        console.log('[AIR:THINK] Intent:', reasoning.intent);
-        console.log('[AIR:THINK] Agents:', reasoning.agents_needed?.join(', '));
-        console.log('[AIR:THINK] Confidence:', reasoning.confidence);
-        console.log('[AIR:THINK] Action:', reasoning.action_required);
-        return { success: true, reasoning, raw: thinking };
-      }
-    }
-    return { success: false, error: 'Could not parse thinking' };
-  } catch (e) {
-    console.log('[AIR:THINK] Error:', e.message);
-    return { success: false, error: e.message };
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// ⬡B:AIR:REACH.JUDGE:FUNC:response.quality:v1.0.0:20260222⬡
-// AIR_judge - Quality check before sending response
-// Like a senior reviewer checking work before it ships
-// ═══════════════════════════════════════════════════════════════════════════════
-
-async function AIR_judge(query, proposedResponse, reasoning) {
-  console.log('[AIR:JUDGE] Evaluating response quality...');
-  
-  const judgePrompt = `You are AIR's quality judge. Evaluate this response BEFORE it goes to the user.
-
-ORIGINAL QUERY: "${query}"
-
-PROPOSED RESPONSE: "${proposedResponse}"
-
-REASONING USED: ${JSON.stringify(reasoning || {})}
-
-JUDGE THIS RESPONSE:
-1. Does it ACTUALLY answer the question? (Yes/No/Partial)
-2. Is there garbage/irrelevant content? (OMI transcripts, logs, etc.)
-3. Is it hallucinating information not in context?
-4. Is the tone right? (warm butler, not robotic)
-5. Should it DO something instead of just talking? (call/text/email)
-6. Overall quality score (1-10)
-
-OUTPUT JSON:
-{
-  "answers_question": "yes/no/partial",
-  "has_garbage": true/false,
-  "garbage_found": "what garbage if any",
-  "hallucinating": true/false,
-  "tone_correct": true/false,
-  "should_take_action": "call/text/email/none",
-  "quality_score": 1-10,
-  "approved": true/false,
-  "fix_suggestion": "how to fix if not approved"
-}`;
-
-  try {
-    const judgeResult = await httpsRequest({
-      hostname: 'api.anthropic.com',
-      path: '/v1/messages',
-      method: 'POST',
-      headers: {
-        'x-api-key': ANTHROPIC_KEY,
-        'anthropic-version': '2023-06-01',
-        'Content-Type': 'application/json'
-      }
-    }, JSON.stringify({
-      model: 'claude-sonnet-4-5-20250929',
-      max_tokens: 500,
-      messages: [{ role: 'user', content: judgePrompt }]
-    }));
-    
-    if (judgeResult.status === 200) {
-      const data = JSON.parse(judgeResult.data.toString());
-      const judgment = data.content?.[0]?.text || '';
-      
-      const jsonMatch = judgment.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const result = JSON.parse(jsonMatch[0]);
-        console.log('[AIR:JUDGE] Quality:', result.quality_score, '/10');
-        console.log('[AIR:JUDGE] Approved:', result.approved);
-        if (!result.approved) console.log('[AIR:JUDGE] Fix:', result.fix_suggestion);
-        return { success: true, judgment: result };
-      }
-    }
-    return { success: false, approved: true }; // Default approve if can't judge
-  } catch (e) {
-    console.log('[AIR:JUDGE] Error:', e.message);
-    return { success: false, approved: true, error: e.message };
-  }
-}
-
-
-// Tracking and Reconnaissance for Automated Context Evaluation (TRACE)
-// ⬡B:AGENT.TRACE:CODE:proactive:v1.0.0:20260225⬡
-AGENTS.TRACE = {
-  name: 'TRACE',
-  fullName: 'Tracking and Reconnaissance for Automated Context Evaluation',
-  department: 'PROACTIVE',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'TRACE',
-      fullName: 'Tracking and Reconnaissance for Automated Context Evaluation',
-      department: 'PROACTIVE',
-      contextAddition: 'Agent TRACE (Tracking and Reconnaissance for Automated Context Evaluation) is available for proactive tasks.',
-      capabilities: ['proactive'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'TRACE',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'TRACE (Tracking and Reconnaissance for Automated Context Evaluation) ready'
-    };
-  }
-};
-
-
-// Protocol for Hostile Input Scanning and Handling (PHISH)
-// ⬡B:AGENT.PHISH:CODE:security:v1.0.0:20260225⬡
-AGENTS.PHISH = {
-  name: 'PHISH',
-  fullName: 'Protocol for Hostile Input Scanning and Handling',
-  department: 'SECURITY',
-  type: 'CONTEXT_WRAPPER',
-  runtime: 'on-demand',
-  active: true,
-  runCount: 0,
-  
-  getContext(message, context) {
-    this.runCount++;
-    return {
-      agent: 'PHISH',
-      fullName: 'Protocol for Hostile Input Scanning and Handling',
-      department: 'SECURITY',
-      contextAddition: 'Agent PHISH (Protocol for Hostile Input Scanning and Handling) is available for security tasks.',
-      capabilities: ['security'],
-      status: 'context_wrapper_v1'
-    };
-  },
-  
-  async execute(action, params) {
-    this.runCount++;
-    return {
-      agent: 'PHISH',
-      action: action || 'getContext',
-      result: this.getContext(params?.message, params?.context),
-      message: 'PHISH (Protocol for Hostile Input Scanning and Handling) ready'
-    };
-  }
-};
-// Deploy trigger: Thu Feb 26 17:33:57 UTC 2026
-// Deploy trigger 1772128014
+setInterval(runAutonomousLoop, LOOP_INTERVAL);
 
