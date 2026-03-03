@@ -315,6 +315,21 @@ const TOOL_DEFINITIONS = [
       required: ['job_title', 'organization', 'assignee']
     }
   }
+  {
+    name: 'get_weather',
+    description: 'Get current weather for a location. Use for morning briefings, travel planning, or weather queries.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        location: {
+          type: 'string',
+          description: 'City name like Greensboro NC or New York'
+        }
+      },
+      required: ['location']
+    }
+  },
+
 ];
 
 // Tool execution function
@@ -904,6 +919,31 @@ async function executeToolCall(toolName, input, context) {
 
 
     
+    case 'get_weather': {
+      const location = input.location || 'Greensboro, NC';
+      let lat = 36.0726, lon = -79.7920, cityName = 'Greensboro';
+      const locLower = location.toLowerCase();
+      if (locLower.includes('new york')) { lat = 40.7128; lon = -74.0060; cityName = 'New York'; }
+      else if (locLower.includes('charlotte')) { lat = 35.2271; lon = -80.8431; cityName = 'Charlotte'; }
+      else if (locLower.includes('phila')) { lat = 39.9526; lon = -75.1652; cityName = 'Philadelphia'; }
+      try {
+        const url = 'https://api.open-meteo.com/v1/forecast?latitude=' + lat + '&longitude=' + lon + '&current=temperature_2m,weather_code&temperature_unit=fahrenheit';
+        const resp = await fetch(url);
+        if (resp.ok) {
+          const d = await resp.json();
+          const temp = Math.round(d.current?.temperature_2m || 0);
+          const code = d.current?.weather_code || 0;
+          let cond = 'clear';
+          if (code >= 61) cond = 'rainy';
+          else if (code >= 51) cond = 'drizzling';
+          else if (code >= 1) cond = 'partly cloudy';
+          return { status: 'success', location: cityName, temperature: temp, condition: cond, message: 'It is ' + temp + 'F and ' + cond + ' in ' + cityName };
+        }
+        return { status: 'error', message: 'Weather unavailable' };
+      } catch (e) { return { status: 'error', message: e.message }; }
+    }
+
+
     default:
       return {
         status: 'unknown_tool',
