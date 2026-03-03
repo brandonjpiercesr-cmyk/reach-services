@@ -102,6 +102,19 @@ function detectAgents(message) {
     agents.push('JOBA');
   }
   
+  // Weather detection for CLIMATE agent
+  if (lower.includes('weather') || lower.includes('temperature') || lower.includes('forecast')) {
+    agents.push('CLIMATE');
+  }
+  
+  // Morning briefing detection - load all relevant agents
+  if (lower.includes('morning') || lower.includes('briefing') || lower.includes('dawn') || lower.includes('daily')) {
+    agents.push('CLIMATE');
+    agents.push('CALI');
+    agents.push('PLAY');
+    agents.push('IMAN');
+  }
+  
   return [...new Set(agents)];
 }
 
