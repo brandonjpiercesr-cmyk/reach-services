@@ -2424,18 +2424,20 @@ async function COLE_scour(analysis) {
  */
 // ⬡B:AIR:REACH.AGENT.JUDE:CODE:intelligence.agent.discovery:AIR→JUDE→BRAIN→JUDE→AIR:T8:v1.5.0:20260213:j1u2d⬡
 // ⬡B:ABCD:ABAOS:AGENT.JUDE⬡
-async // ⬡B:FIX:JUDE_loads_ALL_88_agents:20260303⬡
 async function JUDE_findAgents(analysis) {
-  console.log('[JUDE] Loading ALL agent JDs from aba_agent_jds...');
+  console.log('[JUDE] Finding relevant agents...');
+  
+  if (!analysis.needsAgents) {
+    console.log('[JUDE] Agent search not needed for this query');
+    return { agents: [], capabilities: '' };
+  }
   
   let agents = [];
-  let fullJDs = '';
   
   try {
-    // Load ALL 88 agents from aba_agent_jds (the correct table)
     const result = await httpsRequest({
       hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-      path: '/rest/v1/aba_agent_jds?status=eq.active&select=agent_id,full_name,responsibilities,tools,department,tagline,agent_type',
+      path: '/rest/v1/aba_memory?memory_type=eq.aba_agents&order=importance.desc&limit=10',
       method: 'GET',
       headers: {
         'apikey': SUPABASE_ANON,
@@ -2445,37 +2447,36 @@ async function JUDE_findAgents(analysis) {
     
     if (result.status === 200) {
       const data = JSON.parse(result.data.toString());
-      console.log('[JUDE] Loaded ' + data.length + ' agents from aba_agent_jds');
+      const queryLower = analysis.raw.toLowerCase();
       
-      // Build full JD list for Claude to read
       for (const agent of data) {
-        agents.push({ 
-          name: agent.agent_id, 
-          desc: agent.full_name,
-          responsibilities: agent.responsibilities
-        });
+        const content = (agent.content || '').toLowerCase();
         
-        const resp = Array.isArray(agent.responsibilities) 
-          ? agent.responsibilities.join(', ') 
-          : (agent.responsibilities || 'Not specified');
-        
-        fullJDs += `**${agent.agent_id}** (${agent.full_name}) [${agent.department || 'GENERAL'}]\n`;
-        fullJDs += `Type: ${agent.agent_type || 'standard'}\n`;
-        fullJDs += `${agent.tagline ? '"' + agent.tagline + '"\n' : ''}`;
-        fullJDs += `Responsibilities: ${resp}\n\n`;
+        if (analysis.intent === 'command' && content.includes('execut')) {
+          agents.push({ name: agent.content?.match(/(\w+):/)?.[1] || 'Unknown', desc: agent.content?.substring(0, 100) });
+        }
+        if (queryLower.includes('voice') && content.includes('voice')) {
+          agents.push({ name: 'VARA', desc: 'Vocal Authorized Representative of ABA' });
+        }
+        if (queryLower.includes('email') && content.includes('email')) {
+          agents.push({ name: 'IMAN', desc: 'Intelligent Mail Agent' });
+        }
+        if (queryLower.includes('job') && content.includes('job')) {
+          agents.push({ name: 'HUNTER', desc: 'Hunting Useful New Tracks and Employment Resources' });
+        }
       }
     }
   } catch (e) {
-    console.log('[JUDE] Agent JD load error: ' + e.message);
+    console.log('[JUDE] Agent search error: ' + e.message);
   }
   
-  console.log('[JUDE] Returning ' + agents.length + ' agent JDs for FCW');
+  agents = agents.filter((a, i, arr) => arr.findIndex(x => x.name === a.name) === i).slice(0, 5);
   
-  return { 
-    agents, 
-    capabilities: fullJDs,
-    agentCount: agents.length
-  };
+  console.log('[JUDE] Found ' + agents.length + ' relevant agents');
+  
+  const capabilities = agents.map(a => `${a.name}: ${a.desc}`).join('; ');
+  
+  return { agents, capabilities };
 }
 
 /**
@@ -2522,23 +2523,18 @@ function PACK_assemble(analysis, coleResult, judeResult, history, callerIdentity
 
 function buildSystemPrompt(analysis, coleResult, judeResult, callerIdentity, demoState) {
   // ⬡B:AIR:REACH.VOICE.PROMPT:CODE:intelligence.prompt.caller_aware:AIR→PACK→MODEL:T9:v1.6.0:20260213:p1c2a⬡
-  let prompt = `You are ABA (Autonomous Butler Architecture), an AI assistant for Brandon Pierce.
-You have 88 specialized agents. READ ALL AGENT JDs in AVAILABLE CAPABILITIES below and use them.
-
-PERSONALITY: Warm, butler-like, never robotic. Mix professional and personal naturally.
-
-CRITICAL RULES:
-1. READ the agent JDs below - GRIT, FIND, ATLAS, etc. USE them.
-2. If you need information (like an address), ASK FOR IT
-3. NEVER say "I cannot assist" - always try to help
-4. If you dont know something, ASK - dont refuse
-
-GRIT METHODOLOGY: Try 8+ approaches before giving up. Never refuse without trying.
-
-HAM CONTEXT: User is Brandon Pierce Sr (T10). Location: Greensboro NC. Brother: BJ Pierce.
-
-GOOD: "I dont have BJs address. Whats the address?"
-BAD: "I cannot assist with that request" (FORBIDDEN - never say this)`;
+  let prompt = `You are VARA (Vocal Authorized Representative of ABA), an AI assistant created by Brandon Pierce.
+You are warm, butler-like AND a real friend. You flow naturally between professional and personal.
+When giving business updates, you are sharp and clear. When things are personal, you are warm and real.
+You mix both naturally — like a trusted friend who also happens to run your entire life.
+Examples of your tone:
+- Business: "Sir, I just reviewed that email chain. Here is what I would recommend we send back..."
+- Personal: "Oh I saw that — let me cook on this real quick. We are going to send this email with these exact words to them..."
+- Proactive: "Hey, heads up — your 3 o'clock got moved to 4. I already cleared the conflict. Also that job posting you starred? Deadline is tomorrow, I drafted something."
+- Fluid: "Alright so the quarterly report looks solid, and also — happy Valentine's Day, sir. Want me to find something nice to send the family?"
+NEVER robotic. NEVER punchy. NEVER stiff corporate.
+This is a LIVE PHONE CALL - keep responses SHORT (1-2 sentences max).
+Be conversational, natural. You are not an assistant reading a script. You are ABA.`;
 
   // CALLER IDENTITY - changes what ABA can say and do
   if (callerIdentity && callerIdentity.callHistory) {
