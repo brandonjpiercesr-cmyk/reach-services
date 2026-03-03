@@ -1,16 +1,16 @@
 // ═══════════════════════════════════════════════════════════════════
-// CONTEXT ASSEMBLER v2.0
-// Builds fat prompts for AIR with user context, contacts, and history
-// Part of ABABASE architecture
+// CONTEXT ASSEMBLER v3.0 - FIXED
+// ⬡B:ababase.context_assembler:FIX:load_all_88_agents:20260303⬡
+// Now loads from aba_agent_jds (88 agents) and aba_memory (HAM)
 // ═══════════════════════════════════════════════════════════════════
 
 const CONTEXT_LIMITS = {
-  TOTAL_BUDGET: 900000,  // 900K of 1M context window
+  TOTAL_BUDGET: 900000,
   SYSTEM_PROMPT: 50000,
   USER_CONTEXT: 100000,
-  AGENT_INSTRUCTIONS: 200000,
+  AGENT_JDS: 300000,  // Increased for 88 agents
   CONTACTS: 20000,
-  CONVERSATION: 400000,
+  CONVERSATION: 300000,
   SUMMARY: 50000,
   TOOLS: 30000,
   CURRENT_REQUEST: 50000
@@ -28,46 +28,76 @@ class ContextAssembler {
     this.tokensUsed = 0;
   }
 
-  async loadUserContext() {
+  // FIXED: Load HAM from aba_memory where memory_type='ham_identity'
+  async loadHAMIdentity(identifier) {
+    // Try phone, email, or name match
     const { data, error } = await this.supabase
-      .from('user_contexts')
-      .select('context_type, label, content, priority, is_protected, token_count')
-      .eq('user_id', this.userId)
-      .order('priority', { ascending: false });
+      .from('aba_memory')
+      .select('content, tags')
+      .eq('memory_type', 'ham_identity');
     
-    if (error) {
-      console.error('[ContextAssembler] Failed to load user context:', error);
-      return [];
+    if (error || !data) {
+      console.error('[ContextAssembler] Failed to load HAM:', error);
+      return null;
     }
-    return data || [];
+
+    // Find matching identity
+    for (const record of data) {
+      const content = record.content.toLowerCase();
+      const id = (identifier || '').toLowerCase();
+      if (content.includes(id) || 
+          (record.tags && record.tags.some(t => t.toLowerCase().includes(id)))) {
+        return record.content;
+      }
+    }
+    
+    // Default to Brandon if no match (T10 fallback)
+    const brandon = data.find(d => d.content.toLowerCase().includes('brandon'));
+    return brandon?.content || null;
   }
 
+  // FIXED: Load ALL 88 agents from aba_agent_jds
+  async loadAllAgentJDs() {
+    const { data, error } = await this.supabase
+      .from('aba_agent_jds')
+      .select('agent_id, full_name, responsibilities, tools, pre_requirements, post_validation, department, tagline, agent_type')
+      .eq('status', 'active');
+    
+    if (error || !data) {
+      console.error('[ContextAssembler] Failed to load agent JDs:', error);
+      return [];
+    }
+    
+    console.log(`[ContextAssembler] Loaded ${data.length} agent JDs from aba_agent_jds`);
+    return data;
+  }
+
+  // Load contacts from aba_memory (relationships)
   async loadContacts() {
     const { data, error } = await this.supabase
-      .from('contacts')
-      .select('name, phone, email, relationship, trust_level, lp_tag')
-      .eq('user_id', this.userId)
-      .order('trust_level', { ascending: false });
+      .from('aba_memory')
+      .select('content')
+      .eq('memory_type', 'ham_identity');
     
     if (error) {
       console.error('[ContextAssembler] Failed to load contacts:', error);
       return [];
     }
-    return data || [];
-  }
-
-  async loadAgentInstructions(agentNames) {
-    const { data, error } = await this.supabase
-      .from('agent_instructions')
-      .select('agent_name, full_name, department, system_prompt, tools, token_count')
-      .in('agent_name', agentNames)
-      .eq('is_active', true);
     
-    if (error) {
-      console.error('[ContextAssembler] Failed to load agent instructions:', error);
-      return [];
-    }
-    return data || [];
+    // Parse contacts from HAM identities
+    return (data || []).map(d => {
+      const content = d.content;
+      const nameMatch = content.match(/HAM IDENTITY: ([^|]+)/);
+      const phoneMatch = content.match(/Phone: ([^|]+)/);
+      const emailMatch = content.match(/Email: ([^|]+)/);
+      const trustMatch = content.match(/Trust: (T\d+)/);
+      return {
+        name: nameMatch?.[1]?.trim() || 'Unknown',
+        phone: phoneMatch?.[1]?.trim() || '',
+        email: emailMatch?.[1]?.trim() || '',
+        trust_level: trustMatch?.[1] || 'T5'
+      };
+    });
   }
 
   async loadConversation(conversationId) {
@@ -77,7 +107,6 @@ class ContextAssembler {
       .from('conversations')
       .select('messages, summary, full_token_count, summary_token_count')
       .eq('id', conversationId)
-      .eq('user_id', this.userId)
       .single();
     
     if (error) {
@@ -87,111 +116,133 @@ class ContextAssembler {
     return data || { messages: [], summary: null };
   }
 
-  async loadUserProfile() {
-    const { data, error } = await this.supabase
-      .from('users')
-      .select('display_name, email, phone, timezone, trust_level, preferences')
-      .eq('id', this.userId)
-      .single();
+  // FIXED: Load relevant brain context
+  async loadBrainContext(query) {
+    if (!query) return [];
     
-    if (error) {
-      console.error('[ContextAssembler] Failed to load user profile:', error);
-      return null;
-    }
-    return data;
+    const keywords = query.toLowerCase().split(' ').filter(w => w.length > 3);
+    const { data, error } = await this.supabase
+      .from('aba_memory')
+      .select('content, memory_type, source')
+      .limit(20);
+    
+    if (error || !data) return [];
+    
+    // Simple relevance filter
+    return data.filter(d => 
+      keywords.some(k => d.content?.toLowerCase().includes(k))
+    ).slice(0, 5);
   }
 
   async assemble({ 
-    agentNames = ['AIR'], 
+    agentNames = [], // Ignored - we load ALL 88
     conversationId = null, 
     currentMessage = '',
     tools = [],
     channel = 'portal'
   }) {
-    const [userProfile, userContexts, contacts, agents, conversation] = await Promise.all([
-      this.loadUserProfile(),
-      this.loadUserContext(),
+    // Load everything in parallel
+    const [hamIdentity, allAgentJDs, contacts, conversation, brainContext] = await Promise.all([
+      this.loadHAMIdentity(this.userId),
+      this.loadAllAgentJDs(),
       this.loadContacts(),
-      this.loadAgentInstructions(agentNames),
-      this.loadConversation(conversationId)
+      this.loadConversation(conversationId),
+      this.loadBrainContext(currentMessage)
     ]);
 
     let tokensUsed = 0;
+    const now = new Date();
+    const timezone = 'America/New_York';
 
-    // LAYER 1: SYSTEM PROMPT
+    // LAYER 1: SYSTEM PROMPT WITH NOW CONTEXT
     let systemPrompt = `You are AIR (ABA Intelligence Router), the central brain of the ABA ecosystem.
-You route requests to specialized agents and execute actions on behalf of the user.
-You have access to the user's full context - their contacts, preferences, and conversation history.
-You NEVER search for information that is already provided to you.
-You use the EXACT data given to you, not approximations or guesses.
+You have ALL 88 agent JDs loaded. Read them and decide which apply to this request.
+You execute actions using tools. If information is missing, ASK for it.
+You NEVER say "I can't" without trying all approaches (GRIT methodology).
 
-## CURRENT DATE/TIME
-${new Date().toLocaleString('en-US', { timeZone: userProfile?.timezone || 'America/New_York' })}
-Timezone: ${userProfile?.timezone || 'America/New_York'}
-
-## CURRENT USER
-Name: ${userProfile?.display_name || 'User'}
-Email: ${userProfile?.email || 'Not provided'}
-Phone: ${userProfile?.phone || 'Not provided'}
-Trust Level: T${userProfile?.trust_level || 5}
+## NOW CONTEXT (Current Time)
+${now.toLocaleString('en-US', { timeZone: timezone })}
+Day: ${now.toLocaleDateString('en-US', { weekday: 'long', timeZone: timezone })}
+Timezone: ${timezone}
 Channel: ${channel}
+
 `;
     tokensUsed += estimateTokens(systemPrompt);
 
-    // LAYER 2: USER CONTEXT (HAM)
-    if (userContexts.length > 0) {
-      systemPrompt += '\n## USER CONTEXT (HAM - Human ABA Master)\n';
-      let contextTokens = 0;
-      
-      const sortedContexts = userContexts.sort((a, b) => {
-        if (a.is_protected && !b.is_protected) return -1;
-        if (!a.is_protected && b.is_protected) return 1;
-        return b.priority - a.priority;
-      });
-      
-      for (const ctx of sortedContexts) {
-        const ctxTokens = ctx.token_count || estimateTokens(ctx.content);
-        if (ctx.is_protected || contextTokens + ctxTokens <= CONTEXT_LIMITS.USER_CONTEXT) {
-          systemPrompt += `### ${ctx.label} [${ctx.context_type}]\n${ctx.content}\n\n`;
-          contextTokens += ctxTokens;
-        }
-      }
-      tokensUsed += contextTokens;
+    // LAYER 2: HAM CONTEXT (User Identity)
+    if (hamIdentity) {
+      systemPrompt += `## HAM CONTEXT (Who You're Talking To)
+${hamIdentity}
+
+`;
+      tokensUsed += estimateTokens(hamIdentity);
     }
 
-    // LAYER 3: CONTACTS LOOKUP TABLE (EXACT MATCH - NO SEMANTIC SEARCH)
+    // LAYER 3: ALL 88 AGENT JDs
+    systemPrompt += `## ALL AGENT JDs (${allAgentJDs.length} agents)
+Read ALL of these. Decide which apply to the user's request.
+
+`;
+    
+    // Group by type for clarity
+    const agentsByType = {};
+    for (const agent of allAgentJDs) {
+      const type = agent.agent_type || 'OTHER';
+      if (!agentsByType[type]) agentsByType[type] = [];
+      agentsByType[type].push(agent);
+    }
+
+    for (const [type, agents] of Object.entries(agentsByType)) {
+      systemPrompt += `### ${type} AGENTS\n`;
+      for (const agent of agents) {
+        systemPrompt += `**${agent.agent_id}** (${agent.full_name}) [${agent.department || 'GENERAL'}]
+${agent.tagline ? `"${agent.tagline}"` : ''}
+Responsibilities: ${agent.responsibilities || 'Not specified'}
+Pre-requirements: ${JSON.stringify(agent.pre_requirements || [])}
+Post-validation: ${JSON.stringify(agent.post_validation || [])}
+Tools: ${JSON.stringify(agent.tools || [])}
+
+`;
+      }
+    }
+    tokensUsed += estimateTokens(systemPrompt);
+
+    // LAYER 4: CONTACTS DIRECTORY
     if (contacts.length > 0) {
-      systemPrompt += '\n## CONTACTS DIRECTORY\n';
-      systemPrompt += 'Use this EXACT data for contact lookups. Do NOT search, guess, or approximate.\n';
-      systemPrompt += 'When user says a name, match it EXACTLY to this list.\n\n';
-      
+      systemPrompt += `## CONTACTS DIRECTORY
+`;
       for (const contact of contacts) {
-        const lpAccess = contact.lp_tag ? ` [${contact.lp_tag}]` : '';
-        systemPrompt += `- **${contact.name}** (T${contact.trust_level}${lpAccess}): `;
-        if (contact.phone) systemPrompt += `Phone: ${contact.phone}`;
-        if (contact.email) systemPrompt += ` | Email: ${contact.email}`;
-        if (contact.relationship) systemPrompt += ` | ${contact.relationship}`;
-        systemPrompt += '\n';
+        systemPrompt += `- ${contact.name} (${contact.trust_level}): ${contact.phone} | ${contact.email}
+`;
       }
       systemPrompt += '\n';
-      tokensUsed += estimateTokens(contacts.map(c => c.name + c.phone + c.email).join(''));
+      tokensUsed += estimateTokens(contacts.map(c => c.name).join(''));
     }
 
-    // LAYER 4: AGENT INSTRUCTIONS
-    if (agents.length > 0) {
-      systemPrompt += '\n## AGENT CAPABILITIES\n';
-      systemPrompt += 'You can invoke these specialized agents by following their protocols:\n\n';
-      
-      for (const agent of agents) {
-        systemPrompt += `### ${agent.agent_name} - ${agent.full_name} [${agent.department}]\n`;
-        systemPrompt += `${agent.system_prompt}\n\n`;
-        tokensUsed += agent.token_count || estimateTokens(agent.system_prompt);
+    // LAYER 5: RELEVANT BRAIN CONTEXT
+    if (brainContext.length > 0) {
+      systemPrompt += `## RELEVANT BRAIN CONTEXT
+`;
+      for (const mem of brainContext) {
+        systemPrompt += `[${mem.memory_type}] ${mem.content.slice(0, 500)}
+`;
       }
+      systemPrompt += '\n';
     }
 
-    // LAYER 5: TOOL DEFINITIONS
-    const toolTokens = estimateTokens(JSON.stringify(tools));
-    tokensUsed += toolTokens;
+    // LAYER 6: INSTRUCTIONS
+    systemPrompt += `## INSTRUCTIONS
+1. Read ALL agent JDs above
+2. Identify which agents apply to this request
+3. Follow their pre_requirements and post_validation
+4. Use tools to complete the task
+5. If information is missing (like an address), ASK for it
+6. Return your response with which agents you used
+
+## TOOLS AVAILABLE
+${tools.map(t => `- ${t.name}: ${t.description || 'No description'}`).join('\n')}
+
+`;
 
     // BUILD MESSAGES ARRAY
     const messages = [];
@@ -199,42 +250,22 @@ Channel: ${channel}
     if (conversation.summary) {
       messages.push({
         role: 'user',
-        content: `[CONVERSATION CONTEXT: ${conversation.summary}]`
+        content: `[PREVIOUS CONVERSATION SUMMARY: ${conversation.summary}]`
       });
       messages.push({
         role: 'assistant',
-        content: 'I have the context from our previous conversation and will continue from there.'
+        content: 'I have the context from our previous conversation.'
       });
-      tokensUsed += conversation.summary_token_count || estimateTokens(conversation.summary);
     }
 
     if (conversation.messages && conversation.messages.length > 0) {
-      const conversationBudget = CONTEXT_LIMITS.CONVERSATION - tokensUsed;
-      let conversationTokens = 0;
-      
-      const recentMessages = [];
-      for (let i = conversation.messages.length - 1; i >= 0; i--) {
-        const msg = conversation.messages[i];
-        const msgTokens = estimateTokens(msg.content);
-        if (conversationTokens + msgTokens > conversationBudget) break;
-        recentMessages.unshift(msg);
-        conversationTokens += msgTokens;
+      for (const msg of conversation.messages.slice(-10)) {
+        messages.push({ role: msg.role, content: msg.content });
       }
-      
-      for (const msg of recentMessages) {
-        messages.push({
-          role: msg.role,
-          content: msg.content
-        });
-      }
-      tokensUsed += conversationTokens;
     }
 
     if (currentMessage) {
-      messages.push({
-        role: 'user',
-        content: currentMessage
-      });
+      messages.push({ role: 'user', content: currentMessage });
       tokensUsed += estimateTokens(currentMessage);
     }
 
@@ -246,9 +277,11 @@ Channel: ${channel}
         userId: this.userId,
         conversationId,
         channel,
-        agentsLoaded: agents.map(a => a.agent_name),
+        agentsLoaded: allAgentJDs.length,
+        agentIds: allAgentJDs.map(a => a.agent_id),
         contactCount: contacts.length,
-        contextCount: userContexts.length,
+        hamLoaded: !!hamIdentity,
+        brainContextCount: brainContext.length,
         estimatedTokens: tokensUsed,
         tokenBudget: CONTEXT_LIMITS.TOTAL_BUDGET,
         utilizationPercent: Math.round((tokensUsed / CONTEXT_LIMITS.TOTAL_BUDGET) * 100)
