@@ -2424,20 +2424,18 @@ async function COLE_scour(analysis) {
  */
 // ⬡B:AIR:REACH.AGENT.JUDE:CODE:intelligence.agent.discovery:AIR→JUDE→BRAIN→JUDE→AIR:T8:v1.5.0:20260213:j1u2d⬡
 // ⬡B:ABCD:ABAOS:AGENT.JUDE⬡
+async // ⬡B:FIX:JUDE_loads_ALL_88_agents:20260303⬡
 async function JUDE_findAgents(analysis) {
-  console.log('[JUDE] Finding relevant agents...');
-  
-  if (!analysis.needsAgents) {
-    console.log('[JUDE] Agent search not needed for this query');
-    return { agents: [], capabilities: '' };
-  }
+  console.log('[JUDE] Loading ALL agent JDs from aba_agent_jds...');
   
   let agents = [];
+  let fullJDs = '';
   
   try {
+    // Load ALL 88 agents from aba_agent_jds (the correct table)
     const result = await httpsRequest({
       hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-      path: '/rest/v1/aba_memory?memory_type=eq.aba_agents&order=importance.desc&limit=10',
+      path: '/rest/v1/aba_agent_jds?status=eq.active&select=agent_id,full_name,responsibilities,tools,department,tagline,agent_type',
       method: 'GET',
       headers: {
         'apikey': SUPABASE_ANON,
@@ -2447,36 +2445,37 @@ async function JUDE_findAgents(analysis) {
     
     if (result.status === 200) {
       const data = JSON.parse(result.data.toString());
-      const queryLower = analysis.raw.toLowerCase();
+      console.log('[JUDE] Loaded ' + data.length + ' agents from aba_agent_jds');
       
+      // Build full JD list for Claude to read
       for (const agent of data) {
-        const content = (agent.content || '').toLowerCase();
+        agents.push({ 
+          name: agent.agent_id, 
+          desc: agent.full_name,
+          responsibilities: agent.responsibilities
+        });
         
-        if (analysis.intent === 'command' && content.includes('execut')) {
-          agents.push({ name: agent.content?.match(/(\w+):/)?.[1] || 'Unknown', desc: agent.content?.substring(0, 100) });
-        }
-        if (queryLower.includes('voice') && content.includes('voice')) {
-          agents.push({ name: 'VARA', desc: 'Vocal Authorized Representative of ABA' });
-        }
-        if (queryLower.includes('email') && content.includes('email')) {
-          agents.push({ name: 'IMAN', desc: 'Intelligent Mail Agent' });
-        }
-        if (queryLower.includes('job') && content.includes('job')) {
-          agents.push({ name: 'HUNTER', desc: 'Hunting Useful New Tracks and Employment Resources' });
-        }
+        const resp = Array.isArray(agent.responsibilities) 
+          ? agent.responsibilities.join(', ') 
+          : (agent.responsibilities || 'Not specified');
+        
+        fullJDs += `**${agent.agent_id}** (${agent.full_name}) [${agent.department || 'GENERAL'}]\n`;
+        fullJDs += `Type: ${agent.agent_type || 'standard'}\n`;
+        fullJDs += `${agent.tagline ? '"' + agent.tagline + '"\n' : ''}`;
+        fullJDs += `Responsibilities: ${resp}\n\n`;
       }
     }
   } catch (e) {
-    console.log('[JUDE] Agent search error: ' + e.message);
+    console.log('[JUDE] Agent JD load error: ' + e.message);
   }
   
-  agents = agents.filter((a, i, arr) => arr.findIndex(x => x.name === a.name) === i).slice(0, 5);
+  console.log('[JUDE] Returning ' + agents.length + ' agent JDs for FCW');
   
-  console.log('[JUDE] Found ' + agents.length + ' relevant agents');
-  
-  const capabilities = agents.map(a => `${a.name}: ${a.desc}`).join('; ');
-  
-  return { agents, capabilities };
+  return { 
+    agents, 
+    capabilities: fullJDs,
+    agentCount: agents.length
+  };
 }
 
 /**
