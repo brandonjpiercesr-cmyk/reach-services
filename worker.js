@@ -62,10 +62,6 @@
 // ⬡B:AIR:REACH.SERVER.IMPORTS:CODE:infrastructure.node.modules:AIR→REACH:T10:v1.5.0:20260213:i1m2p⬡
 const http = require('http');
 const https = require('https');
-// ⬡B:FCW.REAL:ABABASE_IMPORTS:20260304⬡
-const { createClient } = require('@supabase/supabase-js');
-const { airProcess } = require('./ababase/air-core');
-
 const { WebSocketServer, WebSocket } = require('ws');
 
 // ⬡B:AIR:REACH.SERVER.PORT:CONFIG:infrastructure.network.binding:AIR→REACH:T10:v1.5.0:20260213:p0r3t⬡
@@ -82,34 +78,6 @@ const PORT = process.env.PORT || 3000;
 // ⬡B:AIR:REACH.CONFIG.SUPABASE:CONFIG:brain.connection.persistence:AIR→REACH→BRAIN:T10:v1.5.0:20260213:s1b2a⬡
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://htlxjkbrstpwwtzsbyvb.supabase.co';
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-// ⬡B:FCW.FIX:HAM_LOADER:20260304⬡
-async function loadHAMFromBrain(userId) {
-  try {
-    const result = await httpsRequest({
-      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-      path: '/rest/v1/aba_memory?memory_type=eq.ham_identity&limit=10',
-      method: 'GET',
-      headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON }
-    });
-    if (result.status === 200) {
-      const data = JSON.parse(result.data.toString());
-      for (const ham of data) {
-        if (userId && ham.content.toLowerCase().includes(userId.toLowerCase())) {
-          const m = ham.content.match(/HAM IDENTITY: ([^|]+).*Trust: (T\d+).*Location: ([^|\n]+)/);
-          if (m) return { name: m[1].trim(), trust: m[2], location: m[3].trim() };
-        }
-      }
-      const b = data.find(h => h.content.includes('Brandon'));
-      if (b) {
-        const m = b.content.match(/HAM IDENTITY: ([^|]+).*Trust: (T\d+).*Location: ([^|\n]+)/);
-        if (m) return { name: m[1].trim(), trust: m[2], location: m[3].trim() };
-      }
-    }
-  } catch (e) { console.log('[HAM] Error:', e.message); }
-  return { name: 'Guest', trust: 'T5', location: 'Unknown' };
-}
-
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0bHhqa2Jyc3Rwd3d0enNieXZiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA1MzI4MjEsImV4cCI6MjA4NjEwODgyMX0.MOgNYkezWpgxTO3ZHd0omZ0WLJOOR-tL7hONXWG9eBw';
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -2565,13 +2533,8 @@ Examples of your tone:
 - Proactive: "Hey, heads up — your 3 o'clock got moved to 4. I already cleared the conflict. Also that job posting you starred? Deadline is tomorrow, I drafted something."
 - Fluid: "Alright so the quarterly report looks solid, and also — happy Valentine's Day, sir. Want me to find something nice to send the family?"
 NEVER robotic. NEVER punchy. NEVER stiff corporate.
-For TEXT, give full responses. For voice, keep it brief.
-Be conversational, natural. You are ABA - a LIFE ASSISTANT created by Brandon Pierce. Not just AI - a true partner.
-GRIT: Try 8+ ways before giving up. If info is missing, ASK. NEVER say you cannot help.`;
-
-  if (callerIdentity && callerIdentity.name) {
-    prompt += '\nHAM: ' + callerIdentity.name + ' (' + (callerIdentity.trust||'T5') + ') in ' + (callerIdentity.location||'Unknown');
-  }
+This is a LIVE PHONE CALL - keep responses SHORT (1-2 sentences max).
+Be conversational, natural. You are not an assistant reading a script. You are ABA.`;
 
   // CALLER IDENTITY - changes what ABA can say and do
   if (callerIdentity && callerIdentity.callHistory) {
@@ -2598,7 +2561,7 @@ GRIT: Try 8+ ways before giving up. If info is missing, ASK. NEVER say you canno
   }
   
   if (judeResult.capabilities) {
-    prompt += '\n\nYOU ARE ABA (Autonomous Butler Architecture):\n- Life Assistant, not just AI\n- 88 specialized agents below\n- Warm butler meets JARVIS\n\nYOUR AGENTS:\n' + judeResult.capabilities;
+    prompt += '\n\nAVAILABLE CAPABILITIES:\n' + judeResult.capabilities;
   }
   
   if (analysis.intent === 'greeting') {
@@ -7156,8 +7119,7 @@ function jsonResponse(res, status, data) {
 // ⬡B:AIR:REACH.API.AIR_TEXT:CODE:routing.text.chat:USER→REACH→AIR→AGENTS→MODEL→USER:T8:v1.5.0:20260213:a1t2x⬡
 // ⬡B:AIR:REACH.API.AIR_TEXT:CODE:routing.text.chat:USER→REACH→AIR→AGENTS→MODEL→USER:T8:v1.5.0:20260213:a1t2x⬡
 // AIR for text chat (higher token limits than voice)
-async function AIR_text(userMessage, history, userId) {
-  const ham = await loadHAMFromBrain(userId);
+async function AIR_text(userMessage, history) {
   const lukeAnalysis = await LUKE_process(userMessage);
   if (lukeAnalysis.isGoodbye) {
     return { response: "Take care! We are all ABA.", isGoodbye: true };
@@ -7167,7 +7129,7 @@ async function AIR_text(userMessage, history, userId) {
   
   // ⬡B:GRIT.FIX:DISPATCH_BEFORE_LLM:20260218⬡
   // TRY AGENT DISPATCH FIRST - actually execute calendar/email/etc
-  const dispatchResult = await AIR_DISPATCH(lukeAnalysis, judeResult, ham);
+  const dispatchResult = await AIR_DISPATCH(lukeAnalysis, judeResult, { name: 'brandon', trust: 'T10' });
   if (dispatchResult && dispatchResult.handled) {
     console.log('[AIR-TEXT] Agent ' + dispatchResult.agent + ' handled request');
     return { 
@@ -7180,7 +7142,7 @@ async function AIR_text(userMessage, history, userId) {
   }
   
   // No agent handled it - proceed with LLM
-  const missionPackage = PACK_assemble(lukeAnalysis, coleResult, judeResult, history || [], ham, null);
+  const missionPackage = PACK_assemble(lukeAnalysis, coleResult, judeResult, history || [], null, null);
   let response = null;
 
   // PRIMARY: Gemini Flash 2.0
@@ -7903,47 +7865,11 @@ Phone: (336) 389-8116</p>
   // When not provided → default AIR_text behavior (LUKE/COLE/JUDE/PACK)
   // This fixes heartbeat dynamic agents using their own JDs instead of hardcoded routing
   if (path === '/api/router' && method === 'POST') {
-    // ⬡B:FCW.REAL:USE_ABABASE_AIR_CORE:20260304⬡
-    // Route through REAL FCW with tool use loop
     try {
       const body = await parseBody(req);
-      const { message, history, userId, agent_id, agent_name } = body;
+      const { message, history, model, systemPrompt, agent_id, agent_name } = body;
       if (!message) return jsonResponse(res, 400, { error: 'message required' });
 
-      // Use real FCW from ababase (pre-loaded at top)
-      const supabaseClient = createClient(
-        SUPABASE_URL,
-        SUPABASE_KEY
-      );
-      
-      console.log('[ROUTER] Using REAL FCW with tool loop for:', message.substring(0, 80));
-      
-      const result = await airProcess({
-        supabaseClient,
-        userId: userId || 'brandon',
-        conversationId: body.conversationId || null,
-        message,
-        channel: body.channel || 'api',
-        maxIterations: 10,
-        timeoutMs: 30000
-      });
-      
-      return jsonResponse(res, 200, {
-        response: result.response,
-        toolsUsed: result.actionsExecuted || [],
-        agents: result.metadata?.agentIds || [],
-        cost: result.metadata?.cost || null,
-        source: 'REACH-AIR-FCW',
-        trace: 'USER*AIR*FCW*' + (result.metadata?.agentIds?.slice(0,5).join(',') || 'AGENTS') + '*TOOLS*RESPONSE'
-      });
-      
-    } catch (fcwError) {
-      console.error('[ROUTER] FCW Error:', fcwError.message);
-      // Fallback to old flow if FCW fails
-      try {
-        const body = await parseBody(req);
-        const { message, history, agent_id, agent_name } = body;
-      
       // If agent_id or agent_name provided, load that agent's JD and route specifically
       if (agent_id || agent_name) {
         // aba_agent_jds columns: agent_id (lowercase), full_name, acronym (uppercase)
@@ -8001,20 +7927,19 @@ Respond as this agent specifically — stay in character.`;
         }
       }
       
-      // Default: route through AIR_text (LUKE/COLE/JUDE/PACK) - FALLBACK
-      console.log('[ROUTER] FALLBACK: Routing message through old AIR_text');
-      const result = await AIR_text(message, history || [], body.userId || 'brandon');
+      // Default: route through AIR_text (LUKE/COLE/JUDE/PACK)
+      console.log('[ROUTER] Routing message through AIR: "' + message.substring(0, 80) + '"');
+      const result = await AIR_text(message, history || []);
       return jsonResponse(res, 200, {
         response: result.response,
         isGoodbye: result.isGoodbye,
         missionNumber: result.missionNumber,
-        source: 'REACH-AIR-FALLBACK',
+        source: 'REACH-AIR',
         trace: 'USER*AIR*LUKE,COLE,JUDE,PACK*MODEL*VARA'
       });
-      } catch (e) {
-        console.error('[ROUTER] Fallback Error:', e.message);
-        return jsonResponse(res, 500, { error: e.message });
-      }
+    } catch (e) {
+      console.error('[ROUTER] Error:', e.message);
+      return jsonResponse(res, 500, { error: e.message });
     }
   }
 
