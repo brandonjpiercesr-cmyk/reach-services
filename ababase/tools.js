@@ -314,7 +314,7 @@ const TOOL_DEFINITIONS = [
       },
       required: ['job_title', 'organization', 'assignee']
     }
-  }
+  },
   {
     name: 'get_weather',
     description: 'Get current weather for a location. Use for morning briefings, travel planning, or weather queries.',
