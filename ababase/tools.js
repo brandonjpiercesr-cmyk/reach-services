@@ -500,18 +500,18 @@ async function executeToolCall(toolName, input, context) {
     }
     
     case 'save_memory': {
-      // ⬡B:FIX:save_memory_uses_aba_memory:20260304⬡
-      // Save to aba_memory table (not user_contexts)
+      // Save to user_contexts table
       const { data, error } = await supabaseClient
-        .from('aba_memory')
-        .insert({
+        .from('user_contexts')
+        .upsert({
+          user_id: userId,
+          context_type: input.context_type,
+          label: input.label,
           content: input.content,
-          memory_type: input.context_type || 'note',
-          source: 'fcw_save_' + (input.label || '').toLowerCase().replace(/\s+/g, '_'),
-          importance: input.priority || 5,
-          tags: [input.label, input.context_type, userId].filter(Boolean),
-          is_system: false,
-          air_processed: true
+          priority: input.priority || 5,
+          is_protected: false
+        }, {
+          onConflict: 'user_id,context_type,label'
         })
         .select()
         .single();
@@ -523,7 +523,7 @@ async function executeToolCall(toolName, input, context) {
       return {
         status: 'success',
         memory_id: data.id,
-        confirmation: 'Saved "' + input.label + '" to brain'
+        confirmation: `Saved "${input.label}" to ${input.context_type}`
       };
     }
     
@@ -734,14 +734,14 @@ async function executeToolCall(toolName, input, context) {
           // Specific type requested - fast query
           url += `&memory_type=eq.${memoryType}`;
           if (query) {
-            url += `&source=ilike.*${query.split(' ')[0]}*`;  // Fast: source only
+            url += `&source=ilike.*${query}*`;
           }
         } else if (query) {
           // No type specified - search in COMMON types only to avoid timeout
           // This prevents full table scan on 238K records
-          const commonTypes = ['checkpoint', 'ham_identity', 'milestone', 'system', 'directive', 'brandon_context', 'preferences', 'notes', 'note', 'personal'];
+          const commonTypes = ['checkpoint', 'ham_identity', 'milestone', 'system', 'directive', 'brandon_context'];
           url += `&memory_type=in.(${commonTypes.join(',')})`;
-          url += `&source=ilike.*${query.split(' ')[0]}*`;  // Fast: source only
+          url += `&source=ilike.*${query}*`;
         } else {
           // No query, no type - return recent high-importance records
           url += `&importance=gte.8`;
