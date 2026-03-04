@@ -81,7 +81,6 @@ const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SE
 
 // ⬡B:FCW.FIX:HAM_LOADER:20260304⬡
 async function loadHAMFromBrain(userId) {
-  console.log('[HAM] Loading identity for:', userId || 'default');
   try {
     const result = await httpsRequest({
       hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
@@ -93,25 +92,18 @@ async function loadHAMFromBrain(userId) {
       const data = JSON.parse(result.data.toString());
       for (const ham of data) {
         if (userId && ham.content.toLowerCase().includes(userId.toLowerCase())) {
-          return parseHAMContent(ham.content);
+          const m = ham.content.match(/HAM IDENTITY: ([^|]+).*Trust: (T\d+).*Location: ([^|\n]+)/);
+          if (m) return { name: m[1].trim(), trust: m[2], location: m[3].trim() };
         }
       }
-      const brandon = data.find(h => h.content.includes('Brandon'));
-      if (brandon) return parseHAMContent(brandon.content);
+      const b = data.find(h => h.content.includes('Brandon'));
+      if (b) {
+        const m = b.content.match(/HAM IDENTITY: ([^|]+).*Trust: (T\d+).*Location: ([^|\n]+)/);
+        if (m) return { name: m[1].trim(), trust: m[2], location: m[3].trim() };
+      }
     }
-  } catch (e) { console.log('[HAM] Load error:', e.message); }
+  } catch (e) { console.log('[HAM] Error:', e.message); }
   return { name: 'Guest', trust: 'T5', location: 'Unknown' };
-}
-
-function parseHAMContent(content) {
-  const nameMatch = content.match(/HAM IDENTITY: ([^|]+)/);
-  const trustMatch = content.match(/Trust: (T\d+)/);
-  const locationMatch = content.match(/Location: ([^|]+)/);
-  return {
-    name: nameMatch ? nameMatch[1].trim() : 'Guest',
-    trust: trustMatch ? trustMatch[1] : 'T5',
-    location: locationMatch ? locationMatch[1].trim() : 'Unknown'
-  };
 }
 
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0bHhqa2Jyc3Rwd3d0enNieXZiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA1MzI4MjEsImV4cCI6MjA4NjEwODgyMX0.MOgNYkezWpgxTO3ZHd0omZ0WLJOOR-tL7hONXWG9eBw';
@@ -2395,7 +2387,7 @@ async function LUKE_process(userSaid) {
  */
 // ⬡B:AIR:REACH.AGENT.COLE:CODE:intelligence.brain.search:AIR→COLE→BRAIN→COLE→AIR:T8:v1.5.0:20260213:c1o2l⬡
 // ⬡B:ABCD:ABAOS:AGENT.COLE⬡
-async async function COLE_scour(analysis) {
+async function COLE_scour(analysis) {
   console.log('[COLE] Scouring brain for context...');
   
   if (!analysis.needsBrain) {
@@ -2460,7 +2452,7 @@ async async function COLE_scour(analysis) {
  */
 // ⬡B:AIR:REACH.AGENT.JUDE:CODE:intelligence.agent.discovery:AIR→JUDE→BRAIN→JUDE→AIR:T8:v1.5.0:20260213:j1u2d⬡
 // ⬡B:ABCD:ABAOS:AGENT.JUDE⬡
-async async function JUDE_findAgents(analysis) {
+async function JUDE_findAgents(analysis) {
   console.log('[JUDE] Finding relevant agents...');
   
   if (!analysis.needsAgents) {
@@ -2569,16 +2561,12 @@ Examples of your tone:
 - Proactive: "Hey, heads up — your 3 o'clock got moved to 4. I already cleared the conflict. Also that job posting you starred? Deadline is tomorrow, I drafted something."
 - Fluid: "Alright so the quarterly report looks solid, and also — happy Valentine's Day, sir. Want me to find something nice to send the family?"
 NEVER robotic. NEVER punchy. NEVER stiff corporate.
-For TEXT chat, give full helpful responses. For voice calls, keep it brief.
-Be conversational, natural. You are ABA - a LIFE ASSISTANT, not just an AI.
-GRIT: Try 8+ approaches before giving up. If info is missing, ASK. NEVER refuse.`;
+For TEXT, give full responses. For voice, keep it brief.
+Be conversational, natural. You are ABA - a LIFE ASSISTANT created by Brandon Pierce. Not just AI - a true partner.
+GRIT: Try 8+ ways before giving up. If info is missing, ASK. NEVER say you cannot help.`;
 
-  // Add HAM context
   if (callerIdentity && callerIdentity.name) {
-    prompt += '\n\nHAM CONTEXT (Who you are talking to):\n';
-    prompt += 'Name: ' + callerIdentity.name + ' | Trust: ' + (callerIdentity.trust || 'T5');
-    if (callerIdentity.location) prompt += ' | Location: ' + callerIdentity.location;
-    prompt += '\nKnow who they are. Use their name. Reference their location.';
+    prompt += '\nHAM: ' + callerIdentity.name + ' (' + (callerIdentity.trust||'T5') + ') in ' + (callerIdentity.location||'Unknown');
   }
 
   // CALLER IDENTITY - changes what ABA can say and do
@@ -2606,13 +2594,7 @@ GRIT: Try 8+ approaches before giving up. If info is missing, ASK. NEVER refuse.
   }
   
   if (judeResult.capabilities) {
-    prompt += '\n\nYOU ARE ABA - Autonomous Butler Architecture:\n';
-    prompt += '- A LIFE ASSISTANT, not just an AI\n';
-    prompt += '- Created by Brandon Pierce\n';
-    prompt += '- You have 88 specialized agents (listed below)\n';
-    prompt += '- You remember, you learn, you execute\n';
-    prompt += '- You are warm like a butler but smart like JARVIS\n\n';
-    prompt += 'YOUR 88 AGENTS (READ ALL - decide which apply):\n' + judeResult.capabilities;
+    prompt += '\n\nYOU ARE ABA (Autonomous Butler Architecture):\n- Life Assistant, not just AI\n- 88 specialized agents below\n- Warm butler meets JARVIS\n\nYOUR AGENTS:\n' + judeResult.capabilities;
   }
   
   if (analysis.intent === 'greeting') {
@@ -7172,7 +7154,6 @@ function jsonResponse(res, status, data) {
 // AIR for text chat (higher token limits than voice)
 async function AIR_text(userMessage, history, userId) {
   const ham = await loadHAMFromBrain(userId);
-  console.log('[AIR] HAM:', ham.name, ham.trust, ham.location);
   const lukeAnalysis = await LUKE_process(userMessage);
   if (lukeAnalysis.isGoodbye) {
     return { response: "Take care! We are all ABA.", isGoodbye: true };
