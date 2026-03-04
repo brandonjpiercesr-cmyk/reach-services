@@ -78,6 +78,42 @@ const PORT = process.env.PORT || 3000;
 // ⬡B:AIR:REACH.CONFIG.SUPABASE:CONFIG:brain.connection.persistence:AIR→REACH→BRAIN:T10:v1.5.0:20260213:s1b2a⬡
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://htlxjkbrstpwwtzsbyvb.supabase.co';
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+// ⬡B:FCW.FIX:HAM_LOADER:20260304⬡
+async function loadHAMFromBrain(userId) {
+  console.log('[HAM] Loading identity for:', userId || 'default');
+  try {
+    const result = await httpsRequest({
+      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+      path: '/rest/v1/aba_memory?memory_type=eq.ham_identity&limit=10',
+      method: 'GET',
+      headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON }
+    });
+    if (result.status === 200) {
+      const data = JSON.parse(result.data.toString());
+      for (const ham of data) {
+        if (userId && ham.content.toLowerCase().includes(userId.toLowerCase())) {
+          return parseHAMContent(ham.content);
+        }
+      }
+      const brandon = data.find(h => h.content.includes('Brandon'));
+      if (brandon) return parseHAMContent(brandon.content);
+    }
+  } catch (e) { console.log('[HAM] Load error:', e.message); }
+  return { name: 'Guest', trust: 'T5', location: 'Unknown' };
+}
+
+function parseHAMContent(content) {
+  const nameMatch = content.match(/HAM IDENTITY: ([^|]+)/);
+  const trustMatch = content.match(/Trust: (T\d+)/);
+  const locationMatch = content.match(/Location: ([^|]+)/);
+  return {
+    name: nameMatch ? nameMatch[1].trim() : 'Guest',
+    trust: trustMatch ? trustMatch[1] : 'T5',
+    location: locationMatch ? locationMatch[1].trim() : 'Unknown'
+  };
+}
+
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0bHhqa2Jyc3Rwd3d0enNieXZiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA1MzI4MjEsImV4cCI6MjA4NjEwODgyMX0.MOgNYkezWpgxTO3ZHd0omZ0WLJOOR-tL7hONXWG9eBw';
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -2359,7 +2395,7 @@ async function LUKE_process(userSaid) {
  */
 // ⬡B:AIR:REACH.AGENT.COLE:CODE:intelligence.brain.search:AIR→COLE→BRAIN→COLE→AIR:T8:v1.5.0:20260213:c1o2l⬡
 // ⬡B:ABCD:ABAOS:AGENT.COLE⬡
-async function COLE_scour(analysis) {
+async async function COLE_scour(analysis) {
   console.log('[COLE] Scouring brain for context...');
   
   if (!analysis.needsBrain) {
@@ -2424,7 +2460,7 @@ async function COLE_scour(analysis) {
  */
 // ⬡B:AIR:REACH.AGENT.JUDE:CODE:intelligence.agent.discovery:AIR→JUDE→BRAIN→JUDE→AIR:T8:v1.5.0:20260213:j1u2d⬡
 // ⬡B:ABCD:ABAOS:AGENT.JUDE⬡
-async function JUDE_findAgents(analysis) {
+async async function JUDE_findAgents(analysis) {
   console.log('[JUDE] Finding relevant agents...');
   
   if (!analysis.needsAgents) {
@@ -2533,8 +2569,17 @@ Examples of your tone:
 - Proactive: "Hey, heads up — your 3 o'clock got moved to 4. I already cleared the conflict. Also that job posting you starred? Deadline is tomorrow, I drafted something."
 - Fluid: "Alright so the quarterly report looks solid, and also — happy Valentine's Day, sir. Want me to find something nice to send the family?"
 NEVER robotic. NEVER punchy. NEVER stiff corporate.
-This is a LIVE PHONE CALL - keep responses SHORT (1-2 sentences max).
-Be conversational, natural. You are not an assistant reading a script. You are ABA.`;
+For TEXT chat, give full helpful responses. For voice calls, keep it brief.
+Be conversational, natural. You are ABA - a LIFE ASSISTANT, not just an AI.
+GRIT: Try 8+ approaches before giving up. If info is missing, ASK. NEVER refuse.`;
+
+  // Add HAM context
+  if (callerIdentity && callerIdentity.name) {
+    prompt += '\n\nHAM CONTEXT (Who you are talking to):\n';
+    prompt += 'Name: ' + callerIdentity.name + ' | Trust: ' + (callerIdentity.trust || 'T5');
+    if (callerIdentity.location) prompt += ' | Location: ' + callerIdentity.location;
+    prompt += '\nKnow who they are. Use their name. Reference their location.';
+  }
 
   // CALLER IDENTITY - changes what ABA can say and do
   if (callerIdentity && callerIdentity.callHistory) {
@@ -2561,7 +2606,13 @@ Be conversational, natural. You are not an assistant reading a script. You are A
   }
   
   if (judeResult.capabilities) {
-    prompt += '\n\nAVAILABLE CAPABILITIES:\n' + judeResult.capabilities;
+    prompt += '\n\nYOU ARE ABA - Autonomous Butler Architecture:\n';
+    prompt += '- A LIFE ASSISTANT, not just an AI\n';
+    prompt += '- Created by Brandon Pierce\n';
+    prompt += '- You have 88 specialized agents (listed below)\n';
+    prompt += '- You remember, you learn, you execute\n';
+    prompt += '- You are warm like a butler but smart like JARVIS\n\n';
+    prompt += 'YOUR 88 AGENTS (READ ALL - decide which apply):\n' + judeResult.capabilities;
   }
   
   if (analysis.intent === 'greeting') {
@@ -7119,7 +7170,9 @@ function jsonResponse(res, status, data) {
 // ⬡B:AIR:REACH.API.AIR_TEXT:CODE:routing.text.chat:USER→REACH→AIR→AGENTS→MODEL→USER:T8:v1.5.0:20260213:a1t2x⬡
 // ⬡B:AIR:REACH.API.AIR_TEXT:CODE:routing.text.chat:USER→REACH→AIR→AGENTS→MODEL→USER:T8:v1.5.0:20260213:a1t2x⬡
 // AIR for text chat (higher token limits than voice)
-async function AIR_text(userMessage, history) {
+async function AIR_text(userMessage, history, userId) {
+  const ham = await loadHAMFromBrain(userId);
+  console.log('[AIR] HAM:', ham.name, ham.trust, ham.location);
   const lukeAnalysis = await LUKE_process(userMessage);
   if (lukeAnalysis.isGoodbye) {
     return { response: "Take care! We are all ABA.", isGoodbye: true };
@@ -7129,7 +7182,7 @@ async function AIR_text(userMessage, history) {
   
   // ⬡B:GRIT.FIX:DISPATCH_BEFORE_LLM:20260218⬡
   // TRY AGENT DISPATCH FIRST - actually execute calendar/email/etc
-  const dispatchResult = await AIR_DISPATCH(lukeAnalysis, judeResult, { name: 'brandon', trust: 'T10' });
+  const dispatchResult = await AIR_DISPATCH(lukeAnalysis, judeResult, ham);
   if (dispatchResult && dispatchResult.handled) {
     console.log('[AIR-TEXT] Agent ' + dispatchResult.agent + ' handled request');
     return { 
@@ -7142,7 +7195,7 @@ async function AIR_text(userMessage, history) {
   }
   
   // No agent handled it - proceed with LLM
-  const missionPackage = PACK_assemble(lukeAnalysis, coleResult, judeResult, history || [], null, null);
+  const missionPackage = PACK_assemble(lukeAnalysis, coleResult, judeResult, history || [], ham, null);
   let response = null;
 
   // PRIMARY: Gemini Flash 2.0
@@ -7929,7 +7982,7 @@ Respond as this agent specifically — stay in character.`;
       
       // Default: route through AIR_text (LUKE/COLE/JUDE/PACK)
       console.log('[ROUTER] Routing message through AIR: "' + message.substring(0, 80) + '"');
-      const result = await AIR_text(message, history || []);
+      const result = await AIR_text(message, history || [], body.userId || 'brandon');
       return jsonResponse(res, 200, {
         response: result.response,
         isGoodbye: result.isGoodbye,
