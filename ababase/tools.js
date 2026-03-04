@@ -739,7 +739,7 @@ async function executeToolCall(toolName, input, context) {
         } else if (query) {
           // No type specified - search in COMMON types only to avoid timeout
           // This prevents full table scan on 238K records
-          const commonTypes = ['checkpoint', 'ham_identity', 'milestone', 'system', 'directive', 'brandon_context'];
+          const commonTypes = ['checkpoint', 'ham_identity', 'milestone', 'system', 'directive', 'brandon_context', 'preferences', 'notes', 'note', 'personal'];
           url += `&memory_type=in.(${commonTypes.join(',')})`;
           url += `&or=(source.ilike.*${query}*,content.ilike.*${query}*)`;
         } else {
