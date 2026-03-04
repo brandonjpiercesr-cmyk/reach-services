@@ -7899,11 +7899,50 @@ Phone: (336) 389-8116</p>
   // When not provided → default AIR_text behavior (LUKE/COLE/JUDE/PACK)
   // This fixes heartbeat dynamic agents using their own JDs instead of hardcoded routing
   if (path === '/api/router' && method === 'POST') {
+    // ⬡B:FCW.REAL:USE_ABABASE_AIR_CORE:20260304⬡
+    // Route through REAL FCW with tool use loop
     try {
       const body = await parseBody(req);
-      const { message, history, model, systemPrompt, agent_id, agent_name } = body;
+      const { message, history, userId, agent_id, agent_name } = body;
       if (!message) return jsonResponse(res, 400, { error: 'message required' });
 
+      // Load real FCW from ababase
+      const { createClient } = require('@supabase/supabase-js');
+      const { airProcess } = require('./ababase/air-core');
+      
+      const supabaseClient = createClient(
+        SUPABASE_URL,
+        SUPABASE_KEY
+      );
+      
+      console.log('[ROUTER] Using REAL FCW with tool loop for:', message.substring(0, 80));
+      
+      const result = await airProcess({
+        supabaseClient,
+        userId: userId || 'brandon',
+        conversationId: body.conversationId || null,
+        message,
+        channel: body.channel || 'api',
+        maxIterations: 10,
+        timeoutMs: 30000
+      });
+      
+      return jsonResponse(res, 200, {
+        response: result.response,
+        toolsUsed: result.actionsExecuted || [],
+        agents: result.metadata?.agentIds || [],
+        cost: result.metadata?.cost || null,
+        source: 'REACH-AIR-FCW',
+        trace: 'USER*AIR*FCW*' + (result.metadata?.agentIds?.slice(0,5).join(',') || 'AGENTS') + '*TOOLS*RESPONSE'
+      });
+      
+    } catch (fcwError) {
+      console.error('[ROUTER] FCW Error:', fcwError.message);
+      // Fallback to old flow if FCW fails
+      try {
+        const body = await parseBody(req);
+        const { message, history, agent_id, agent_name } = body;
+      
       // If agent_id or agent_name provided, load that agent's JD and route specifically
       if (agent_id || agent_name) {
         // aba_agent_jds columns: agent_id (lowercase), full_name, acronym (uppercase)
@@ -7961,19 +8000,20 @@ Respond as this agent specifically — stay in character.`;
         }
       }
       
-      // Default: route through AIR_text (LUKE/COLE/JUDE/PACK)
-      console.log('[ROUTER] Routing message through AIR: "' + message.substring(0, 80) + '"');
+      // Default: route through AIR_text (LUKE/COLE/JUDE/PACK) - FALLBACK
+      console.log('[ROUTER] FALLBACK: Routing message through old AIR_text');
       const result = await AIR_text(message, history || [], body.userId || 'brandon');
       return jsonResponse(res, 200, {
         response: result.response,
         isGoodbye: result.isGoodbye,
         missionNumber: result.missionNumber,
-        source: 'REACH-AIR',
+        source: 'REACH-AIR-FALLBACK',
         trace: 'USER*AIR*LUKE,COLE,JUDE,PACK*MODEL*VARA'
       });
-    } catch (e) {
-      console.error('[ROUTER] Error:', e.message);
-      return jsonResponse(res, 500, { error: e.message });
+      } catch (e) {
+        console.error('[ROUTER] Fallback Error:', e.message);
+        return jsonResponse(res, 500, { error: e.message });
+      }
     }
   }
 
