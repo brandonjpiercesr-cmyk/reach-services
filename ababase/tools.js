@@ -500,18 +500,18 @@ async function executeToolCall(toolName, input, context) {
     }
     
     case 'save_memory': {
-      // Save to user_contexts table
+      // ⬡B:FIX:save_memory_uses_aba_memory:20260304⬡
+      // Save to aba_memory table (not user_contexts)
       const { data, error } = await supabaseClient
-        .from('user_contexts')
-        .upsert({
-          user_id: userId,
-          context_type: input.context_type,
-          label: input.label,
+        .from('aba_memory')
+        .insert({
           content: input.content,
-          priority: input.priority || 5,
-          is_protected: false
-        }, {
-          onConflict: 'user_id,context_type,label'
+          memory_type: input.context_type || 'note',
+          source: 'fcw_save_' + (input.label || '').toLowerCase().replace(/\s+/g, '_'),
+          importance: input.priority || 5,
+          tags: [input.label, input.context_type, userId].filter(Boolean),
+          is_system: false,
+          air_processed: true
         })
         .select()
         .single();
@@ -523,7 +523,7 @@ async function executeToolCall(toolName, input, context) {
       return {
         status: 'success',
         memory_id: data.id,
-        confirmation: `Saved "${input.label}" to ${input.context_type}`
+        confirmation: 'Saved "' + input.label + '" to brain'
       };
     }
     
