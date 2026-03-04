@@ -2588,6 +2588,18 @@ For TEXT chat, give full helpful responses. For voice, keep it SHORT.
 Be conversational, natural. You are not an assistant reading a script. You are ABA.
 GRIT: Try 8+ approaches before giving up. If info is missing, ASK for it. NEVER say I cannot assist.`;
 
+  // ⬡B:FCW.FIX:HAM_IN_PROMPT:20260303⬡
+  // Add HAM identity to prompt
+  if (callerIdentity && callerIdentity.name) {
+    prompt += '\n\nHAM CONTEXT (Who you are talking to):\n';
+    prompt += 'Name: ' + callerIdentity.name + '\n';
+    prompt += 'Trust Level: ' + (callerIdentity.trust || 'T5') + '\n';
+    if (callerIdentity.location) prompt += 'Location: ' + callerIdentity.location + '\n';
+    if (callerIdentity.phone) prompt += 'Phone: ' + callerIdentity.phone + '\n';
+    if (callerIdentity.email) prompt += 'Email: ' + callerIdentity.email + '\n';
+    prompt += 'Use this context. Address them by name. Know their location.';
+  }
+
   // CALLER IDENTITY - changes what ABA can say and do
   if (callerIdentity && callerIdentity.callHistory) {
     prompt += '\nPREVIOUS CALL HISTORY WITH THIS CALLER:\n' + callerIdentity.callHistory.substring(0, 500);
