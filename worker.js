@@ -78,6 +78,57 @@ const PORT = process.env.PORT || 3000;
 // ⬡B:AIR:REACH.CONFIG.SUPABASE:CONFIG:brain.connection.persistence:AIR→REACH→BRAIN:T10:v1.5.0:20260213:s1b2a⬡
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://htlxjkbrstpwwtzsbyvb.supabase.co';
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
+// ⬡B:FCW.FIX:HAM_LOADER:20260303⬡
+// Load HAM identity from brain
+async function loadHAMFromBrain(userId) {
+  console.log('[HAM] Loading identity for:', userId || 'default');
+  try {
+    const result = await httpsRequest({
+      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+      path: '/rest/v1/aba_memory?memory_type=eq.ham_identity&limit=10',
+      method: 'GET',
+      headers: {
+        'apikey': SUPABASE_ANON,
+        'Authorization': 'Bearer ' + SUPABASE_ANON
+      }
+    });
+    if (result.status === 200) {
+      const data = JSON.parse(result.data.toString());
+      // Find matching user or default to Brandon
+      for (const ham of data) {
+        if (userId && ham.content.toLowerCase().includes(userId.toLowerCase())) {
+          console.log('[HAM] Found matching identity');
+          return parseHAMContent(ham.content);
+        }
+      }
+      // Default to Brandon (T10)
+      const brandon = data.find(h => h.content.includes('Brandon'));
+      if (brandon) {
+        console.log('[HAM] Using Brandon identity (T10)');
+        return parseHAMContent(brandon.content);
+      }
+    }
+  } catch (e) {
+    console.log('[HAM] Load error:', e.message);
+  }
+  return { name: 'Guest', trust: 'T5', location: 'Unknown' };
+}
+
+function parseHAMContent(content) {
+  const nameMatch = content.match(/HAM IDENTITY: ([^|]+)/);
+  const trustMatch = content.match(/Trust: (T\d+)/);
+  const locationMatch = content.match(/Location: ([^|]+)/);
+  const phoneMatch = content.match(/Phone: ([^|]+)/);
+  const emailMatch = content.match(/Email: ([^|]+)/);
+  return {
+    name: nameMatch ? nameMatch[1].trim() : 'Guest',
+    trust: trustMatch ? trustMatch[1] : 'T5',
+    location: locationMatch ? locationMatch[1].trim() : 'Unknown',
+    phone: phoneMatch ? phoneMatch[1].trim() : '',
+    email: emailMatch ? emailMatch[1].trim() : ''
+  };
+}
+
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0bHhqa2Jyc3Rwd3d0enNieXZiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA1MzI4MjEsImV4cCI6MjA4NjEwODgyMX0.MOgNYkezWpgxTO3ZHd0omZ0WLJOOR-tL7hONXWG9eBw';
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -2562,7 +2613,16 @@ GRIT: Try 8+ approaches before giving up. If info is missing, ASK for it. NEVER 
   }
   
   if (judeResult.capabilities) {
-    prompt += '\n\nAVAILABLE CAPABILITIES:\n' + judeResult.capabilities;
+    prompt += '\n\nAVAILABLE CAPABILITIES (88 Agent JDs - READ ALL):\n' + judeResult.capabilities;
+  }
+  
+  // Add conversation history for context retention
+  if (history && history.length > 0) {
+    prompt += '\n\nCONVERSATION HISTORY:\n';
+    for (const msg of history.slice(-10)) {
+      prompt += (msg.role === 'user' ? 'User: ' : 'ABA: ') + msg.content + '\n';
+    }
+    prompt += '\nUse this history to maintain context. Remember what was discussed.';
   }
   
   if (analysis.intent === 'greeting') {
@@ -7120,7 +7180,11 @@ function jsonResponse(res, status, data) {
 // ⬡B:AIR:REACH.API.AIR_TEXT:CODE:routing.text.chat:USER→REACH→AIR→AGENTS→MODEL→USER:T8:v1.5.0:20260213:a1t2x⬡
 // ⬡B:AIR:REACH.API.AIR_TEXT:CODE:routing.text.chat:USER→REACH→AIR→AGENTS→MODEL→USER:T8:v1.5.0:20260213:a1t2x⬡
 // AIR for text chat (higher token limits than voice)
-async function AIR_text(userMessage, history) {
+async function AIR_text(userMessage, history, userId) {
+  // ⬡B:FCW.FIX:LOAD_HAM_FIRST:20260303⬡
+  const ham = await loadHAMFromBrain(userId);
+  console.log('[AIR-TEXT] HAM loaded:', ham.name, ham.trust);
+  
   const lukeAnalysis = await LUKE_process(userMessage);
   if (lukeAnalysis.isGoodbye) {
     return { response: "Take care! We are all ABA.", isGoodbye: true };
@@ -7130,7 +7194,7 @@ async function AIR_text(userMessage, history) {
   
   // ⬡B:GRIT.FIX:DISPATCH_BEFORE_LLM:20260218⬡
   // TRY AGENT DISPATCH FIRST - actually execute calendar/email/etc
-  const dispatchResult = await AIR_DISPATCH(lukeAnalysis, judeResult, { name: 'brandon', trust: 'T10' });
+  const dispatchResult = await AIR_DISPATCH(lukeAnalysis, judeResult, ham);
   if (dispatchResult && dispatchResult.handled) {
     console.log('[AIR-TEXT] Agent ' + dispatchResult.agent + ' handled request');
     return { 
@@ -7143,7 +7207,7 @@ async function AIR_text(userMessage, history) {
   }
   
   // No agent handled it - proceed with LLM
-  const missionPackage = PACK_assemble(lukeAnalysis, coleResult, judeResult, history || [], null, null);
+  const missionPackage = PACK_assemble(lukeAnalysis, coleResult, judeResult, history || [], ham, null);
   let response = null;
 
   // PRIMARY: Gemini Flash 2.0
@@ -7930,7 +7994,7 @@ Respond as this agent specifically — stay in character.`;
       
       // Default: route through AIR_text (LUKE/COLE/JUDE/PACK)
       console.log('[ROUTER] Routing message through AIR: "' + message.substring(0, 80) + '"');
-      const result = await AIR_text(message, history || []);
+      const result = await AIR_text(message, history || [], body.userId || 'brandon');
       return jsonResponse(res, 200, {
         response: result.response,
         isGoodbye: result.isGoodbye,
