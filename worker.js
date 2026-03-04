@@ -2616,14 +2616,6 @@ GRIT: Try 8+ approaches before giving up. If info is missing, ASK for it. NEVER 
     prompt += '\n\nAVAILABLE CAPABILITIES (88 Agent JDs - READ ALL):\n' + judeResult.capabilities;
   }
   
-  // Add conversation history for context retention
-  if (history && history.length > 0) {
-    prompt += '\n\nCONVERSATION HISTORY:\n';
-    for (const msg of history.slice(-10)) {
-      prompt += (msg.role === 'user' ? 'User: ' : 'ABA: ') + msg.content + '\n';
-    }
-    prompt += '\nUse this history to maintain context. Remember what was discussed.';
-  }
   
   if (analysis.intent === 'greeting') {
     prompt += '\n\nThis is a greeting. Be warm and welcoming.';
