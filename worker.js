@@ -2424,7 +2424,7 @@ async function LUKE_process(userSaid) {
  */
 // ⬡B:AIR:REACH.AGENT.COLE:CODE:intelligence.brain.search:AIR→COLE→BRAIN→COLE→AIR:T8:v1.5.0:20260213:c1o2l⬡
 // ⬡B:ABCD:ABAOS:AGENT.COLE⬡
-async function COLE_scour(analysis) {
+async async function COLE_scour(analysis) {
   console.log('[COLE] Scouring brain for context...');
   
   if (!analysis.needsBrain) {
@@ -2489,7 +2489,7 @@ async function COLE_scour(analysis) {
  */
 // ⬡B:AIR:REACH.AGENT.JUDE:CODE:intelligence.agent.discovery:AIR→JUDE→BRAIN→JUDE→AIR:T8:v1.5.0:20260213:j1u2d⬡
 // ⬡B:ABCD:ABAOS:AGENT.JUDE⬡
-async function JUDE_findAgents(analysis) {
+async async function JUDE_findAgents(analysis) {
   // ⬡B:FCW.FIX:JUDE_LOAD_88_AGENTS:20260304⬡
   console.log('[JUDE] Loading ALL 88 agent JDs from aba_agent_jds...');
   
