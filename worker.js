@@ -5630,7 +5630,7 @@ async function AIR_process(userSaid, history, callerIdentity, demoState) {
   console.log('[AIR] Response: "' + response + '"');
   console.log('═══════════════════════════════════════════════════════════');
   
-  return { response, isGoodbye: false, missionNumber: missionPackage.missionNumber, agentCount: result.agentCount || 0 };
+  return { response, isGoodbye: false, missionNumber: missionPackage.missionNumber, agentCount: judeResult.agentCount || 0 };
 }
 
 /**
@@ -7316,7 +7316,7 @@ async function AIR_text(userMessage, history, userId) {
   }
 
   if (!response) response = "I'm here and processing. Could you rephrase that?";
-  return { response, isGoodbye: false, missionNumber: missionPackage.missionNumber, agentCount: result.agentCount || 0 };
+  return { response, isGoodbye: false, missionNumber: missionPackage.missionNumber, agentCount: judeResult.agentCount || 0 };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
