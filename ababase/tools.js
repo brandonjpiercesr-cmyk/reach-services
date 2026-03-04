@@ -734,14 +734,14 @@ async function executeToolCall(toolName, input, context) {
           // Specific type requested - fast query
           url += `&memory_type=eq.${memoryType}`;
           if (query) {
-            url += `&source=ilike.*${query}*`;
+            url += `&or=(source.ilike.*${query}*,content.ilike.*${query}*)`;
           }
         } else if (query) {
           // No type specified - search in COMMON types only to avoid timeout
           // This prevents full table scan on 238K records
           const commonTypes = ['checkpoint', 'ham_identity', 'milestone', 'system', 'directive', 'brandon_context'];
           url += `&memory_type=in.(${commonTypes.join(',')})`;
-          url += `&source=ilike.*${query}*`;
+          url += `&or=(source.ilike.*${query}*,content.ilike.*${query}*)`;
         } else {
           // No query, no type - return recent high-importance records
           url += `&importance=gte.8`;
