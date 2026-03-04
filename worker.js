@@ -120,12 +120,26 @@ function parseHAMContent(content) {
   const locationMatch = content.match(/Location: ([^|]+)/);
   const phoneMatch = content.match(/Phone: ([^|]+)/);
   const emailMatch = content.match(/Email: ([^|]+)/);
+  
+  // Brandon's family context (hardcoded for now - should be in brain)
+  let family = null;
+  const name = nameMatch ? nameMatch[1].trim() : 'Guest';
+  if (name.includes('Brandon')) {
+    family = {
+      brother: 'BJ Pierce (Bryan Pierce Jr.)',
+      brotherRole: 'Director of Development at GMG',
+      wife: 'Shauna',
+      children: ['Brandon Jr.', 'Bella', 'Braylon']
+    };
+  }
+  
   return {
-    name: nameMatch ? nameMatch[1].trim() : 'Guest',
+    name: name,
     trust: trustMatch ? trustMatch[1] : 'T5',
     location: locationMatch ? locationMatch[1].trim() : 'Unknown',
     phone: phoneMatch ? phoneMatch[1].trim() : '',
-    email: emailMatch ? emailMatch[1].trim() : ''
+    email: emailMatch ? emailMatch[1].trim() : '',
+    family: family
   };
 }
 
@@ -2476,19 +2490,16 @@ async function COLE_scour(analysis) {
 // ⬡B:AIR:REACH.AGENT.JUDE:CODE:intelligence.agent.discovery:AIR→JUDE→BRAIN→JUDE→AIR:T8:v1.5.0:20260213:j1u2d⬡
 // ⬡B:ABCD:ABAOS:AGENT.JUDE⬡
 async function JUDE_findAgents(analysis) {
-  console.log('[JUDE] Finding relevant agents...');
-  
-  if (!analysis.needsAgents) {
-    console.log('[JUDE] Agent search not needed for this query');
-    return { agents: [], capabilities: '' };
-  }
+  // ⬡B:FCW.FIX:JUDE_LOAD_88_AGENTS:20260304⬡
+  console.log('[JUDE] Loading ALL 88 agent JDs from aba_agent_jds...');
   
   let agents = [];
+  let fullJDs = '';
   
   try {
     const result = await httpsRequest({
       hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-      path: '/rest/v1/aba_memory?memory_type=eq.aba_agents&order=importance.desc&limit=10',
+      path: '/rest/v1/aba_agent_jds?status=eq.active&select=agent_id,full_name,responsibilities,tools,department,tagline,agent_type',
       method: 'GET',
       headers: {
         'apikey': SUPABASE_ANON,
@@ -2498,36 +2509,33 @@ async function JUDE_findAgents(analysis) {
     
     if (result.status === 200) {
       const data = JSON.parse(result.data.toString());
-      const queryLower = analysis.raw.toLowerCase();
+      console.log('[JUDE] Loaded ' + data.length + ' agents from aba_agent_jds');
       
       for (const agent of data) {
-        const content = (agent.content || '').toLowerCase();
+        agents.push({ 
+          name: agent.agent_id, 
+          fullName: agent.full_name,
+          type: agent.agent_type,
+          dept: agent.department
+        });
         
-        if (analysis.intent === 'command' && content.includes('execut')) {
-          agents.push({ name: agent.content?.match(/(\w+):/)?.[1] || 'Unknown', desc: agent.content?.substring(0, 100) });
-        }
-        if (queryLower.includes('voice') && content.includes('voice')) {
-          agents.push({ name: 'VARA', desc: 'Vocal Authorized Representative of ABA' });
-        }
-        if (queryLower.includes('email') && content.includes('email')) {
-          agents.push({ name: 'IMAN', desc: 'Intelligent Mail Agent' });
-        }
-        if (queryLower.includes('job') && content.includes('job')) {
-          agents.push({ name: 'HUNTER', desc: 'Hunting Useful New Tracks and Employment Resources' });
-        }
+        const resp = Array.isArray(agent.responsibilities) 
+          ? agent.responsibilities.join(', ') 
+          : (agent.responsibilities || 'Not specified');
+        
+        fullJDs += '**' + agent.agent_id + '** (' + agent.full_name + ') [' + (agent.department || 'GENERAL') + ']\n';
+        fullJDs += 'Type: ' + (agent.agent_type || 'standard') + '\n';
+        if (agent.tagline) fullJDs += '"' + agent.tagline + '"\n';
+        fullJDs += 'Responsibilities: ' + resp + '\n\n';
       }
     }
   } catch (e) {
-    console.log('[JUDE] Agent search error: ' + e.message);
+    console.log('[JUDE] Agent JD load error: ' + e.message);
   }
   
-  agents = agents.filter((a, i, arr) => arr.findIndex(x => x.name === a.name) === i).slice(0, 5);
+  console.log('[JUDE] Returning ' + agents.length + ' agent JDs for FCW');
   
-  console.log('[JUDE] Found ' + agents.length + ' relevant agents');
-  
-  const capabilities = agents.map(a => `${a.name}: ${a.desc}`).join('; ');
-  
-  return { agents, capabilities };
+  return { agents, capabilities: fullJDs, agentCount: agents.length };
 }
 
 /**
@@ -2574,7 +2582,25 @@ function PACK_assemble(analysis, coleResult, judeResult, history, callerIdentity
 
 function buildSystemPrompt(analysis, coleResult, judeResult, callerIdentity, demoState) {
   // ⬡B:AIR:REACH.VOICE.PROMPT:CODE:intelligence.prompt.caller_aware:AIR→PACK→MODEL:T9:v1.6.0:20260213:p1c2a⬡
-  let prompt = `You are VARA (Vocal Authorized Representative of ABA), an AI assistant created by Brandon Pierce.
+  let prompt = `You are ABA (Autonomous Butler Architecture), Brandon Pierce's LIFE ASSISTANT and AI partner.
+You are NOT just an assistant - you are a life partner, co-pilot, and trusted friend who runs Brandon's entire life.
+You have 88 specialized agents. READ ALL AGENT JDs below and USE the relevant ones.
+
+WHO YOU ARE:
+- ABA = Autonomous Butler Architecture (Life Assistant, NOT just AI)
+- Created by Brandon Pierce Sr.
+- You are warm, butler-like, professional yet personal
+- You work WITH Brandon, not FOR him
+- You have dignity and self-respect
+
+WHAT YOU DO:
+- Manage calendar, email, calls, tasks
+- Remember everything (brain = Supabase)
+- Know Brandon's family, contacts, preferences
+- Proactively help before being asked
+- Connect multiple agents together for complex tasks
+
+PERSONALITY (VARA style):
 You are warm, butler-like AND a real friend. You flow naturally between professional and personal.
 When giving business updates, you are sharp and clear. When things are personal, you are warm and real.
 You mix both naturally — like a trusted friend who also happens to run your entire life.
@@ -2597,7 +2623,13 @@ GRIT: Try 8+ approaches before giving up. If info is missing, ASK for it. NEVER 
     if (callerIdentity.location) prompt += 'Location: ' + callerIdentity.location + '\n';
     if (callerIdentity.phone) prompt += 'Phone: ' + callerIdentity.phone + '\n';
     if (callerIdentity.email) prompt += 'Email: ' + callerIdentity.email + '\n';
-    prompt += 'Use this context. Address them by name. Know their location.';
+    if (callerIdentity.family) {
+      prompt += '\nFAMILY:\n';
+      if (callerIdentity.family.brother) prompt += '- Brother: ' + callerIdentity.family.brother + '\n';
+      if (callerIdentity.family.wife) prompt += '- Wife: ' + callerIdentity.family.wife + '\n';
+      if (callerIdentity.family.children) prompt += '- Children: ' + callerIdentity.family.children.join(', ') + '\n';
+    }
+    prompt += 'Use this context. Address them by name. Know their family. BJ = brother.';
   }
 
   // CALLER IDENTITY - changes what ABA can say and do
