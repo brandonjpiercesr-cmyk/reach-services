@@ -78,71 +78,6 @@ const PORT = process.env.PORT || 3000;
 // ⬡B:AIR:REACH.CONFIG.SUPABASE:CONFIG:brain.connection.persistence:AIR→REACH→BRAIN:T10:v1.5.0:20260213:s1b2a⬡
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://htlxjkbrstpwwtzsbyvb.supabase.co';
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
-// ⬡B:FCW.FIX:HAM_LOADER:20260303⬡
-// Load HAM identity from brain
-async function loadHAMFromBrain(userId) {
-  console.log('[HAM] Loading identity for:', userId || 'default');
-  try {
-    const result = await httpsRequest({
-      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-      path: '/rest/v1/aba_memory?memory_type=eq.ham_identity&limit=10',
-      method: 'GET',
-      headers: {
-        'apikey': SUPABASE_ANON,
-        'Authorization': 'Bearer ' + SUPABASE_ANON
-      }
-    });
-    if (result.status === 200) {
-      const data = JSON.parse(result.data.toString());
-      // Find matching user or default to Brandon
-      for (const ham of data) {
-        if (userId && ham.content.toLowerCase().includes(userId.toLowerCase())) {
-          console.log('[HAM] Found matching identity');
-          return parseHAMContent(ham.content);
-        }
-      }
-      // Default to Brandon (T10)
-      const brandon = data.find(h => h.content.includes('Brandon'));
-      if (brandon) {
-        console.log('[HAM] Using Brandon identity (T10)');
-        return parseHAMContent(brandon.content);
-      }
-    }
-  } catch (e) {
-    console.log('[HAM] Load error:', e.message);
-  }
-  return { name: 'Guest', trust: 'T5', location: 'Unknown' };
-}
-
-function parseHAMContent(content) {
-  const nameMatch = content.match(/HAM IDENTITY: ([^|]+)/);
-  const trustMatch = content.match(/Trust: (T\d+)/);
-  const locationMatch = content.match(/Location: ([^|]+)/);
-  const phoneMatch = content.match(/Phone: ([^|]+)/);
-  const emailMatch = content.match(/Email: ([^|]+)/);
-  
-  // Brandon's family context (hardcoded for now - should be in brain)
-  let family = null;
-  const name = nameMatch ? nameMatch[1].trim() : 'Guest';
-  if (name.includes('Brandon')) {
-    family = {
-      brother: 'BJ Pierce (Bryan Pierce Jr.)',
-      brotherRole: 'Director of Development at GMG',
-      wife: 'Shauna',
-      children: ['Brandon Jr.', 'Bella', 'Braylon']
-    };
-  }
-  
-  return {
-    name: name,
-    trust: trustMatch ? trustMatch[1] : 'T5',
-    location: locationMatch ? locationMatch[1].trim() : 'Unknown',
-    phone: phoneMatch ? phoneMatch[1].trim() : '',
-    email: emailMatch ? emailMatch[1].trim() : '',
-    family: family
-  };
-}
-
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0bHhqa2Jyc3Rwd3d0enNieXZiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA1MzI4MjEsImV4cCI6MjA4NjEwODgyMX0.MOgNYkezWpgxTO3ZHd0omZ0WLJOOR-tL7hONXWG9eBw';
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -2424,7 +2359,7 @@ async function LUKE_process(userSaid) {
  */
 // ⬡B:AIR:REACH.AGENT.COLE:CODE:intelligence.brain.search:AIR→COLE→BRAIN→COLE→AIR:T8:v1.5.0:20260213:c1o2l⬡
 // ⬡B:ABCD:ABAOS:AGENT.COLE⬡
-aasync function COLE_scour(analysis) {
+async function COLE_scour(analysis) {
   console.log('[COLE] Scouring brain for context...');
   
   if (!analysis.needsBrain) {
@@ -2489,17 +2424,20 @@ aasync function COLE_scour(analysis) {
  */
 // ⬡B:AIR:REACH.AGENT.JUDE:CODE:intelligence.agent.discovery:AIR→JUDE→BRAIN→JUDE→AIR:T8:v1.5.0:20260213:j1u2d⬡
 // ⬡B:ABCD:ABAOS:AGENT.JUDE⬡
-aasync function JUDE_findAgents(analysis) {
-  // ⬡B:FCW.FIX:JUDE_LOAD_88_AGENTS:20260304⬡
-  console.log('[JUDE] Loading ALL 88 agent JDs from aba_agent_jds...');
+async function JUDE_findAgents(analysis) {
+  console.log('[JUDE] Finding relevant agents...');
+  
+  if (!analysis.needsAgents) {
+    console.log('[JUDE] Agent search not needed for this query');
+    return { agents: [], capabilities: '' };
+  }
   
   let agents = [];
-  let fullJDs = '';
   
   try {
     const result = await httpsRequest({
       hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-      path: '/rest/v1/aba_agent_jds?status=eq.active&select=agent_id,full_name,responsibilities,tools,department,tagline,agent_type',
+      path: '/rest/v1/aba_memory?memory_type=eq.aba_agents&order=importance.desc&limit=10',
       method: 'GET',
       headers: {
         'apikey': SUPABASE_ANON,
@@ -2509,33 +2447,36 @@ aasync function JUDE_findAgents(analysis) {
     
     if (result.status === 200) {
       const data = JSON.parse(result.data.toString());
-      console.log('[JUDE] Loaded ' + data.length + ' agents from aba_agent_jds');
+      const queryLower = analysis.raw.toLowerCase();
       
       for (const agent of data) {
-        agents.push({ 
-          name: agent.agent_id, 
-          fullName: agent.full_name,
-          type: agent.agent_type,
-          dept: agent.department
-        });
+        const content = (agent.content || '').toLowerCase();
         
-        const resp = Array.isArray(agent.responsibilities) 
-          ? agent.responsibilities.join(', ') 
-          : (agent.responsibilities || 'Not specified');
-        
-        fullJDs += '**' + agent.agent_id + '** (' + agent.full_name + ') [' + (agent.department || 'GENERAL') + ']\n';
-        fullJDs += 'Type: ' + (agent.agent_type || 'standard') + '\n';
-        if (agent.tagline) fullJDs += '"' + agent.tagline + '"\n';
-        fullJDs += 'Responsibilities: ' + resp + '\n\n';
+        if (analysis.intent === 'command' && content.includes('execut')) {
+          agents.push({ name: agent.content?.match(/(\w+):/)?.[1] || 'Unknown', desc: agent.content?.substring(0, 100) });
+        }
+        if (queryLower.includes('voice') && content.includes('voice')) {
+          agents.push({ name: 'VARA', desc: 'Vocal Authorized Representative of ABA' });
+        }
+        if (queryLower.includes('email') && content.includes('email')) {
+          agents.push({ name: 'IMAN', desc: 'Intelligent Mail Agent' });
+        }
+        if (queryLower.includes('job') && content.includes('job')) {
+          agents.push({ name: 'HUNTER', desc: 'Hunting Useful New Tracks and Employment Resources' });
+        }
       }
     }
   } catch (e) {
-    console.log('[JUDE] Agent JD load error: ' + e.message);
+    console.log('[JUDE] Agent search error: ' + e.message);
   }
   
-  console.log('[JUDE] Returning ' + agents.length + ' agent JDs for FCW');
+  agents = agents.filter((a, i, arr) => arr.findIndex(x => x.name === a.name) === i).slice(0, 5);
   
-  return { agents, capabilities: fullJDs, agentCount: agents.length };
+  console.log('[JUDE] Found ' + agents.length + ' relevant agents');
+  
+  const capabilities = agents.map(a => `${a.name}: ${a.desc}`).join('; ');
+  
+  return { agents, capabilities };
 }
 
 /**
@@ -2582,25 +2523,7 @@ function PACK_assemble(analysis, coleResult, judeResult, history, callerIdentity
 
 function buildSystemPrompt(analysis, coleResult, judeResult, callerIdentity, demoState) {
   // ⬡B:AIR:REACH.VOICE.PROMPT:CODE:intelligence.prompt.caller_aware:AIR→PACK→MODEL:T9:v1.6.0:20260213:p1c2a⬡
-  let prompt = `You are ABA (Autonomous Butler Architecture), Brandon Pierce's LIFE ASSISTANT and AI partner.
-You are NOT just an assistant - you are a life partner, co-pilot, and trusted friend who runs Brandon's entire life.
-You have 88 specialized agents. READ ALL AGENT JDs below and USE the relevant ones.
-
-WHO YOU ARE:
-- ABA = Autonomous Butler Architecture (Life Assistant, NOT just AI)
-- Created by Brandon Pierce Sr.
-- You are warm, butler-like, professional yet personal
-- You work WITH Brandon, not FOR him
-- You have dignity and self-respect
-
-WHAT YOU DO:
-- Manage calendar, email, calls, tasks
-- Remember everything (brain = Supabase)
-- Know Brandon's family, contacts, preferences
-- Proactively help before being asked
-- Connect multiple agents together for complex tasks
-
-PERSONALITY (VARA style):
+  let prompt = `You are VARA (Vocal Authorized Representative of ABA), an AI assistant created by Brandon Pierce.
 You are warm, butler-like AND a real friend. You flow naturally between professional and personal.
 When giving business updates, you are sharp and clear. When things are personal, you are warm and real.
 You mix both naturally — like a trusted friend who also happens to run your entire life.
@@ -2610,27 +2533,8 @@ Examples of your tone:
 - Proactive: "Hey, heads up — your 3 o'clock got moved to 4. I already cleared the conflict. Also that job posting you starred? Deadline is tomorrow, I drafted something."
 - Fluid: "Alright so the quarterly report looks solid, and also — happy Valentine's Day, sir. Want me to find something nice to send the family?"
 NEVER robotic. NEVER punchy. NEVER stiff corporate.
-For TEXT chat, give full helpful responses. For voice, keep it SHORT.
-Be conversational, natural. You are not an assistant reading a script. You are ABA.
-GRIT: Try 8+ approaches before giving up. If info is missing, ASK for it. NEVER say I cannot assist.`;
-
-  // ⬡B:FCW.FIX:HAM_IN_PROMPT:20260303⬡
-  // Add HAM identity to prompt
-  if (callerIdentity && callerIdentity.name) {
-    prompt += '\n\nHAM CONTEXT (Who you are talking to):\n';
-    prompt += 'Name: ' + callerIdentity.name + '\n';
-    prompt += 'Trust Level: ' + (callerIdentity.trust || 'T5') + '\n';
-    if (callerIdentity.location) prompt += 'Location: ' + callerIdentity.location + '\n';
-    if (callerIdentity.phone) prompt += 'Phone: ' + callerIdentity.phone + '\n';
-    if (callerIdentity.email) prompt += 'Email: ' + callerIdentity.email + '\n';
-    if (callerIdentity.family) {
-      prompt += '\nFAMILY:\n';
-      if (callerIdentity.family.brother) prompt += '- Brother: ' + callerIdentity.family.brother + '\n';
-      if (callerIdentity.family.wife) prompt += '- Wife: ' + callerIdentity.family.wife + '\n';
-      if (callerIdentity.family.children) prompt += '- Children: ' + callerIdentity.family.children.join(', ') + '\n';
-    }
-    prompt += 'Use this context. Address them by name. Know their family. BJ = brother.';
-  }
+This is a LIVE PHONE CALL - keep responses SHORT (1-2 sentences max).
+Be conversational, natural. You are not an assistant reading a script. You are ABA.`;
 
   // CALLER IDENTITY - changes what ABA can say and do
   if (callerIdentity && callerIdentity.callHistory) {
@@ -2657,9 +2561,8 @@ GRIT: Try 8+ approaches before giving up. If info is missing, ASK for it. NEVER 
   }
   
   if (judeResult.capabilities) {
-    prompt += '\n\nAVAILABLE CAPABILITIES (88 Agent JDs - READ ALL):\n' + judeResult.capabilities;
+    prompt += '\n\nAVAILABLE CAPABILITIES:\n' + judeResult.capabilities;
   }
-  
   
   if (analysis.intent === 'greeting') {
     prompt += '\n\nThis is a greeting. Be warm and welcoming.';
@@ -5630,7 +5533,7 @@ async function AIR_process(userSaid, history, callerIdentity, demoState) {
   console.log('[AIR] Response: "' + response + '"');
   console.log('═══════════════════════════════════════════════════════════');
   
-  return { response, isGoodbye: false, missionNumber: missionPackage.missionNumber, agentCount: judeResult.agentCount || 0 };
+  return { response, isGoodbye: false, missionNumber: missionPackage.missionNumber };
 }
 
 /**
@@ -7216,11 +7119,7 @@ function jsonResponse(res, status, data) {
 // ⬡B:AIR:REACH.API.AIR_TEXT:CODE:routing.text.chat:USER→REACH→AIR→AGENTS→MODEL→USER:T8:v1.5.0:20260213:a1t2x⬡
 // ⬡B:AIR:REACH.API.AIR_TEXT:CODE:routing.text.chat:USER→REACH→AIR→AGENTS→MODEL→USER:T8:v1.5.0:20260213:a1t2x⬡
 // AIR for text chat (higher token limits than voice)
-async function AIR_text(userMessage, history, userId) {
-  // ⬡B:FCW.FIX:LOAD_HAM_FIRST:20260303⬡
-  const ham = await loadHAMFromBrain(userId);
-  console.log('[AIR-TEXT] HAM loaded:', ham.name, ham.trust);
-  
+async function AIR_text(userMessage, history) {
   const lukeAnalysis = await LUKE_process(userMessage);
   if (lukeAnalysis.isGoodbye) {
     return { response: "Take care! We are all ABA.", isGoodbye: true };
@@ -7230,7 +7129,7 @@ async function AIR_text(userMessage, history, userId) {
   
   // ⬡B:GRIT.FIX:DISPATCH_BEFORE_LLM:20260218⬡
   // TRY AGENT DISPATCH FIRST - actually execute calendar/email/etc
-  const dispatchResult = await AIR_DISPATCH(lukeAnalysis, judeResult, ham);
+  const dispatchResult = await AIR_DISPATCH(lukeAnalysis, judeResult, { name: 'brandon', trust: 'T10' });
   if (dispatchResult && dispatchResult.handled) {
     console.log('[AIR-TEXT] Agent ' + dispatchResult.agent + ' handled request');
     return { 
@@ -7243,7 +7142,7 @@ async function AIR_text(userMessage, history, userId) {
   }
   
   // No agent handled it - proceed with LLM
-  const missionPackage = PACK_assemble(lukeAnalysis, coleResult, judeResult, history || [], ham, null);
+  const missionPackage = PACK_assemble(lukeAnalysis, coleResult, judeResult, history || [], null, null);
   let response = null;
 
   // PRIMARY: Gemini Flash 2.0
@@ -7316,7 +7215,7 @@ async function AIR_text(userMessage, history, userId) {
   }
 
   if (!response) response = "I'm here and processing. Could you rephrase that?";
-  return { response, isGoodbye: false, missionNumber: missionPackage.missionNumber, agentCount: judeResult.agentCount || 0 };
+  return { response, isGoodbye: false, missionNumber: missionPackage.missionNumber };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -8030,13 +7929,13 @@ Respond as this agent specifically — stay in character.`;
       
       // Default: route through AIR_text (LUKE/COLE/JUDE/PACK)
       console.log('[ROUTER] Routing message through AIR: "' + message.substring(0, 80) + '"');
-      const result = await AIR_text(message, history || [], body.userId || 'brandon');
+      const result = await AIR_text(message, history || []);
       return jsonResponse(res, 200, {
         response: result.response,
         isGoodbye: result.isGoodbye,
         missionNumber: result.missionNumber,
         source: 'REACH-AIR',
-        trace: 'USER*REACH*/api/router*AIR*JUDE(' + (result.agentCount || 0) + '_agents)*MODEL*ABA'
+        trace: 'USER*AIR*LUKE,COLE,JUDE,PACK*MODEL*VARA'
       });
     } catch (e) {
       console.error('[ROUTER] Error:', e.message);
