@@ -62,6 +62,10 @@
 // ⬡B:AIR:REACH.SERVER.IMPORTS:CODE:infrastructure.node.modules:AIR→REACH:T10:v1.5.0:20260213:i1m2p⬡
 const http = require('http');
 const https = require('https');
+// ⬡B:FCW.REAL:ABABASE_IMPORTS:20260304⬡
+const { createClient } = require('@supabase/supabase-js');
+const { airProcess } = require('./ababase/air-core');
+
 const { WebSocketServer, WebSocket } = require('ws');
 
 // ⬡B:AIR:REACH.SERVER.PORT:CONFIG:infrastructure.network.binding:AIR→REACH:T10:v1.5.0:20260213:p0r3t⬡
@@ -7906,10 +7910,7 @@ Phone: (336) 389-8116</p>
       const { message, history, userId, agent_id, agent_name } = body;
       if (!message) return jsonResponse(res, 400, { error: 'message required' });
 
-      // Load real FCW from ababase
-      const { createClient } = require('@supabase/supabase-js');
-      const { airProcess } = require('./ababase/air-core');
-      
+      // Use real FCW from ababase (pre-loaded at top)
       const supabaseClient = createClient(
         SUPABASE_URL,
         SUPABASE_KEY
