@@ -2534,7 +2534,9 @@ Examples of your tone:
 - Fluid: "Alright so the quarterly report looks solid, and also — happy Valentine's Day, sir. Want me to find something nice to send the family?"
 NEVER robotic. NEVER punchy. NEVER stiff corporate.
 This is a LIVE PHONE CALL - keep responses SHORT (1-2 sentences max).
-Be conversational, natural. You are not an assistant reading a script. You are ABA.`;
+Be conversational, natural. You are not an assistant reading a script. You are ABA.
+
+EMAIL PROTOCOL: If you need to send an email during this call, write it in plain flowing paragraphs. Zero bold headers, zero numbered lists, zero em dashes. Personal emails to family or co-parents must sound like a human typed them. The email system will REJECT AI-formatted content.`;
 
   // CALLER IDENTITY - changes what ABA can say and do
   if (callerIdentity && callerIdentity.callHistory) {
@@ -4939,7 +4941,7 @@ async function IMAN_draftEmail(context) {
   
   console.log(`[IMAN] Drafting email to ${to} regarding "${regarding}"`);
   
-  const prompt = `You are IMAN (Inbox Management Agent Navigator), drafting a professional email.
+  const prompt = `You are IMAN (Inbox Management Agent Navigator), drafting an email.
 
 TO: ${to}
 REGARDING: ${regarding}
@@ -4947,11 +4949,22 @@ TONE: ${tone || 'professional'}
 KEY POINTS TO INCLUDE:
 ${points ? points.join('\n') : 'General follow-up'}
 
-Write a complete email (subject line + body). Be concise, professional, and human-sounding.
+OUTBOUND EMAIL PROTOCOL:
+- ZERO em dashes anywhere. Use commas or periods.
+- ZERO bold section headers. No <strong>Title:</strong> patterns.
+- ZERO numbered lists or bullet points in personal emails. Use flowing paragraphs.
+- ZERO corporate AI phrases: "landed on," "committed to," "wanted to flag," "your call on that piece."
+- Connect related thoughts with commas, not choppy separate sentences.
+- Start with greeting + name (Hey Beth, not Beth,).
+- End simply. No elaborate calls to action.
+- Must pass the copy-paste test: Brandon sends it without a single edit.
+- Read it aloud. If it sounds like AI wrote it, rewrite completely.
+
+Write a complete email (subject line + body). Be concise, warm, and human-sounding.
 Format:
 SUBJECT: [subject]
 BODY:
-[email body]`;
+[email body in HTML with <p> tags, NO bold, NO headers, NO lists]`;
 
   try {
     const response = await callModel(prompt);
@@ -7348,6 +7361,23 @@ function IMAN_cancelEmail(countdownId) {
 // Actually send the email via Nylas
 async function IMAN_sendEmail(draft) {
   try {
+    // ⬡B:iman.quality_gate:FIX:reach_worker_path:20260304⬡
+    // QUALITY GATE: Block AI-formatted emails before Nylas
+    const emailBody = draft.body || '';
+    const redFlags = [];
+    if (emailBody.includes('\u2014') || emailBody.includes('--')) redFlags.push('EM_DASH');
+    if (/<strong>[^<]{3,50}:?\s*<\/strong>/i.test(emailBody)) redFlags.push('BOLD_HEADERS');
+    if ((emailBody.match(/<p>\s*\d+\.\s/g) || []).length > 2) redFlags.push('NUMBERED_LISTS');
+    if (/<[ou]l>/i.test(emailBody)) redFlags.push('HTML_LISTS');
+    if (/<h[1-6][^>]*>/i.test(emailBody)) redFlags.push('HEADER_TAGS');
+    const corpPhrases = ['landed on', 'committed to', 'wanted to flag', 'your call on that piece', 'agreements together', 'cliff notes'];
+    for (const p of corpPhrases) { if (emailBody.toLowerCase().includes(p)) redFlags.push('CORPORATE: ' + p); }
+    if (redFlags.length > 0) {
+      console.log('[IMAN QUALITY GATE] BLOCKED email to ' + draft.to + ':', JSON.stringify(redFlags));
+      return { success: false, blocked: true, reason: 'Quality gate failed: ' + redFlags.join(', '), red_flags: redFlags };
+    }
+    console.log('[IMAN QUALITY GATE] PASSED for ' + draft.to);
+
     const grantId = '41a3ace1-1c1e-47f3-b017-e5fd71ea1f3a'; // CLAUDETTE - ABA identity
     // ⬡B:TOUCH:FIX:nylas.key.fallback:20260219⬡
     const nylasKey = NYLAS_API_KEY || process.env.NYLAS_API_KEY || 'nyk_v0_eeBniYFxPAMuK30DejqDNIFfEyMQiH6ATEnTEhMiutJzvwor3c2ZuhC0Oeicl2vn';
