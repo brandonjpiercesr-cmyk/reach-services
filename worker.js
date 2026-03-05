@@ -10898,80 +10898,126 @@ We Are All ABA.`;
   // /api/escalate - AIR triggers escalation based on urgency
   if (path === '/api/escalate' && method === 'POST') {
     // ═══════════════════════════════════════════════════════════════════════════════
-    // ⬡B:AIR:REACH.ROUTE.ESCALATE:CODE:routing.autonomous.escalation:
-    // USER→AIR→LUKE,COLE,JUDE,PACK→DECISION→DIAL/CARA→VARA→USER:T10:v1.0.0:20260214:e1s1c⬡
+    // ⬡B:REACH:FIX:route.to.ababase:20260305⬡
     // 
-    // AUTONOMOUS ESCALATION - Routed through AIR with full agent analysis
-    // OR force_call=true to bypass analysis (HAM asked for a call directly)
+    // FIXED: Now routes to abacia-services AIR.process (FCW + 88 agents)
+    // reach-services is a DUMB EXECUTOR - it doesn't think, it dials when told
+    // 
+    // OLD (broken): LUKE/COLE/JUDE/PACK made decisions locally without FCW
+    // NEW (correct): AIR decides with full context, reach-services just executes
     // ═══════════════════════════════════════════════════════════════════════════════
     const body = await parseBody(req);
     const { message, context, source, urgency, target, type, force_call } = body;
     
     console.log('');
     console.log('═══════════════════════════════════════════════════════════');
-    console.log('[ESCALATE] *** INCOMING ESCALATION REQUEST ***');
-    console.log(`[ESCALATE] Source: ${source || 'manual'} | Type: ${type || 'direct'} | Force Call: ${force_call || false}`);
+    console.log('[ESCALATE] *** ROUTING TO ABABASE AIR ***');
+    console.log(`[ESCALATE] Source: ${source || 'manual'} | Force Call: ${force_call || false}`);
     console.log('═══════════════════════════════════════════════════════════');
     
     try {
-      // ⬡B:TOUCH:FIX:force_call:20260216⬡
-      // If HAM asks for a call, JUST CALL. No analysis needed.
+      // If HAM explicitly asks for a call, JUST CALL. No analysis needed.
       if (force_call === true) {
-        console.log('[ESCALATE] force_call=true - BYPASSING ANALYSIS, CALLING NOW');
-        
-        // ⬡B:TOUCH:FIX:use.elevenlabs.dial:20260216⬡
-        // Use ElevenLabs convai for REAL 2-way calls (this is what worked with BJ!)
-        // NOT Twilio TwiML which kept breaking
-        const targetPhone = '+13363898116'; // Brandon's actual phone
+        console.log('[ESCALATE] force_call=true - HAM requested call directly');
+        const targetPhone = '+13363898116';
         const spokenMessage = message || 'Hey, this is ABA calling as requested.';
         
-        try {
-          const dialResult = await DIAL_callWithElevenLabs(targetPhone, spokenMessage, source || 'escalate');
-          
-          return jsonResponse(res, 200, {
-            success: dialResult.success,
-            routing: 'FORCE_CALL*ELEVENLABS*TWOWAY',
-            analysis: { urgency: 10, category: 'ham_request', intent: 'Call requested by HAM' },
-            decision: { action: 'call_now', target: 'Brandon', reasoning: 'HAM asked for a call - using ElevenLabs 2-way' },
-            execution: {
-              action: 'call_now',
-              target: 'Brandon',
-              conversation_id: dialResult.conversation_id,
-              status: dialResult.success ? 'call_initiated' : 'failed',
-              timestamp: new Date().toISOString()
-            },
-            message: spokenMessage.substring(0, 100) + '...'
-          });
-        } catch (e) {
-          console.log('[ESCALATE] DIAL_callWithElevenLabs failed:', e.message);
-          return jsonResponse(res, 500, { error: 'Call failed: ' + e.message });
-        }
+        const dialResult = await DIAL_callWithElevenLabs(targetPhone, spokenMessage, source || 'escalate');
+        
+        return jsonResponse(res, 200, {
+          success: dialResult.success,
+          routing: 'FORCE_CALL*ELEVENLABS',
+          decision: { action: 'call_now', reason: 'HAM requested directly' },
+          execution: { conversation_id: dialResult.conversation_id, status: dialResult.success ? 'initiated' : 'failed' }
+        });
       }
       
-      // Route through AIR_escalate for REAL agent analysis
-      const result = await AIR_escalate({
-        type: type || 'manual_escalation',
-        source: source || 'api',
-        content: message || context || 'Escalation triggered',
-        metadata: { urgency, target, originalBody: body }
+      // ═══════════════════════════════════════════════════════════════════════════════
+      // ROUTE TO ABABASE - Let AIR decide with FCW + 88 agents
+      // ═══════════════════════════════════════════════════════════════════════════════
+      console.log('[ESCALATE] Forwarding to abacia-services AIR.process...');
+      
+      const airResponse = await fetch('https://abacia-services.onrender.com/api/air/process', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'escalation_decision',
+          message: `ESCALATION REQUEST from ${source || 'unknown'}:\n\n${message || context || 'No content'}\n\nDecide: Should we call Brandon? Text him? Email? Or just log this? Consider urgency and context. If this is routine/informational, respond with action:none. Only recommend call for TRUE emergencies.`,
+          source: 'REACH_ESCALATE',
+          channel: 'escalation',
+          metadata: { original_urgency: urgency, target, source, type }
+        })
+      });
+      
+      const airResult = await airResponse.json();
+      console.log('[ESCALATE] AIR response:', JSON.stringify(airResult).substring(0, 300));
+      
+      // Parse AIR's decision
+      const responseText = (airResult.response || airResult.message || '').toLowerCase();
+      let action = 'none';
+      let reasoning = airResult.response || 'AIR processed';
+      
+      // AIR tells us what to do
+      if (responseText.includes('call brandon') || responseText.includes('phone call') || responseText.includes('call immediately')) {
+        action = 'call';
+      } else if (responseText.includes('text') || responseText.includes('sms')) {
+        action = 'sms';
+      } else if (responseText.includes('email')) {
+        action = 'email';
+      } else {
+        action = 'none'; // Log only, no outreach
+      }
+      
+      console.log(`[ESCALATE] AIR decided: action=${action}`);
+      
+      // EXECUTE what AIR decided
+      let execution = { action, timestamp: new Date().toISOString() };
+      
+      if (action === 'call') {
+        const dialResult = await DIAL_callWithElevenLabs('+13363898116', message || 'ABA here with an update.', source);
+        execution.conversation_id = dialResult.conversation_id;
+        execution.status = dialResult.success ? 'call_initiated' : 'failed';
+      } else if (action === 'sms') {
+        // Send SMS via Twilio
+        const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+        const smsResult = await twilioClient.messages.create({
+          body: (message || 'ABA update').substring(0, 160),
+          from: process.env.TWILIO_PHONE_NUMBER || '+13362037510',
+          to: '+13363898116'
+        });
+        execution.sms_sid = smsResult.sid;
+        execution.status = 'sms_sent';
+      } else {
+        execution.status = 'logged_only';
+      }
+      
+      // Log to brain
+      await fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
+        method: 'POST',
+        headers: {
+          'apikey': SUPABASE_SERVICE,
+          'Authorization': `Bearer ${SUPABASE_SERVICE}`,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=minimal'
+        },
+        body: JSON.stringify({
+          content: `ESCALATION via AIR: action=${action}, source=${source}, message=${(message||'').substring(0,200)}`,
+          memory_type: 'escalation',
+          source: `air_escalation_${Date.now()}`,
+          importance: action === 'call' ? 8 : action === 'sms' ? 6 : 4,
+          is_system: true,
+          tags: ['escalation', 'air_routed', action, source || 'unknown']
+        })
       });
       
       return jsonResponse(res, 200, {
         success: true,
-        routing: result.routing,
-        analysis: {
-          urgency: result.analysis.urgency,
-          category: result.analysis.category,
-          intent: result.analysis.intent
-        },
-        decision: {
-          action: result.decision.action,
-          target: result.decision.target.name,
-          reasoning: result.decision.reasoning
-        },
-        execution: result.execution,
-        message: result.message.spokenMessage?.substring(0, 100) + '...'
+        routing: 'REACH*ABABASE_AIR*EXECUTE',
+        air_used: true,
+        decision: { action, reasoning: reasoning.substring(0, 200) },
+        execution
       });
+      
     } catch (e) {
       console.error('[ESCALATE] Error:', e.message);
       return jsonResponse(res, 500, { success: false, error: e.message });
