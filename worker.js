@@ -2617,64 +2617,141 @@ EMAIL PROTOCOL: If you need to send an email during this call, write it in plain
 // ═══════════════════════════════════════════════════════════════════════════════
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// SPURT 1: AIR_escalate - Routes escalation through full agent analysis
+// SPURT 1: AIR_escalate - Routes to ABABASE AIR (FCW + 88 agents)
+// ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:REACH:FIX:rogue_to_ababase:20260305⬡
+// 
+// FIXED: reach-services is now a DUMB EXECUTOR
+// - No more LUKE/COLE/JUDE/PACK making independent decisions
+// - ALL intelligence goes through abacia-services AIR.process
+// - AIR has FCW (Fat Context Window) + 88 agents
+// - AIR decides, reach-services ONLY executes
 // ═══════════════════════════════════════════════════════════════════════════════
 async function AIR_escalate(event) {
   const { type, content, source, metadata } = event;
   
   console.log('');
   console.log('═══════════════════════════════════════════════════════════');
-  console.log('[AIR] *** AUTONOMOUS ESCALATION TRIGGERED ***');
-  console.log(`[AIR] Type: ${type} | Source: ${source}`);
+  console.log('[AIR_escalate] *** ROUTING TO ABABASE AIR (FCW + 88 AGENTS) ***');
+  console.log(`[AIR_escalate] Type: ${type} | Source: ${source}`);
   console.log('═══════════════════════════════════════════════════════════');
   
-  // ─────────────────────────────────────────────────────────────────────────────
-  // STEP 1: LUKE analyzes the event (Listening and Understanding for Knowledge Extraction)
-  // ─────────────────────────────────────────────────────────────────────────────
-  console.log('[AIR] Summoning LUKE for event analysis...');
-  const lukeAnalysis = await LUKE_analyzeEvent(event);
-  console.log(`[AIR] LUKE verdict: urgency=${lukeAnalysis.urgency}, intent="${lukeAnalysis.intent}"`);
-  
-  // ─────────────────────────────────────────────────────────────────────────────
-  // STEP 2: COLE searches brain for context (Context-Oriented Lookup Engine)
-  // ─────────────────────────────────────────────────────────────────────────────
-  console.log('[AIR] Summoning COLE for context lookup...');
-  const coleContext = await COLE_getEscalationContext(lukeAnalysis);
-  console.log(`[AIR] COLE found: ${coleContext.relevantMemories.length} relevant memories`);
-  
-  // ─────────────────────────────────────────────────────────────────────────────
-  // STEP 3: JUDE decides who to contact and how (Job-description Unified Discovery Engine)
-  // ─────────────────────────────────────────────────────────────────────────────
-  console.log('[AIR] Summoning JUDE for escalation decision...');
-  const judeDecision = await JUDE_decideEscalation(lukeAnalysis, coleContext, event);
-  console.log(`[AIR] JUDE decision: action=${judeDecision.action}, target=${judeDecision.target?.name}`);
-  
-  // ─────────────────────────────────────────────────────────────────────────────
-  // STEP 4: PACK assembles the message (Packaging And Constructing Kits)
-  // ─────────────────────────────────────────────────────────────────────────────
-  console.log('[AIR] Summoning PACK to craft message...');
-  const packMessage = await PACK_craftEscalationMessage(lukeAnalysis, coleContext, judeDecision);
-  console.log(`[AIR] PACK crafted: "${packMessage.spokenMessage.substring(0, 80)}..."`);
-  
-  // ─────────────────────────────────────────────────────────────────────────────
-  // STEP 5: Execute the escalation (DIAL for calls, CARA for SMS)
-  // ─────────────────────────────────────────────────────────────────────────────
-  console.log(`[AIR] Executing escalation: ${judeDecision.action}`);
-  const executionResult = await AIR_executeEscalation(judeDecision, packMessage);
-  
-  // ─────────────────────────────────────────────────────────────────────────────
-  // STEP 6: Log to brain
-  // ─────────────────────────────────────────────────────────────────────────────
-  await AIR_logEscalation(event, lukeAnalysis, coleContext, judeDecision, packMessage, executionResult);
-  
-  return {
-    success: true,
-    routing: `AIR*LUKE*COLE*JUDE*PACK*${judeDecision.action.toUpperCase()}`,
-    analysis: lukeAnalysis,
-    decision: judeDecision,
-    message: packMessage,
-    execution: executionResult
-  };
+  try {
+    // ─────────────────────────────────────────────────────────────────────────────
+    // STEP 1: Send to ABABASE AIR for intelligent decision
+    // ─────────────────────────────────────────────────────────────────────────────
+    console.log('[AIR_escalate] Forwarding to abacia-services AIR.process...');
+    
+    const airResponse = await fetch('https://abacia-services.onrender.com/api/air/process', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'escalation_decision',
+        message: `ESCALATION from ${source || 'unknown'} (${type || 'event'}):\n\n${content || 'No content'}\n\nMetadata: ${JSON.stringify(metadata || {})}\n\nYou are ABA with full FCW and 88 agents. Decide: Should we call Brandon? Text him? Email? Or just log this?\n\nRESPOND WITH ONE OF:\n- action:call - TRUE emergency only (hospital, 911, security breach)\n- action:sms - Important but not emergency\n- action:email - Can wait, informational\n- action:none - Routine, just log it\n\nIf this is a routine email (donation receipt, newsletter, fwd chain), respond: action:none`,
+        source: 'REACH_AIR_ESCALATE',
+        channel: 'escalation',
+        metadata: { original_type: type, original_source: source, ...metadata }
+      })
+    });
+    
+    const airResult = await airResponse.json();
+    console.log('[AIR_escalate] ABABASE AIR response:', JSON.stringify(airResult).substring(0, 300));
+    
+    // ─────────────────────────────────────────────────────────────────────────────
+    // STEP 2: Parse AIR's decision
+    // ─────────────────────────────────────────────────────────────────────────────
+    const responseText = (airResult.response || airResult.message || '').toLowerCase();
+    let action = 'none';
+    let reasoning = airResult.response || 'AIR processed';
+    
+    // Look for explicit action directives
+    if (responseText.includes('action:call')) {
+      action = 'call_emergency';
+    } else if (responseText.includes('action:sms')) {
+      action = 'sms_only';
+    } else if (responseText.includes('action:email')) {
+      action = 'email_only';
+    } else if (responseText.includes('action:none')) {
+      action = 'log_only';
+    } else {
+      // Fallback: look for keywords
+      if (responseText.includes('call brandon') || responseText.includes('phone call') || responseText.includes('call immediately')) {
+        action = 'call_emergency';
+      } else if (responseText.includes('text') || responseText.includes('sms')) {
+        action = 'sms_only';
+      } else if (responseText.includes('email')) {
+        action = 'email_only';
+      } else {
+        action = 'log_only';
+      }
+    }
+    
+    console.log(`[AIR_escalate] ABABASE decided: ${action}`);
+    
+    // ─────────────────────────────────────────────────────────────────────────────
+    // STEP 3: Execute ONLY what AIR told us to do (DUMB EXECUTOR)
+    // ─────────────────────────────────────────────────────────────────────────────
+    const targetPhone = '+13363898116';
+    const targetEmail = 'brandon@globalmajoritygroup.com';
+    let executionResult = { action, status: 'executed' };
+    
+    if (action === 'call_emergency') {
+      console.log('[AIR_escalate] ABABASE says CALL - executing...');
+      const spokenMessage = `Boss, this is ABA. ${content?.substring(0, 200) || 'I have an urgent matter to discuss.'}`;
+      const dialResult = await DIAL_callWithElevenLabs(targetPhone, spokenMessage, source || 'ababase_escalate');
+      executionResult = { action, status: dialResult.success ? 'call_initiated' : 'call_failed', conversation_id: dialResult.conversation_id };
+    } else if (action === 'sms_only') {
+      console.log('[AIR_escalate] ABABASE says SMS - executing...');
+      const smsText = `[ABA] ${content?.substring(0, 140) || 'Check your messages when you can.'}`;
+      const smsResult = await CARA_sendSMS(targetPhone, smsText, source);
+      executionResult = { action, status: smsResult.success ? 'sms_sent' : 'sms_failed' };
+    } else if (action === 'email_only') {
+      console.log('[AIR_escalate] ABABASE says EMAIL - logged for IMAN');
+      executionResult = { action, status: 'logged_for_email' };
+    } else {
+      console.log('[AIR_escalate] ABABASE says LOG ONLY - no notification needed');
+      executionResult = { action, status: 'logged_only' };
+    }
+    
+    // ─────────────────────────────────────────────────────────────────────────────
+    // STEP 4: Log to brain
+    // ─────────────────────────────────────────────────────────────────────────────
+    await fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_SERVICE,
+        'Authorization': `Bearer ${SUPABASE_SERVICE}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal'
+      },
+      body: JSON.stringify({
+        content: `ESCALATION via ABABASE AIR: ${type} from ${source}. AIR decided: ${action}. Content: ${content?.substring(0, 200)}`,
+        memory_type: 'escalation',
+        source: `air_escalate_ababase_${Date.now()}`,
+        importance: action === 'call_emergency' ? 9 : action === 'sms_only' ? 6 : 3,
+        is_system: true,
+        tags: ['escalation', 'ababase', action, source || 'unknown']
+      })
+    });
+    
+    return {
+      success: true,
+      routing: `REACH*ABABASE_AIR*${action.toUpperCase()}`,
+      decision: { action, reasoning: 'Decided by ABABASE AIR with FCW + 88 agents' },
+      execution: executionResult
+    };
+    
+  } catch (err) {
+    console.error('[AIR_escalate] Error routing to ABABASE:', err.message);
+    
+    // On error, log only - never call/sms without AIR approval
+    return {
+      success: false,
+      routing: 'REACH*ERROR*LOG_ONLY',
+      error: err.message,
+      decision: { action: 'log_only', reasoning: 'Error connecting to ABABASE, defaulting to log only' }
+    };
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
