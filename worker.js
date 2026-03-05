@@ -2646,7 +2646,7 @@ async function AIR_escalate(event) {
   // STEP 3: JUDE decides who to contact and how (Job-description Unified Discovery Engine)
   // ─────────────────────────────────────────────────────────────────────────────
   console.log('[AIR] Summoning JUDE for escalation decision...');
-  const judeDecision = await JUDE_decideEscalation(lukeAnalysis, coleContext);
+  const judeDecision = await JUDE_decideEscalation(lukeAnalysis, coleContext, event);
   console.log(`[AIR] JUDE decision: action=${judeDecision.action}, target=${judeDecision.target?.name}`);
   
   // ─────────────────────────────────────────────────────────────────────────────
@@ -2760,7 +2760,7 @@ async function COLE_getEscalationContext(lukeAnalysis) {
 // ═══════════════════════════════════════════════════════════════════════════════
 // JUDE_decideEscalation - Decides who to contact and how
 // ═══════════════════════════════════════════════════════════════════════════════
-async function JUDE_decideEscalation(lukeAnalysis, coleContext) {
+async function JUDE_decideEscalation(lukeAnalysis, coleContext, event = {}) {
   const { urgency, category } = lukeAnalysis;
   
   // Contact registry with trigger categories
@@ -2781,16 +2781,63 @@ async function JUDE_decideEscalation(lukeAnalysis, coleContext) {
   // Future: Pull owner from Supabase user profile
   const _unused = category; // Category would be used in multi-tenant setup
   
-  // Decide action based on urgency
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // EMERGENCY CALL GATE - Only call for REAL emergencies
+  // AI hallucinated "legal emergency" from a routine donation email on 3/5/2026
+  // Now we require explicit emergency keywords in the ACTUAL content
+  // ═══════════════════════════════════════════════════════════════════════════════
+  const contentLower = (event?.content || '').toLowerCase();
+  const subjectLower = (event?.metadata?.subject || '').toLowerCase();
+  
+  // REAL emergency keywords that warrant a phone call
+  const REAL_EMERGENCY_KEYWORDS = [
+    '911', 'hospital', 'ambulance', 'police', 'fire department',
+    'heart attack', 'stroke', 'accident', 'injured', 'dying',
+    'arrested', 'jail', 'court summons', 'subpoena',
+    'account hacked', 'breach', 'fraud alert',
+    'deadline today', 'due in 1 hour', 'expires today'
+  ];
+  
+  // Check if ANY real emergency keyword is present
+  const hasRealEmergency = REAL_EMERGENCY_KEYWORDS.some(kw => 
+    contentLower.includes(kw) || subjectLower.includes(kw)
+  );
+  
+  // IGNORE patterns - routine emails that should NEVER trigger calls
+  const IGNORE_PATTERNS = [
+    'donation received', 'donation confirmation', 'thank you for your',
+    're: fwd:', 'fwd: re:', 're[', // Forwarded chains
+    'receipt', 'confirmation number', 'order confirmed',
+    'newsletter', 'unsubscribe', 'weekly update', 'monthly report',
+    'out of office', 'auto-reply', 'automatic reply'
+  ];
+  
+  const shouldIgnore = IGNORE_PATTERNS.some(p => 
+    contentLower.includes(p) || subjectLower.includes(p)
+  );
+  
+  // Decide action based on urgency WITH safety gates
   let action = 'log_only';
-  // THROTTLED CALLS - Only TRUE emergencies (urgency 6) get calls
-  // Everything else goes to SMS to avoid blowing up Brandon's phone
-  if (urgency >= 6) action = 'call_emergency'; // RE-ENABLED
-  else if (urgency >= 5) action = 'sms_only';
-  else if (urgency >= 4) action = 'sms_only';
-  else if (urgency >= 3) action = 'sms_only';
-  else if (urgency >= 2) action = 'email_only';
-  else action = 'log_only';
+  
+  if (shouldIgnore) {
+    // Routine email - log only, no notification
+    action = 'log_only';
+    console.log('[JUDE] Routine email detected, ignoring:', subjectLower.substring(0, 50));
+  } else if (urgency >= 6 && hasRealEmergency) {
+    // TRUE emergency with proof - call allowed
+    action = 'call_emergency';
+    console.log('[JUDE] REAL emergency detected, calling');
+  } else if (urgency >= 6 && !hasRealEmergency) {
+    // AI said 6 but no proof - downgrade to SMS
+    action = 'sms_only';
+    console.log('[JUDE] AI said urgency 6 but no emergency keywords - downgrading to SMS');
+  } else if (urgency >= 4) {
+    action = 'sms_only';
+  } else if (urgency >= 2) {
+    action = 'email_only';
+  } else {
+    action = 'log_only';
+  }
   
   return {
     action,
