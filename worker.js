@@ -1019,6 +1019,38 @@ const GEMINI_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
 
 // ⬡B:AIR:REACH.CONFIG.ANTHROPIC:CONFIG:models.backup.haiku:AIR→REACH→MODEL:T8:v1.5.0:20260213:a1n2t⬡
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
+// ═══════════════════════════════════════════════════════════
+// GROQ - PRIMARY LLM FOR BACKGROUND (replaces dead Gemini)
+// ⬡B:reach:GROQ_PRIMARY:20260309⬡
+// ═══════════════════════════════════════════════════════════
+async function callGroqPrimary(systemPrompt, userMessage, maxTokens = 600) {
+  const GROQ_KEY = process.env.GROQ_API_KEY;
+  try {
+    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: { 
+        'Authorization': 'Bearer ' + GROQ_KEY,
+        'Content-Type': 'application/json' 
+      },
+      body: JSON.stringify({
+        model: 'llama-3.1-8b-instant',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userMessage }
+        ],
+        max_tokens: maxTokens,
+        temperature: 0.3
+      })
+    });
+    const data = await res.json();
+    return data?.choices?.[0]?.message?.content || '';
+  } catch (err) {
+    console.error('[GROQ PRIMARY] Error:', err.message);
+    return null;
+  }
+}
+
+
 
 // ⬡B:AIR:REACH.CONFIG.GROQ:CONFIG:models.fallback.speed:AIR→REACH→MODEL:T7:v1.5.0:20260213:g1r2q⬡
 const GROQ_KEY = process.env.GROQ_API_KEY;
@@ -1098,7 +1130,7 @@ console.log('══════════════════════�
 console.log('[ABA REACH v2.10.1] FULL HIERARCHY + SIGILS + API ROUTES');
 console.log('[HIERARCHY] L6:AIR > L5:REACH > L4:VOICE,SMS,EMAIL,OMI > L3:VARA,CARA,IMAN,TASTE');
 console.log('[AIR] Hardcoded agents: LUKE, COLE, JUDE, PACK');
-console.log('[AIR] PRIMARY: Gemini Flash 2.0 | BACKUP: Claude Haiku');
+console.log('[AIR] PRIMARY: Groq Llama | BACKUP: Claude Haiku (Gemini DEAD)');
 console.log('[VARA] Voice: ' + ELEVENLABS_VOICE);
 console.log('[SIGILS] ACL 10X format on every block');
 console.log('[API] 9 routes live');
@@ -5603,7 +5635,7 @@ async function AIR_process(userSaid, history, callerIdentity, demoState) {
   
   // ⬡B:AIR:REACH.ORCHESTRATOR.MODEL_SELECT:CODE:routing.model.cascade:AIR→GEMINI|HAIKU|GROQ:T10:v1.5.0:20260213:m1s2l⬡
   console.log('[AIR] Selecting model for mission: ' + missionPackage.missionNumber);
-  console.log('[AIR] Model priority: 1. Gemini Flash, 2. Claude Haiku, 3. Groq');
+  console.log('[AIR] Model priority: 1. Groq (FREE), 2. Claude Haiku (PAID - user only)');
   
   let response = null;
   
@@ -12612,7 +12644,7 @@ httpServer.listen(PORT, '0.0.0.0', () => {
   console.log('═══════════════════════════════════════════════════════════');
   console.log('[AIR] ABA Intellectual Role - ONLINE');
   console.log('[AIR] PRIMARY: Gemini Flash 2.0');
-  console.log('[AIR] BACKUP: Claude Haiku');
+  console.log('[AIR] BACKUP: Claude Haiku (only for user-facing)');
   console.log('[AIR] SPEED FALLBACK: Groq');
   console.log('[LUKE] Listening and Understanding for Knowledge Extraction - READY');
   console.log('[COLE] Context-Oriented Lookup Engine - READY');
