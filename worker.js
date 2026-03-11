@@ -13231,9 +13231,29 @@ async function loopSupaWrite(table, data) {
   } catch (e) { console.error('[AIR-LOOP] Write error:', e.message); return false; }
 }
 
-// ── AIR CALL (server-side, uses existing ANTHROPIC_KEY) ─────────────────────
+// ── AIR CALL - ⬡B:COST_FIX:gemini_first:20260310⬡ ─────────────────────
+// Gemini Flash (FREE) first, Claude Haiku fallback only if Gemini fails
 async function loopAirCall(message, systemPrompt, model) {
-  if (!ANTHROPIC_KEY) { console.warn('[AIR-LOOP] No ANTHROPIC_KEY'); return null; }
+  // TIER 1: Gemini Flash (FREE)
+  if (GEMINI_KEY) {
+    try {
+      const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=' + GEMINI_KEY, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: (systemPrompt || '') + '\n\nUSER: ' + message }] }],
+          generationConfig: { maxOutputTokens: 2000, temperature: 0.3 }
+        })
+      });
+      if (r.ok) {
+        const d = await r.json();
+        const text = d.candidates && d.candidates[0] && d.candidates[0].content && d.candidates[0].content.parts && d.candidates[0].content.parts[0] && d.candidates[0].content.parts[0].text;
+        if (text) return text;
+      }
+    } catch (e) { console.log('[AIR-LOOP] Gemini failed, trying Haiku:', e.message); }
+  }
+  // TIER 2: Claude Haiku (cheap fallback)
+  if (!ANTHROPIC_KEY) { console.warn('[AIR-LOOP] No keys available'); return null; }
   try {
     const r = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -13243,7 +13263,7 @@ async function loopAirCall(message, systemPrompt, model) {
         'anthropic-version': '2023-06-01'
       },
       body: JSON.stringify({
-        model: model || 'claude-haiku-4-5-20251001',
+        model: 'claude-haiku-4-5-20251001',
         max_tokens: 2000,
         system: systemPrompt,
         messages: [{ role: 'user', content: message }]
@@ -13252,7 +13272,7 @@ async function loopAirCall(message, systemPrompt, model) {
     if (!r.ok) throw new Error('API ' + r.status);
     const d = await r.json();
     return (d.content && d.content[0] && d.content[0].text) || '';
-  } catch (e) { console.error('[AIR-LOOP] AI call failed:', e.message); return null; }
+  } catch (e) { console.error('[AIR-LOOP] Haiku also failed:', e.message); return null; }
 }
 
 // ── AGENT TASKS ─────────────────────────────────────────────────────────────
