@@ -3380,7 +3380,30 @@ async function TRIGGER_systemAlert(alert) {
 
 // ⬡B:AIR:REACH.THINK_TANK.DEEP_MODEL:FUNC:model.deep.reasoning:AIR→MODEL:T10:v1.0.0:20260219:d1m1l⬡
 async function callModelDeep(prompt, maxTokens = 2000) {
-  // Use Claude Sonnet for deep reasoning (Think Tank needs quality over speed)
+  // ⬡B:COST_FIX:callModelDeep:gemini_first:20260310⬡
+  // FIXED: Gemini Flash FIRST (FREE), Claude Sonnet as FALLBACK ONLY
+  // Was burning $3-5/day calling Sonnet as primary for ERICA every 30 min
+  if (GEMINI_KEY) {
+    try {
+      const result = await httpsRequest({
+        hostname: 'generativelanguage.googleapis.com',
+        path: '/v1beta/models/gemini-2.0-flash:generateContent?key=' + GEMINI_KEY,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      }, JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { maxOutputTokens: maxTokens, temperature: 0.4 }
+      }));
+      const json = JSON.parse(result.data.toString());
+      if (json.candidates?.[0]?.content?.parts?.[0]?.text) {
+        return json.candidates[0].content.parts[0].text;
+      }
+    } catch (e) {
+      console.log('[THINK TANK] Gemini failed, falling back to Sonnet:', e.message);
+    }
+  }
+  
+  // Fallback to Claude Sonnet (COSTLY - only if Gemini fails)
   if (ANTHROPIC_KEY) {
     try {
       const result = await httpsRequest({
@@ -3402,28 +3425,7 @@ async function callModelDeep(prompt, maxTokens = 2000) {
         return json.content[0].text;
       }
     } catch (e) {
-      console.log('[THINK TANK] Sonnet failed, falling back to Gemini:', e.message);
-    }
-  }
-  
-  // Fallback to Gemini Flash for resilience
-  if (GEMINI_KEY) {
-    try {
-      const result = await httpsRequest({
-        hostname: 'generativelanguage.googleapis.com',
-        path: '/v1beta/models/gemini-2.0-flash:generateContent?key=' + GEMINI_KEY,
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
-      }, JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { maxOutputTokens: maxTokens, temperature: 0.4 }
-      }));
-      const json = JSON.parse(result.data.toString());
-      if (json.candidates?.[0]?.content?.parts?.[0]?.text) {
-        return json.candidates[0].content.parts[0].text;
-      }
-    } catch (e) {
-      console.log('[THINK TANK] Gemini also failed:', e.message);
+      console.log('[THINK TANK] Sonnet also failed:', e.message);
     }
   }
 
@@ -4026,7 +4028,7 @@ async function GRIT_testEndpoints() {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 let ERICA_LAST_RUN = 0;
-const ERICA_COOLDOWN = 30 * 60 * 1000; // 30 min cooldown between runs
+const ERICA_COOLDOWN = 24 * 60 * 60 * 1000; // ⬡B:COST_FIX:erica:24hr_cooldown:20260310⬡ 24 HOURS - was 30 min burning Sonnet credits
 
 async function ERICA_selfBuild() {
   const now = Date.now();
