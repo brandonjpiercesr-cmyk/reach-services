@@ -7,11 +7,11 @@ const { createClient } = require("@supabase/supabase-js");
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "https://htlxjkbrstpwwtzsbyvb.supabase.co";
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
-// ⬡B:LUKE:GEMINI_FLASH_2:20260314⬡ - Migrated from Claude to Gemini Flash 2.0 (cost fix)
+// ⬡B:LUKE:GEMINI_2_5_FLASH:20260314⬡ - Migrated from Claude to Gemini 2.5 Flash (cost fix)
 const GEMINI_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`;
+const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`;
 
 const LUKE_SYSTEM = `You are ABA AGENT LUKE (Listening Utility Knowledge Extractor).
 Your job is to extract actionable items from transcripts.
