@@ -11410,20 +11410,29 @@ We Are All ABA.`;
               job.emailDate = msg.date;
               allJobs.push(job);
               
-              // Store in brain
-              if (SUPABASE_KEY) {
+              // Route through ABABASE - let AIR/JOBA handle assignment and materials
+              try {
                 await httpsRequest({
-                  hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-                  path: '/rest/v1/aba_memory', method: 'POST',
-                  headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' }
+                  hostname: 'abacia-services.onrender.com',
+                  path: '/api/air/process',
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' }
                 }, JSON.stringify({
-                  content: JSON.stringify(job),
-                  memory_type: 'job_posting',
-                  importance: 7,
-                  is_system: false,
-                  source: 'idealist_backfill_' + new Date().toISOString().split('T')[0],
-                  tags: ['jobs', 'idealist', 'backfill', job.employment_type?.toLowerCase()?.includes('contract') ? 'contract' : 'full_time']
+                  message: 'New Idealist job from backfill. Use the awa_create_job_from_scrape tool. Title: ' + (job.title || 'Unknown') + '. Organization: ' + (job.company || 'Unknown') + '. URL: ' + (job.url || '') + '. Source: idealist_backfill. Salary: ' + (job.salary || '') + '. Location: ' + (job.location || '') + '. Remote: ' + (job.remote || '') + '. Deadline: ' + (job.deadline || '') + '. Description: ' + (job.description || '').substring(0, 300),
+                  user_id: 'brandon',
+                  channel: 'iman_idealist_backfill',
+                  context: {
+                    action: 'new_job_found',
+                    source: 'idealist_backfill',
+                    url: job.url,
+                    title: job.title,
+                    company: job.company,
+                    verified: !!(job.title && job.company)
+                  }
                 }));
+                console.log('[BACKFILL] Routed to ABABASE: ' + (job.title || 'Unknown'));
+              } catch (routeErr) {
+                console.error('[BACKFILL] ABABASE route error:', routeErr.message);
               }
             }
           } catch(e) { errors.push({ url, error: e.message }); }
