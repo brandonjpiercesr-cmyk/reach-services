@@ -44,11 +44,11 @@ class CostTracker {
   }
 
   static PRICING = {
-    'claude-sonnet-4-5-20250929': { input: 3.00, output: 15.00, cacheRead: 0.30, cacheWrite: 3.75 },
+    'claude-sonnet-4-6-20260217': { input: 3.00, output: 15.00, cacheRead: 0.30, cacheWrite: 3.75 },
     'claude-haiku-4-5-20251001': { input: 0.25, output: 1.25, cacheRead: 0.03, cacheWrite: 0.30 }
   };
 
-  add(usage, model = 'claude-sonnet-4-5-20250929') {
+  add(usage, model = 'claude-sonnet-4-6-20260217') {
     this.inputTokens += usage.input_tokens || 0;
     this.outputTokens += usage.output_tokens || 0;
     this.cacheReadTokens += usage.cache_read_input_tokens || 0;
@@ -57,7 +57,7 @@ class CostTracker {
   }
   
   estimate() {
-    const pricing = CostTracker.PRICING[this.model] || CostTracker.PRICING['claude-sonnet-4-5-20250929'];
+    const pricing = CostTracker.PRICING[this.model] || CostTracker.PRICING['claude-sonnet-4-6-20260217'];
     const inputCost = (this.inputTokens / 1_000_000) * pricing.input;
     const outputCost = (this.outputTokens / 1_000_000) * pricing.output;
     const cacheReadCost = (this.cacheReadTokens / 1_000_000) * pricing.cacheRead;
@@ -74,7 +74,7 @@ class CostTracker {
     this.outputTokens = 0;
     this.cacheReadTokens = 0;
     this.cacheWriteTokens = 0;
-    this.model = 'claude-sonnet-4-5-20250929';
+    this.model = 'claude-sonnet-4-6-20260217';
   }
 }
 
@@ -168,7 +168,7 @@ async function airProcess({
 
     try {
       const response = await anthropic.messages.create({
-        model: 'claude-sonnet-4-5-20250929',
+        model: 'claude-sonnet-4-6-20260217',
         max_tokens: 4096,
         system: [
           {
