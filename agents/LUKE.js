@@ -2,15 +2,16 @@
 // Extracts tasks, action items, and key info from transcripts
 // v1.0.0 - Feb 17, 2026
 
-const Anthropic = require("@anthropic-ai/sdk");
+const fetch = require("node-fetch");
 const { createClient } = require("@supabase/supabase-js");
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "https://htlxjkbrstpwwtzsbyvb.supabase.co";
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
-const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
+// ⬡B:LUKE:GEMINI_FLASH_2:20260314⬡ - Migrated from Claude to Gemini Flash 2.0 (cost fix)
+const GEMINI_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-const anthropic = new Anthropic({ apiKey: ANTHROPIC_KEY });
+const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`;
 
 const LUKE_SYSTEM = `You are ABA AGENT LUKE (Listening Utility Knowledge Extractor).
 Your job is to extract actionable items from transcripts.
@@ -40,19 +41,17 @@ Return JSON format:
 
 async function extractFromTranscript(transcript, source = "unknown") {
   try {
-    const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-5-20250929",
-      max_tokens: 4000,
-      system: LUKE_SYSTEM,
-      messages: [
-        {
-          role: "user",
-          content: `Extract all actionable items from this transcript:\n\n${transcript}\n\nSource: ${source}`
-        }
-      ]
+    const geminiRes = await fetch(GEMINI_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: LUKE_SYSTEM }] },
+        contents: [{ role: 'user', parts: [{ text: `Extract all actionable items from this transcript:\n\n${transcript}\n\nSource: ${source}` }] }],
+        generationConfig: { maxOutputTokens: 4000 }
+      })
     });
-
-    const content = response.content[0].text;
+    const geminiData = await geminiRes.json();
+    const content = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || '';
     
     // Parse JSON from response
     let extraction;
