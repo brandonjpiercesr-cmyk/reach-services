@@ -208,7 +208,7 @@ async function processWithAbabse(request) {
     actions: result.actionsExecuted || [],
     
     // Flattened fields for worker.js
-    model: 'claude-sonnet-4-5-20250929',
+    model: 'claude-sonnet-4-6-20260217',
     tokensUsed: result.metadata?.tokens ? 
       (result.metadata.tokens.input + result.metadata.tokens.output) : 0,
     cost: result.metadata?.cost?.total || 0,
