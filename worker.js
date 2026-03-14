@@ -8632,6 +8632,29 @@ Respond as this agent specifically — stay in character.`;
           // Check if ABACIA returned a direct response
           if (abaciaData.response) {
             responseText = abaciaData.response;
+            
+            // ⬡B:VOICE:REVIEW_GATE_STRIP:20260314⬡ — Strip review analysis noise
+            // ABABASE review gate prepends "FAIL: ...\n---\nCorrected response:\n..."
+            // This internal QA text must NEVER be spoken aloud on phone calls
+            if (responseText.includes('Corrected response:') || responseText.includes('Corrected Response:')) {
+              const correctedMatch = responseText.match(/Corrected [Rr]esponse:\s*\n?([\s\S]+)/);
+              if (correctedMatch) {
+                responseText = correctedMatch[1].trim();
+                console.log('[AIR VOICE TOOL] Stripped review gate text, using corrected response');
+              }
+            } else if (responseText.match(/^(FAIL|PASS|The tool result|The response (includes|invents|fabricates)|Additionally|None of this|Looking at this)/)) {
+              // Response starts with review analysis but no "Corrected response:" section
+              // Try to find the actual response after "---" separator
+              const dashSplit = responseText.split(/\n---\n/);
+              if (dashSplit.length > 1) {
+                responseText = dashSplit[dashSplit.length - 1].trim();
+                console.log('[AIR VOICE TOOL] Stripped review prefix via --- separator');
+              }
+            }
+            // Also strip any remaining numbered review items at the start
+            responseText = responseText.replace(/^\d+\.\s+"[^"]+"\s*[—–-]\s*(not in|invented|fabricated|hallucinated)[^\n]*\n*/gm, '').trim();
+            // Strip markdown formatting that sounds bad when spoken
+            responseText = responseText.replace(/\*\*/g, '').replace(/\|\s*[#\-]+\s*\|[^\n]*/g, '').trim();
           }
           // Check if any agent returned a conversational response
           else if (abaciaData.agents) {
