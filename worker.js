@@ -4483,6 +4483,12 @@ async function generateProgressReport(pulseId) {
 // CALL THROTTLING - Prevent ABA from blowing up Brandon's phone
 // ═══════════════════════════════════════════════════════════════════════════════
 const CALL_COOLDOWN = new Map(); // phone -> last call timestamp
+
+// ⬡B:911_FIX:IDEALIST_COOLDOWN:20260314⬡
+// 12-hour cooldown for Idealist processing - prevents token burn
+// Idealist sends ONE digest per day, no need for more
+let IDEALIST_LAST_BATCH = 0;
+const IDEALIST_COOLDOWN_MS = 12 * 60 * 60 * 1000; // 12 hours
 const CALL_COOLDOWN_MINUTES = 30; // Don't call same person within 30 min
 const MAX_CALLS_PER_HOUR = 3; // Max 3 calls per hour total
 const CALL_HISTORY = []; // timestamps of all calls
@@ -4651,8 +4657,17 @@ async function checkEmails(pulseId) {
       
       // v2.6.8-FORGE-S10 | IMAN Idealist auto-scan in polling loop
       // Brandon: IMAN reads Claudette's inbox, finds Idealist emails, auto-seeds jobs
+      // ⬡B:911_FIX:IDEALIST_BATCH:20260314⬡ - BATCH ALL JOBS INTO ONE CALL
       const isIdealist = from.includes('idealist.org') || combined.includes('idealist');
       if (isIdealist) {
+        // ⬡B:911_FIX:COOLDOWN_CHECK:20260314⬡
+        // 12-hour cooldown - Idealist sends ONE digest per day
+        const now = Date.now();
+        if (now - IDEALIST_LAST_BATCH < IDEALIST_COOLDOWN_MS) {
+          console.log(`[PULSE:IMAN] Idealist cooldown active. Hours remaining: ${Math.ceil((IDEALIST_COOLDOWN_MS - (now - IDEALIST_LAST_BATCH)) / 3600000)}`);
+          continue;
+        }
+        
         const idealistKey = `idealist_poll_${msg.id}`;
         if (CALL_COOLDOWN.has(idealistKey)) continue;
         CALL_COOLDOWN.set(idealistKey, Date.now());
@@ -4679,52 +4694,52 @@ async function checkEmails(pulseId) {
             }
           }
           
-          // ⬡B:reach.unify:FIX:route_to_ababase:v1.0:20260314⬡
-          // REACH is SKIN - never writes to brain directly
-          // Route all scraped jobs through ABABASE /api/air/process
-          // ABABASE handles: dedup, JOBA assignment, cover letter, resume, awa_job write
-          let seededCount = 0;
-          for (const jobUrl of jobUrls) {
-            const slug = jobUrl.split('/').pop();
-            const titleClean = slug.replace(/^[a-f0-9]{20}-/, '').replace(/-/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+          // ⬡B:911_FIX:BATCH_ALL_JOBS:20260314⬡
+          // Route ALL jobs in ONE ABABASE call instead of N separate calls
+          // This cuts token usage from N*60k to 1*60k = 99% reduction
+          if (jobUrls.size > 0) {
+            const jobList = Array.from(jobUrls).map(url => {
+              const slug = url.split('/').pop();
+              const titleClean = slug.replace(/^[a-f0-9]{20}-/, '').replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+              return { url, title: titleClean };
+            });
             
             try {
-              // Call ABABASE - let AIR/JOBA handle assignment and materials
+              const batchMessage = `IMAN IDEALIST BATCH: ${jobList.length} jobs found in email "${subject}". Process each using awa_create_job_from_scrape tool. Source: idealist.\n\nJOBS:\n${jobList.map((j, i) => `${i+1}. Title: ${j.title}\n   URL: ${j.url}`).join('\n\n')}`;
+              
               const ababaseResult = await httpsRequest({
                 hostname: 'abacia-services.onrender.com',
                 path: '/api/air/process',
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' }
               }, JSON.stringify({
-                message: 'New Idealist job found. Use the awa_create_job_from_scrape tool to process it. URL: ' + jobUrl + '. Title: ' + titleClean + '. Source: idealist.',
+                message: batchMessage,
                 user_id: 'brandon',
-                channel: 'iman_idealist',
+                channel: 'iman_idealist_batch',
                 context: {
-                  action: 'new_job_found',
+                  action: 'batch_jobs_found',
                   source: 'idealist',
-                  url: jobUrl,
-                  title: titleClean,
+                  job_count: jobList.length,
+                  jobs: jobList,
                   email_id: msg.id,
                   email_subject: subject
                 }
               }));
               
               const result = JSON.parse(ababaseResult.data.toString());
-              if (result && !result.error) seededCount++;
-              console.log('[PULSE:IMAN] ABABASE processed: ' + titleClean + ' - ' + (result.error || 'OK'));
+              console.log('[PULSE:IMAN] BATCHED ' + jobList.length + ' jobs to ABABASE: ' + (result.error || 'OK'));
+              
+              // Update cooldown - prevents reprocessing for 12 hours
+              IDEALIST_LAST_BATCH = Date.now();
+              
             } catch (ababaseErr) {
-              console.error('[PULSE:IMAN] ABABASE call failed for ' + titleClean + ': ' + ababaseErr.message);
+              console.error('[PULSE:IMAN] ABABASE batch call failed: ' + ababaseErr.message);
             }
-          }
-          
-          if (seededCount > 0) {
-            console.log('[PULSE:IMAN] Routed ' + seededCount + ' new Idealist jobs through ABABASE');
           }
         } catch (idealistErr) {
           console.error('[PULSE:IMAN] Idealist parse error:', idealistErr.message);
         }
-      }
-    }
+      }    }
   } catch (e) {
     console.error('[PULSE:EMAIL] Error:', e.message);
   }
@@ -8599,13 +8614,11 @@ Respond as this agent specifically — stay in character.`;
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            message: userMessage,
-            userId: callerIdentity?.name === 'Brandon' ? 'brandon' : 'unknown',
-            channel: 'elevenlabs_voice',
+            query: userMessage,
             caller: callerIdentity,
             source: 'elevenlabs_voice',
             conversation_id: conversationId,
-            conversationHistory: conversationHistory
+            conversation_history: conversationHistory  // NEW: Send history for context
           })
         });
         
@@ -10417,6 +10430,14 @@ RULES:
                           emailBody.includes('idealist.org');
         
         if (isIdealist && emailBody) {
+          // ⬡B:911_FIX:WEBHOOK_COOLDOWN:20260314⬡
+          // 12-hour cooldown - skip if we recently processed Idealist
+          const now = Date.now();
+          if (now - IDEALIST_LAST_BATCH < IDEALIST_COOLDOWN_MS) {
+            console.log('[Nylas Webhook] Idealist cooldown active. Skipping.');
+            results.push({ subject, skipped: true, reason: 'cooldown_active' });
+            continue;
+          }
           // ═══════ AUTO-PARSE IDEALIST EMAIL ═══════
           // Extract URLs
           const urlRegex = /https?:\/\/www\.idealist\.org\/[^\s"'<>)\]]+/g;
@@ -10465,41 +10486,38 @@ RULES:
             }
           }
           
-          // ⬡B:reach.unify:FIX:nylas_webhook_to_ababase:v1.0:20260314⬡
-          // REACH is SKIN - route all scraped jobs through ABABASE
+          // ⬡B:911_FIX:WEBHOOK_BATCH:20260314⬡
+          // Route ALL scraped jobs in ONE ABABASE call (not N separate calls)
           if (jobs.length > 0) {
-            let routedCount = 0;
-            for (const job of jobs) {
-              try {
-                // Route each scraped job through ABABASE AIR
-                // ABABASE handles: dedup, JOBA assignment, cover letter, resume, awa_job write
-                await httpsRequest({
-                  hostname: 'abacia-services.onrender.com',
-                  path: '/api/air/process',
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' }
-                }, JSON.stringify({
-                  message: 'New Idealist job scraped from webhook. Use the awa_create_job_from_scrape tool. Title: ' + (job.title || 'Unknown') + '. Organization: ' + (job.company || 'Unknown') + '. URL: ' + (job.url || '') + '. Source: idealist. Salary: ' + (job.salary || '') + '. Location: ' + (job.location || '') + '. Remote: ' + (job.remote || '') + '. Deadline: ' + (job.deadline || '') + '. Description: ' + (job.description || '').substring(0, 300) + '. Requirements: ' + (job.requirements || '').substring(0, 300),
-                  user_id: 'brandon',
-                  channel: 'iman_idealist_webhook',
-                  context: {
-                    action: 'new_job_found',
-                    source: 'idealist',
-                    url: job.url,
-                    title: job.title,
-                    company: job.company,
-                    verified: job.verified,
-                    email_subject: subject
-                  }
-                }));
-                routedCount++;
-                console.log('[Nylas Webhook] Routed to ABABASE: ' + (job.title || 'Unknown'));
-              } catch (routeErr) {
-                console.error('[Nylas Webhook] ABABASE route error:', routeErr.message);
-              }
+            try {
+              const batchMessage = `IMAN IDEALIST WEBHOOK BATCH: ${jobs.length} jobs scraped. Process each using awa_create_job_from_scrape tool. Source: idealist.\n\nJOBS:\n${jobs.map((j, i) => `${i+1}. Title: ${j.title || 'Unknown'}\n   Organization: ${j.company || 'Unknown'}\n   URL: ${j.url}\n   Location: ${j.location || ''}\n   Salary: ${j.salary || ''}\n   Remote: ${j.remote || ''}`).join('\n\n')}`;
+              
+              await httpsRequest({
+                hostname: 'abacia-services.onrender.com',
+                path: '/api/air/process',
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+              }, JSON.stringify({
+                message: batchMessage,
+                user_id: 'brandon',
+                channel: 'iman_idealist_webhook_batch',
+                context: {
+                  action: 'batch_jobs_scraped',
+                  source: 'idealist',
+                  job_count: jobs.length,
+                  jobs: jobs,
+                  email_subject: subject
+                }
+              }));
+              
+              console.log('[Nylas Webhook] BATCHED ' + jobs.length + ' jobs to ABABASE');
+              
+              // Update cooldown - prevents reprocessing for 12 hours
+              IDEALIST_LAST_BATCH = Date.now();
+              
+            } catch (routeErr) {
+              console.error('[Nylas Webhook] ABABASE batch route error:', routeErr.message);
             }
-            
-            console.log('[Nylas Webhook] Routed ' + routedCount + '/' + jobs.length + ' jobs through ABABASE');
             
             // Deadline escalation still triggers directly (already routes to AIR)
             const now = new Date();
@@ -13608,5 +13626,6 @@ setTimeout(runAutonomousLoop, 30000);
   // RE-ENABLED WITH GEMINI FLASH (FREE)
   setInterval(runAutonomousLoop, LOOP_INTERVAL);
   console.log('[AUTONOMOUS] DISABLED - Loop disabled to save costs');
+
 
 
