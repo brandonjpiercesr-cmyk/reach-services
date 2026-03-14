@@ -4679,52 +4679,46 @@ async function checkEmails(pulseId) {
             }
           }
           
+          // ⬡B:reach.unify:FIX:route_to_ababase:v1.0:20260314⬡
+          // REACH is SKIN - never writes to brain directly
+          // Route all scraped jobs through ABABASE /api/air/process
+          // ABABASE handles: dedup, JOBA assignment, cover letter, resume, awa_job write
           let seededCount = 0;
           for (const jobUrl of jobUrls) {
             const slug = jobUrl.split('/').pop();
             const titleClean = slug.replace(/^[a-f0-9]{20}-/, '').replace(/-/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
             
-            // Dedup check
-            const existing = await httpsRequest({
-              hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-              path: '/rest/v1/aba_memory?memory_type=eq.parsed_job&content=ilike.*' + encodeURIComponent(slug.substring(0, 30)) + '*&limit=1',
-              method: 'GET',
-              headers: { 'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY, 'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY) }
-            });
-            if (JSON.parse(existing.data.toString()).length > 0) continue;
-            
-            await httpsRequest({
-              hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-              path: '/rest/v1/aba_memory',
-              method: 'POST',
-              headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' }
-            }, JSON.stringify({
-              content: JSON.stringify({ title: titleClean, url: jobUrl, source: 'idealist', source_email: 'claudette@globalmajoritygroup.com', status: 'new', auto_seeded: true, seeded_at: new Date().toISOString().split('T')[0] }),
-              memory_type: 'parsed_job',
-              categories: ['jobs', 'idealist', 'claudette', 'automated'],
-              importance: 6, is_system: true,
-              source: 'iman_poll_' + new Date().toISOString().split('T')[0],
-              tags: ['parsed_job', 'idealist', 'claudette', 'new', 'automated']
-            }));
-            seededCount++;
+            try {
+              // Call ABABASE - let AIR/JOBA handle assignment and materials
+              const ababaseResult = await httpsRequest({
+                hostname: 'abacia-services.onrender.com',
+                path: '/api/air/process',
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+              }, JSON.stringify({
+                message: 'New Idealist job found. Use the awa_create_job_from_scrape tool to process it. URL: ' + jobUrl + '. Title: ' + titleClean + '. Source: idealist.',
+                user_id: 'brandon',
+                channel: 'iman_idealist',
+                context: {
+                  action: 'new_job_found',
+                  source: 'idealist',
+                  url: jobUrl,
+                  title: titleClean,
+                  email_id: msg.id,
+                  email_subject: subject
+                }
+              }));
+              
+              const result = JSON.parse(ababaseResult.data.toString());
+              if (result && !result.error) seededCount++;
+              console.log('[PULSE:IMAN] ABABASE processed: ' + titleClean + ' - ' + (result.error || 'OK'));
+            } catch (ababaseErr) {
+              console.error('[PULSE:IMAN] ABABASE call failed for ' + titleClean + ': ' + ababaseErr.message);
+            }
           }
           
           if (seededCount > 0) {
-            console.log('[PULSE:IMAN] Seeded ' + seededCount + ' new Idealist jobs');
-            // Store to Command Center feed
-            await httpsRequest({
-              hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-              path: '/rest/v1/aba_memory',
-              method: 'POST',
-              headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' }
-            }, JSON.stringify({
-              content: '[COMMAND_CENTER] IMAN*AIR*idealist_seeded: Auto-seeded ' + seededCount + ' new jobs from Idealist email: "' + subject + '"',
-              memory_type: 'system',
-              categories: ['command_center', 'iman', 'jobs'],
-              importance: 6, is_system: true,
-              source: 'iman_idealist_' + new Date().toISOString().split('T')[0],
-              tags: ['command_center', 'iman', 'idealist', 'jobs']
-            }));
+            console.log('[PULSE:IMAN] Routed ' + seededCount + ' new Idealist jobs through ABABASE');
           }
         } catch (idealistErr) {
           console.error('[PULSE:IMAN] Idealist parse error:', idealistErr.message);
@@ -4750,7 +4744,7 @@ async function checkDeadlines(pulseId) {
     // Check job deadlines in brain
     const jobsResult = await httpsRequest({
       hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-      path: '/rest/v1/aba_memory?memory_type=eq.parsed_job&order=created_at.desc&limit=50',
+      path: '/rest/v1/aba_memory?memory_type=eq.awa_job&order=created_at.desc&limit=50',
       method: 'GET',
       headers: {
         'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
@@ -10469,57 +10463,43 @@ RULES:
             }
           }
           
-          // ═══════ STORE IN SUPABASE BRAIN ═══════
-          if (SUPABASE_KEY && jobs.length > 0) {
+          // ⬡B:reach.unify:FIX:nylas_webhook_to_ababase:v1.0:20260314⬡
+          // REACH is SKIN - route all scraped jobs through ABABASE
+          if (jobs.length > 0) {
+            let routedCount = 0;
             for (const job of jobs) {
               try {
+                // Route each scraped job through ABABASE AIR
+                // ABABASE handles: dedup, JOBA assignment, cover letter, resume, awa_job write
                 await httpsRequest({
-                  hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-                  path: '/rest/v1/aba_memory',
+                  hostname: 'abacia-services.onrender.com',
+                  path: '/api/air/process',
                   method: 'POST',
-                  headers: {
-                    'apikey': SUPABASE_KEY,
-                    'Authorization': 'Bearer ' + SUPABASE_KEY,
-                    'Content-Type': 'application/json',
-                    'Prefer': 'return=minimal'
-                  }
+                  headers: { 'Content-Type': 'application/json' }
                 }, JSON.stringify({
-                  content: JSON.stringify(job),
-                  memory_type: 'parsed_job',
-                  categories: ['jobs', 'idealist', 'claudette', 'automated'],
-                  importance: 6,
-                  tags: ['parsed_job', 'idealist', 'scout', 'new', 'automated'],
-                  source: 'nylas_webhook_' + new Date().toISOString().split('T')[0]
+                  message: 'New Idealist job scraped from webhook. Use the awa_create_job_from_scrape tool. Title: ' + (job.title || 'Unknown') + '. Organization: ' + (job.company || 'Unknown') + '. URL: ' + (job.url || '') + '. Source: idealist. Salary: ' + (job.salary || '') + '. Location: ' + (job.location || '') + '. Remote: ' + (job.remote || '') + '. Deadline: ' + (job.deadline || '') + '. Description: ' + (job.description || '').substring(0, 300) + '. Requirements: ' + (job.requirements || '').substring(0, 300),
+                  user_id: 'brandon',
+                  channel: 'iman_idealist_webhook',
+                  context: {
+                    action: 'new_job_found',
+                    source: 'idealist',
+                    url: job.url,
+                    title: job.title,
+                    company: job.company,
+                    verified: job.verified,
+                    email_subject: subject
+                  }
                 }));
-              } catch (storeErr) {
-                console.error('[Nylas Webhook] Store error:', storeErr.message);
+                routedCount++;
+                console.log('[Nylas Webhook] Routed to ABABASE: ' + (job.title || 'Unknown'));
+              } catch (routeErr) {
+                console.error('[Nylas Webhook] ABABASE route error:', routeErr.message);
               }
             }
             
-            // ═══════ LOG ACTIVITY FOR VARA ═══════
-            try {
-              await httpsRequest({
-                hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-                path: '/rest/v1/aba_memory',
-                method: 'POST',
-                headers: {
-                  'apikey': SUPABASE_KEY,
-                  'Authorization': 'Bearer ' + SUPABASE_KEY,
-                  'Content-Type': 'application/json',
-                  'Prefer': 'return=minimal'
-                }
-              }, JSON.stringify({
-                content: `CLAUDETTE found ${jobs.length} new jobs from Idealist. Subject: "${subject}". Companies: ${jobs.map(j=>j.company).filter(Boolean).join(', ')}. ${jobs.filter(j=>j.verified).length} verified.`,
-                memory_type: 'system',
-                categories: ['vara', 'notification', 'jobs'],
-                importance: 7,
-                tags: ['vara_speak', 'claudette', 'jobs', 'idealist'],
-                source: 'nylas_webhook_vara_' + Date.now()
-              }));
-            } catch (varaErr) { /* non-critical */ }
+            console.log('[Nylas Webhook] Routed ' + routedCount + '/' + jobs.length + ' jobs through ABABASE');
             
-            // ═══════ CHECK FOR URGENT JOB DEADLINES → TRIGGER AIR ═══════
-            // If any job has a deadline within 3 days, trigger escalation
+            // Deadline escalation still triggers directly (already routes to AIR)
             const now = new Date();
             const threeDaysFromNow = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
             
@@ -10591,12 +10571,12 @@ RULES:
       const status = url.searchParams.get('status') || 'new';
       const limit = parseInt(url.searchParams.get('limit') || '50');
       
-      const supaUrl = `https://htlxjkbrstpwwtzsbyvb.supabase.co/rest/v1/aba_memory?memory_type=eq.parsed_job&order=created_at.desc&limit=${limit}`;
+      const supaUrl = `https://htlxjkbrstpwwtzsbyvb.supabase.co/rest/v1/aba_memory?memory_type=eq.awa_job&order=created_at.desc&limit=${limit}`;
       const supaKey = SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0bHhqa2Jyc3Rwd3d0enNieXZiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA1MzI4MjEsImV4cCI6MjA4NjEwODgyMX0.MOgNYkezWpgxTO3ZHd0omZ0WLJOOR-tL7hONXWG9eBw';
       
       const result = await httpsRequest({
         hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-        path: '/rest/v1/aba_memory?memory_type=eq.parsed_job&order=created_at.desc&limit=' + limit,
+        path: '/rest/v1/aba_memory?memory_type=eq.awa_job&order=created_at.desc&limit=' + limit,
         method: 'GET',
         headers: {
           'apikey': supaKey,
@@ -13439,10 +13419,10 @@ async function loopHunterScan() {
   const jobs = await loopSupaRead('aba_memory',
     'memory_type=eq.system&content=ilike.*new_job*&tags=cs.{unprocessed}&limit=10'
   );
-  // v2.6.8-FORGE-S11 | HUNTER also checks Idealist auto-seeded parsed_jobs
-  // Brandon: IMAN seeds jobs from Claudette's Idealist emails, HUNTER processes them
+  // v2.6.8-FORGE-S11 | HUNTER checks awa_job for items needing enrichment
+  // Jobs now created via ABABASE as awa_job; parsed_job is legacy
   const idealistJobs = await loopSupaRead('aba_memory',
-    'memory_type=eq.parsed_job&tags=cs.{needs_scrape}&limit=10'
+    'memory_type=eq.awa_job&tags=cs.{needs_scrape}&limit=10'
   );
   const total = jobs.length + idealistJobs.length;
   if (total > 0) {
