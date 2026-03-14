@@ -8614,11 +8614,13 @@ Respond as this agent specifically — stay in character.`;
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            query: userMessage,
+            message: userMessage,
+            userId: callerIdentity?.name === 'Brandon' ? 'brandon' : 'unknown',
+            channel: 'elevenlabs_voice',
             caller: callerIdentity,
             source: 'elevenlabs_voice',
             conversation_id: conversationId,
-            conversation_history: conversationHistory  // NEW: Send history for context
+            conversationHistory: conversationHistory
           })
         });
         
