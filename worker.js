@@ -8609,31 +8609,52 @@ Respond as this agent specifically — stay in character.`;
       
       let responseText = "I understand. Let me help you with that.";
       
-      // ⬡B:VOICE:HAM_RESOLVE:20260314⬡ — Resolve userId from caller identity
-      // Map callerIdentity name to HAM userId for data isolation
-      // No hardcoded Brandon check — works for any known HAM
+      // ⬡B:VOICE:HAM_RESOLVE_DYNAMIC:20260315⬡ — Resolve userId from brain, not hardcoded map
       let resolvedUserId = 'unknown';
       const callerName = (callerIdentity?.name || '').toLowerCase().trim();
-      const HAM_NAME_MAP = {
-        'brandon': 'brandon', 'brandon pierce': 'brandon',
-        'bethany': 'bethany', 'bethany pierce': 'bethany', 'beth': 'bethany',
-        'eric': 'eric', 'dr. eric r. lane sr.': 'eric', 'eric lane': 'eric', 'dr. lane': 'eric',
-        'bj': 'bj', 'bryan j. pierce jr.': 'bj', 'bryan pierce': 'bj', 'bryan': 'bj',
-        'raquel': 'raquel', 'raquel britton': 'raquel',
-        'cj': 'cj', 'c.j. moore': 'cj', 'cj moore': 'cj',
-        'vante': 'vante', 'devante': 'vante', 'devante shields': 'vante',
-        'dwayne': 'dwayne', 'dwayne murray': 'dwayne', 'dwayne murray jr.': 'dwayne'
-      };
-      resolvedUserId = HAM_NAME_MAP[callerName] || 'unknown';
-      if (resolvedUserId === 'unknown' && callerName && callerName !== 'caller') {
-        for (const [key, val] of Object.entries(HAM_NAME_MAP)) {
-          if (callerName.includes(key) || key.includes(callerName)) {
-            resolvedUserId = val;
-            break;
+      const callerPhone = callerIdentity?.phone || callerNumber || '';
+      
+      // Query brain for ham.profile.* entries and match by phone or name
+      try {
+        const hamProfilesRes = await httpsRequest({
+          hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+          path: '/rest/v1/aba_memory?memory_type=eq.ham_profile&select=source,content&limit=20',
+          method: 'GET',
+          headers: { 'apikey': SUPABASE_ANON, 'Authorization': 'Bearer ' + SUPABASE_ANON }
+        });
+        
+        if (hamProfilesRes.status === 200) {
+          const profiles = JSON.parse(hamProfilesRes.data.toString());
+          const callerDigits = (callerPhone || '').replace(/[^0-9]/g, '').slice(-10);
+          
+          for (const p of profiles) {
+            const hamId = (p.source || '').replace('ham.profile.', '');
+            let profile = p.content;
+            if (typeof profile === 'string') { try { profile = JSON.parse(profile); } catch { continue; } }
+            
+            // Match by phone first (most reliable)
+            const profileDigits = (profile.phone || '').replace(/[^0-9]/g, '').slice(-10);
+            if (callerDigits && profileDigits && callerDigits === profileDigits) {
+              resolvedUserId = hamId;
+              console.log('[AIR VOICE TOOL] Matched by phone: ' + callerPhone + ' → ' + hamId + ' (' + profile.name + ')');
+              break;
+            }
+            
+            // Match by name
+            const profileName = (profile.name || '').toLowerCase();
+            const firstName = profileName.split(' ')[0];
+            if (callerName && (callerName === firstName || callerName === profileName || callerName === hamId || profileName.includes(callerName))) {
+              resolvedUserId = hamId;
+              console.log('[AIR VOICE TOOL] Matched by name: ' + callerName + ' → ' + hamId);
+              break;
+            }
           }
         }
+      } catch (e) {
+        console.log('[AIR VOICE TOOL] Brain profile lookup error: ' + e.message);
       }
-      console.log('[AIR VOICE TOOL] Resolved userId:', resolvedUserId, 'from callerName:', callerName);
+      
+      console.log('[AIR VOICE TOOL] Resolved userId:', resolvedUserId, 'from callerName:', callerName, 'phone:', callerPhone);
       
       try {
         const abaciaResult = await fetch('https://abacia-services.onrender.com/api/air/process', {
