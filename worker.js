@@ -8609,13 +8609,39 @@ Respond as this agent specifically — stay in character.`;
       
       let responseText = "I understand. Let me help you with that.";
       
+      // ⬡B:VOICE:HAM_RESOLVE:20260314⬡ — Resolve userId from caller identity
+      // Map callerIdentity name to HAM userId for data isolation
+      // No hardcoded Brandon check — works for any known HAM
+      let resolvedUserId = 'unknown';
+      const callerName = (callerIdentity?.name || '').toLowerCase().trim();
+      const HAM_NAME_MAP = {
+        'brandon': 'brandon', 'brandon pierce': 'brandon',
+        'bethany': 'bethany', 'bethany pierce': 'bethany', 'beth': 'bethany',
+        'eric': 'eric', 'dr. eric r. lane sr.': 'eric', 'eric lane': 'eric', 'dr. lane': 'eric',
+        'bj': 'bj', 'bryan j. pierce jr.': 'bj', 'bryan pierce': 'bj', 'bryan': 'bj',
+        'raquel': 'raquel', 'raquel britton': 'raquel',
+        'cj': 'cj', 'c.j. moore': 'cj', 'cj moore': 'cj',
+        'vante': 'vante', 'devante': 'vante', 'devante shields': 'vante',
+        'dwayne': 'dwayne', 'dwayne murray': 'dwayne', 'dwayne murray jr.': 'dwayne'
+      };
+      resolvedUserId = HAM_NAME_MAP[callerName] || 'unknown';
+      if (resolvedUserId === 'unknown' && callerName && callerName !== 'caller') {
+        for (const [key, val] of Object.entries(HAM_NAME_MAP)) {
+          if (callerName.includes(key) || key.includes(callerName)) {
+            resolvedUserId = val;
+            break;
+          }
+        }
+      }
+      console.log('[AIR VOICE TOOL] Resolved userId:', resolvedUserId, 'from callerName:', callerName);
+      
       try {
         const abaciaResult = await fetch('https://abacia-services.onrender.com/api/air/process', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             message: userMessage,
-            userId: callerIdentity?.name === 'Brandon' ? 'brandon' : 'unknown',
+            userId: resolvedUserId,
             channel: 'elevenlabs_voice',
             caller: callerIdentity,
             source: 'elevenlabs_voice',
