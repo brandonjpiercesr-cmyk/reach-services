@@ -13134,7 +13134,7 @@ Respond naturally:`;
     try {
       const result = await httpsRequest({
         hostname: 'generativelanguage.googleapis.com',
-        path: '/v1beta/models/gemini-2.0-flash-exp:generateContent?key=' + GEMINI_KEY,
+        path: '/v1beta/models/gemini-2.0-flash:generateContent?key=' + GEMINI_KEY,
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }
       }, JSON.stringify({
