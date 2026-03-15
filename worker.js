@@ -53,7 +53,7 @@
  * REPORTS TO: AIR (ABA Intelligence Router) - L6 Department Leader
  * SERVES: VARA (voice), CARA (outreach), IMAN (email), TASTE (transcripts)
  *
- * MODELS: Gemini 2.5 Flash (primary), Claude Haiku (backup), Groq (speed fallback)
+ * MODELS: Gemini Flash 2.0 (primary), Claude Haiku (backup), Groq (speed fallback)
  * AGENTS SUMMONED: LUKE, COLE, JUDE, PACK (hardcoded on every AIR call)
  *
  * SIGILS STAMP: ⬡B:SIGILS:REACH.SERVER:CODE:indexing.labeling.stamping:AIR→SIGILS→REACH:T8:v1.5.0:20260213:s3g1l⬡
@@ -1561,7 +1561,7 @@ Then action_type should be "execute".`;
 
     const analysisResult = await httpsRequest({
       hostname: 'generativelanguage.googleapis.com',
-      path: '/v1beta/models/gemini-2.5-flash:generateContent?key=' + GEMINI_KEY,
+      path: '/v1beta/models/gemini-2.0-flash:generateContent?key=' + GEMINI_KEY,
       method: 'POST',
       headers: { 'Content-Type': 'application/json' }
     }, JSON.stringify({
@@ -3236,7 +3236,7 @@ async function callModel(prompt) {
     try {
       const result = await httpsRequest({
         hostname: 'generativelanguage.googleapis.com',
-        path: '/v1beta/models/gemini-2.5-flash:generateContent?key=' + GEMINI_KEY,
+        path: '/v1beta/models/gemini-2.0-flash:generateContent?key=' + GEMINI_KEY,
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }
       }, JSON.stringify({
@@ -3387,7 +3387,7 @@ async function callModelDeep(prompt, maxTokens = 2000) {
     try {
       const result = await httpsRequest({
         hostname: 'generativelanguage.googleapis.com',
-        path: '/v1beta/models/gemini-2.5-flash:generateContent?key=' + GEMINI_KEY,
+        path: '/v1beta/models/gemini-2.0-flash:generateContent?key=' + GEMINI_KEY,
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }
       }, JSON.stringify({
@@ -4910,6 +4910,16 @@ async function healthCheck(pulseId) {
     health.supabase = false;
   }
   
+  // ⬡B:HEALTH:ABABASE_KEEPALIVE:20260315⬡ — Ping ABABASE every 5 min to prevent cold starts
+  // Without this, ABABASE sleeps on free tier Render. Phone calls hit sleeping server = hang up.
+  try {
+    await fetch('https://abacia-services.onrender.com/health');
+    health.ababase = true;
+  } catch (e) {
+    health.ababase = false;
+    console.log('[PULSE:HEALTH] ABABASE ping failed:', e.message);
+  }
+  
   console.log(`[PULSE:HEALTH] Status: Supabase=${health.supabase}, Twilio=${health.twilio}, Nylas=${health.nylas}`);
   
   broadcastToCommandCenter({
@@ -5651,10 +5661,10 @@ async function AIR_process(userSaid, history, callerIdentity, demoState) {
   let response = null;
   
   // ⬡B:AIR:REACH.MODEL.GEMINI:CODE:models.primary.flash2:AIR→GEMINI→AIR:T8:v1.5.0:20260213:g1f2l⬡
-  // PRIMARY: Gemini 2.5 Flash (speed + 1M context + quality)
+  // PRIMARY: Gemini Flash 2.0 (speed + 1M context + quality)
   if (GEMINI_KEY && !response) {
     try {
-      console.log('[AIR] Routing to Gemini 2.5 Flash (PRIMARY)');
+      console.log('[AIR] Routing to Gemini Flash 2.0 (PRIMARY)');
       
       const messages = history.map(h => ({
         role: h.role === 'assistant' ? 'model' : 'user',
@@ -5664,7 +5674,7 @@ async function AIR_process(userSaid, history, callerIdentity, demoState) {
       
       const result = await httpsRequest({
         hostname: 'generativelanguage.googleapis.com',
-        path: '/v1beta/models/gemini-2.5-flash:generateContent?key=' + GEMINI_KEY,
+        path: '/v1beta/models/gemini-2.0-flash:generateContent?key=' + GEMINI_KEY,
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -7420,7 +7430,7 @@ async function AIR_text(userMessage, history) {
   const missionPackage = PACK_assemble(lukeAnalysis, coleResult, judeResult, history || [], null, null);
   let response = null;
 
-  // PRIMARY: Gemini 2.5 Flash
+  // PRIMARY: Gemini Flash 2.0
   if (GEMINI_KEY && !response) {
     try {
       const messages = (history || []).map(h => ({
@@ -7430,7 +7440,7 @@ async function AIR_text(userMessage, history) {
       messages.push({ role: 'user', parts: [{ text: userMessage }] });
       const result = await httpsRequest({
         hostname: 'generativelanguage.googleapis.com',
-        path: '/v1beta/models/gemini-2.5-flash:generateContent?key=' + GEMINI_KEY,
+        path: '/v1beta/models/gemini-2.0-flash:generateContent?key=' + GEMINI_KEY,
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }
       }, JSON.stringify({
@@ -7753,7 +7763,7 @@ const httpServer = http.createServer(async (req, res) => {
       service: 'ABA TOUCH v2.13.0-DYNAMIC-GREETINGS',
       mode: 'FULL API + VOICE + OMI + SMS + SPEECH INTELLIGENCE',
       air: 'ABA Intellectual Role - CENTRAL ORCHESTRATOR',
-      models: { primary: 'Gemini 2.5 Flash', backup: 'Claude Haiku', speed_fallback: 'Groq' },
+      models: { primary: 'Gemini Flash 2.0', backup: 'Claude Haiku', speed_fallback: 'Groq' },
       agents: { hardcoded: ['LUKE', 'COLE', 'JUDE', 'PACK'], voice: 'VARA', intelligence: 'DEEPGRAM' },
       voice: 'ElevenLabs ' + ELEVENLABS_VOICE,
       phone: TWILIO_PHONE,
@@ -12726,7 +12736,7 @@ httpServer.listen(PORT, '0.0.0.0', () => {
   console.log('[ABA REACH v2.10.1] LIVE on port ' + PORT);
   console.log('═══════════════════════════════════════════════════════════');
   console.log('[AIR] ABA Intellectual Role - ONLINE');
-  console.log('[AIR] PRIMARY: Gemini 2.5 Flash');
+  console.log('[AIR] PRIMARY: Gemini Flash 2.0');
   console.log('[AIR] BACKUP: Claude Haiku (only for user-facing)');
   console.log('[AIR] SPEED FALLBACK: Groq');
   console.log('[LUKE] Listening and Understanding for Knowledge Extraction - READY');
@@ -13134,7 +13144,7 @@ Respond naturally:`;
     try {
       const result = await httpsRequest({
         hostname: 'generativelanguage.googleapis.com',
-        path: '/v1beta/models/gemini-2.5-flash:generateContent?key=' + GEMINI_KEY,
+        path: '/v1beta/models/gemini-2.0-flash-exp:generateContent?key=' + GEMINI_KEY,
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }
       }, JSON.stringify({
@@ -13318,7 +13328,7 @@ async function loopAirCall(message, systemPrompt, model) {
   // TIER 1: Gemini Flash (FREE)
   if (GEMINI_KEY) {
     try {
-      const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + GEMINI_KEY, {
+      const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=' + GEMINI_KEY, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
