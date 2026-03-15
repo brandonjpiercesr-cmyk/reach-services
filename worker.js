@@ -63,6 +63,8 @@
 const http = require('http');
 const https = require('https');
 const { WebSocketServer, WebSocket } = require('ws');
+// ⬡B:Phase8:IMPORT:voice_speech_id:20260315⬡
+const { identifyCallerBySpeech } = require('./voice-speech-id');
 
 // ⬡B:AIR:REACH.SERVER.PORT:CONFIG:infrastructure.network.binding:AIR→REACH:T10:v1.5.0:20260213:p0r3t⬡
 const PORT = process.env.PORT || 3000;
@@ -7134,6 +7136,29 @@ async function processUtterance(session, text) {
         session.touchpoints.callerName = text.trim().split(/\s+/)[0];
         console.log('[DEMO] Caller name (short): ' + session.touchpoints.callerName);
       }
+    }
+  }
+  
+  // ⬡B:Phase8:SPEECH_ID:voice_id_by_speech:20260315⬡
+  // If caller is UNKNOWN (T2), try to identify from their first few utterances
+  if (session.callerIdentity?.name === 'Unknown' && session.callerIdentity?.trust === 'T2') {
+    try {
+      const speechMatch = await identifyCallerBySpeech(text, session.callerNumber);
+      if (speechMatch) {
+        console.log('[SPEECH-ID] Upgraded caller from Unknown to: ' + speechMatch.name + ' (trust: ' + speechMatch.trust + ')');
+        session.callerIdentity = {
+          ...session.callerIdentity,
+          ...speechMatch,
+          phone: session.callerNumber,
+          identifiedBy: 'speech'
+        };
+        // Update touchpoints with new identity
+        if (session.touchpoints) {
+          session.touchpoints.callerName = speechMatch.name;
+        }
+      }
+    } catch (speechErr) {
+      console.log('[SPEECH-ID] Error during speech identification:', speechErr.message);
     }
   }
   
