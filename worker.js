@@ -1007,10 +1007,10 @@ const TWILIO_PHONE = process.env.TWILIO_PHONE_NUMBER;
 // ⬡B:AIR:REACH.CONFIG.ELEVENLABS:CONFIG:voice.tts.personality:AIR→REACH→VARA:T8:v1.5.0:20260213:e1l2v⬡
 const ELEVENLABS_KEY = process.env.ELEVENLABS_API_KEY; // ⬡B:ENV:ELEVENLABS⬡
 // ⬡B:VARA:VOICE_ID:CONFIG:voice.identity:VARA→ELEVENLABS:T10:v2.0.1:20260214:vid⬡
-// OFFICIAL ABA VOICE ID: LD658Mupr7vNwTTJSPsk (ABA v1)
+// OFFICIAL ABA VOICE ID: AIFDUhRnM6s61433WMNu (Kiara)
 // Updated: February 14, 2026
 // DO NOT CHANGE without global update: ElevenLabs, 1A Shell, Brain, all services
-const ELEVENLABS_VOICE = 'LD658Mupr7vNwTTJSPsk'; // Brandon's ONLY voice - NEVER CHANGE THIS
+const ELEVENLABS_VOICE = 'AIFDUhRnM6s61433WMNu'; // Kiara voice - ⬡B:VOICE_ID:CONFIG:20260317⬡
 const ELEVENLABS_MODEL = 'eleven_flash_v2_5';
 
 // ⬡B:AIR:REACH.CONFIG.DEEPGRAM:CONFIG:voice.stt.transcription:AIR→REACH→TASTE:T8:v1.5.0:20260213:d1g2m⬡
@@ -8368,7 +8368,7 @@ Respond as this agent specifically — stay in character.`;
         return res.end();
       }
 
-      const voiceId = ELEVENLABS_VOICE || 'LD658Mupr7vNwTTJSPsk';
+      const voiceId = ELEVENLABS_VOICE || 'AIFDUhRnM6s61433WMNu';
       const result = await httpsRequest({
         hostname: 'api.elevenlabs.io',
         path: '/v1/text-to-speech/' + voiceId,
