@@ -8802,19 +8802,31 @@ Respond as this agent specifically — stay in character.`;
   }
 
   // ═══════════════════════════════════════════════════════════════════════════════
-  // ⬡B:AIR:REACH.VOICE.ELEVENLABS_POSTCALL:CODE:voice.postcall.webhook:ELEVENLABS→AIR→CC:T10:v2.0.0:20260214:p1c2w⬡
+  // ⬡B:AIR:REACH.VOICE.ELEVENLABS_POSTCALL:CODE:voice.postcall.webhook:ELEVENLABS→AIR→CC:T10:v2.1.0:20260316:p1c2w⬡
   // POST-CALL WEBHOOK - ElevenLabs calls this when call ends
+  // v2.1.0: Added debug logging to brain + ElevenLabs API fallback for transcript
   // ═══════════════════════════════════════════════════════════════════════════════
   if (path === '/api/air/call-ended' && method === 'POST') {
     try {
       const body = await parseBody(req);
-      const conversationId = body.conversation_id || 'unknown';
-      const transcript = body.transcript || [];
-      const duration = body.duration_seconds || 0;
-      const callerNumber = body.caller_number || 'unknown';
+      
+      // ⬡B:FIX:postcall_debug:20260316⬡
+      // Step 1: Log ENTIRE raw webhook body to brain so we can see exactly what ElevenLabs sends
+      storeToBrain({
+        content: 'POSTCALL RAW WEBHOOK: ' + JSON.stringify(body).substring(0, 4000),
+        memory_type: 'debug',
+        source: 'postcall_debug_' + Date.now(),
+        importance: 6,
+        tags: ['debug', 'postcall', 'raw_webhook']
+      }).catch(e => console.log('[BRAIN] Debug store error:', e.message));
+      
+      const conversationId = body.conversation_id || body.id || 'unknown';
+      const duration = body.duration_seconds || body.metadata?.duration || 0;
+      const callerNumber = body.caller_number || body.metadata?.caller || 'unknown';
       
       console.log('[POST-CALL] Call ended:', conversationId);
       console.log('[POST-CALL] Duration:', duration, 'seconds');
+      console.log('[POST-CALL] Body keys:', Object.keys(body).join(', '));
       
       // Broadcast to Command Center
       broadcastToCommandCenter({
@@ -8822,24 +8834,94 @@ Respond as this agent specifically — stay in character.`;
         conversation_id: conversationId,
         caller: callerNumber,
         duration_seconds: duration,
-        transcript_length: Array.isArray(transcript) ? transcript.length : 0,
         timestamp: new Date().toISOString()
       });
       
-      // Store full transcript in brain
-      const transcriptText = Array.isArray(transcript) 
-        ? transcript.map(t => (t.role || 'unknown') + ': ' + (t.text || '')).join('\n')
-        : JSON.stringify(transcript);
+      // Step 2: Try to extract transcript from webhook payload
+      let transcript = body.transcript || body.messages || body.conversation || [];
+      let transcriptText = '';
+      
+      if (Array.isArray(transcript) && transcript.length > 0) {
+        transcriptText = transcript.map(t => {
+          const role = t.role || t.speaker || 'unknown';
+          const text = t.text || t.content || t.message || '';
+          return role + ': ' + text;
+        }).join('\n');
+        console.log('[POST-CALL] Transcript from webhook: ' + transcript.length + ' turns');
+      }
+      
+      // ⬡B:FIX:elevenlabs_api_fallback:20260316⬡
+      // Step 3: If transcript is empty, fetch from ElevenLabs API
+      // For Custom LLM agents, ElevenLabs may not include transcript in webhook
+      if (!transcriptText && conversationId && conversationId !== 'unknown') {
+        console.log('[POST-CALL] No transcript in webhook — fetching from ElevenLabs API');
+        try {
+          const elResponse = await new Promise((resolve, reject) => {
+            const options = {
+              hostname: 'api.elevenlabs.io',
+              path: '/v1/convai/conversations/' + conversationId,
+              method: 'GET',
+              headers: {
+                'xi-api-key': process.env.ELEVENLABS_API_KEY || ''
+              }
+            };
+            httpsRequest(options).then(resolve).catch(reject);
+          });
+          
+          const elData = typeof elResponse === 'string' ? JSON.parse(elResponse) : elResponse;
+          
+          // ElevenLabs returns transcript in different formats
+          const apiTranscript = elData.transcript || elData.messages || [];
+          if (Array.isArray(apiTranscript) && apiTranscript.length > 0) {
+            transcriptText = apiTranscript.map(t => {
+              const role = t.role || t.speaker || 'unknown';
+              const text = t.message || t.text || t.content || '';
+              return role + ': ' + text;
+            }).join('\n');
+            console.log('[POST-CALL] Transcript from API: ' + apiTranscript.length + ' turns');
+          } else {
+            console.log('[POST-CALL] API returned no transcript either. Keys:', Object.keys(elData).join(', '));
+            // Store the API response for debugging
+            storeToBrain({
+              content: 'POSTCALL API RESPONSE (no transcript): ' + JSON.stringify(elData).substring(0, 3000),
+              memory_type: 'debug',
+              source: 'postcall_api_debug_' + Date.now(),
+              importance: 5,
+              tags: ['debug', 'postcall', 'api_response']
+            }).catch(() => {});
+          }
+          
+          // Also capture duration from API if webhook had 0
+          if (!duration && elData.metadata?.duration) {
+            // duration is available from API
+            console.log('[POST-CALL] Duration from API:', elData.metadata.duration);
+          }
+        } catch (apiErr) {
+          console.error('[POST-CALL] ElevenLabs API fetch failed:', apiErr.message);
+          storeToBrain({
+            content: 'POSTCALL API FETCH FAILED: ' + apiErr.message + ' | conv_id: ' + conversationId,
+            memory_type: 'debug',
+            source: 'postcall_api_error_' + Date.now(),
+            importance: 7,
+            tags: ['debug', 'postcall', 'api_error']
+          }).catch(() => {});
+        }
+      }
+      
+      // Step 4: Store transcript to brain (even if empty, we record the call happened)
+      const finalContent = transcriptText
+        ? 'VOICE CALL TRANSCRIPT [' + conversationId + '] Duration: ' + duration + 's\nCaller: ' + callerNumber + '\n\n' + transcriptText
+        : 'VOICE CALL [' + conversationId + '] Duration: ' + duration + 's\nCaller: ' + callerNumber + '\n(No transcript captured — check postcall_debug entries)';
       
       storeToBrain({
-        content: 'CALL TRANSCRIPT [' + conversationId + '] Duration: ' + duration + 's\n' + transcriptText,
+        content: finalContent,
         memory_type: 'phone_transcript',
-        categories: ['voice', 'transcript', 'elevenlabs'],
+        source: 'elevenlabs_call_' + conversationId,
         importance: 7,
-        tags: ['voice', 'transcript', 'call_complete']
+        tags: ['voice', 'transcript', 'elevenlabs', 'call_complete', transcriptText ? 'has_transcript' : 'no_transcript']
       }).catch(e => console.log('[BRAIN] Store error:', e.message));
       
-      return jsonResponse(res, 200, { received: true, conversation_id: conversationId });
+      return jsonResponse(res, 200, { received: true, conversation_id: conversationId, has_transcript: !!transcriptText });
       
     } catch (e) {
       console.error('[POST-CALL] Error:', e.message);
