@@ -4697,18 +4697,15 @@ async function checkEmails(pulseId) {
           }
           
           // ═══════════════════════════════════════════════════════════════
-          // ⬡B:911_COST_RULE:idealist_brain_only:20260318⬡
+          // ⬡B:911_COST_RULE:idealist_direct_write_pulse:20260318⬡ (Option D)
           //
-          // DO NOT ROUTE IDEALIST JOBS THROUGH /api/air/process.
-          // DO NOT "UPGRADE" THIS BACK TO executeAIR OR SONNET.
+          // ONE Haiku call ($0.002) assigns tracks for ALL jobs.
+          // Then writes awa_job rows directly. No AIR. No pending queue.
+          // Was: $0.60-1.00 per Sonnet × 4/day = $72-120/month
+          // Now: $0.002 per Haiku × 1/day = $0.06/month
           //
-          // Each batch call was $0.60-1.00 through full Claude Sonnet
-          // pipeline. 4 calls/day = $2.40-4.00/day = $72-120/month.
-          // Now saves to brain for FREE. JOBA picks them up on the
-          // next manual run or scheduled batch.
-          //
-          // Brandon approved this March 18, 2026 after tracing $20/day
-          // in charges. If you want real-time processing, talk to Brandon.
+          // Brandon approved Option D on March 18, 2026.
+          // DO NOT route through /api/air/process or executeAIR.
           // ═══════════════════════════════════════════════════════════════
           if (jobUrls.size > 0) {
             const jobList = Array.from(jobUrls).map(url => {
@@ -4718,42 +4715,69 @@ async function checkEmails(pulseId) {
             });
             
             try {
-              // Save to brain — ZERO LLM cost
-              const SUPA_URL = 'https://htlxjkbrstpwwtzsbyvb.supabase.co';
               const SUPA_KEY = process.env.SUPABASE_SERVICE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0bHhqa2Jyc3Rwd3d0enNieXZiIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MDUzMjgyMSwiZXhwIjoyMDg2MTA4ODIxfQ.G55zXnfanoUxRAoaYz-tD9FDJ53xHH-pRgDrKss_Iqo';
+              const aiKey = process.env.ANTHROPIC_API_KEY;
+              let assignments = jobList.map(j => ({ ...j, track: 'unassigned', assignees: [], reason: 'no AI' }));
               
-              await httpsRequest({
-                hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-                path: '/rest/v1/aba_memory',
-                method: 'POST',
-                headers: {
-                  'apikey': SUPA_KEY,
-                  'Authorization': 'Bearer ' + SUPA_KEY,
-                  'Content-Type': 'application/json',
-                  'Prefer': 'return=minimal'
+              if (aiKey) {
+                try {
+                  const trackRes = await httpsRequest({
+                    hostname: 'api.anthropic.com',
+                    path: '/v1/messages',
+                    method: 'POST',
+                    headers: { 'x-api-key': aiKey, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' }
+                  }, JSON.stringify({
+                    model: 'claude-haiku-4-5-20251001',
+                    max_tokens: 1000,
+                    system: 'Assign each job to a team track. Return ONLY a JSON array. TRACK RULES: executive_director (ED, CDO, VP, Senior Fundraising, PT $50+/hr REMOTE) → assignees ["brandon","eric"]. gmg_consultant (Consultant, Contractor, Fractional) → assignees ["gmg"]. director_of_development (Director of Dev, Marketing/Comms Director, Grant Writing) → assignees ["bj"]. development_manager (Dev Manager, Grants Manager, Foundation Relations) → assignees ["cj"]. coordinator (Coordinator, Programs, Community Outreach, Associate) → assignees ["vante"]. finance_ops (Finance, Accounting, Operations, Admin, Budget) → assignees ["dwayne"]. Return: [{"title":"...","track":"...","assignees":[...],"reason":"..."}]',
+                    messages: [{ role: 'user', content: 'Assign tracks:\n' + jobList.map((j,i) => (i+1) + '. ' + j.title + ' — ' + j.url).join('\n') }]
+                  }));
+                  const trackData = JSON.parse(trackRes.data.toString());
+                  const trackText = trackData.content?.[0]?.text || '[]';
+                  const jsonMatch = trackText.match(/\[\s*\{[\s\S]*\}\s*\]/);
+                  if (jsonMatch) {
+                    const parsed = JSON.parse(jsonMatch[0]);
+                    for (let i = 0; i < Math.min(parsed.length, jobList.length); i++) {
+                      assignments[i] = { ...jobList[i], ...parsed[i] };
+                    }
+                  }
+                  console.log('[PULSE:IMAN] Haiku assigned tracks for ' + jobList.length + ' jobs ($0.002)');
+                } catch (aiErr) {
+                  console.log('[PULSE:IMAN] Haiku failed, writing as unassigned:', aiErr.message);
                 }
-              }, JSON.stringify({
-                source: 'idealist_batch_' + msg.id,
-                memory_type: 'idealist_jobs_pending',
-                content: JSON.stringify({
-                  jobs: jobList,
-                  email_id: msg.id,
-                  email_subject: subject,
-                  discovered_at: new Date().toISOString(),
-                  status: 'pending',
-                  source_path: 'reach_pulse_polling'
-                }),
-                importance: 7,
-                is_system: true,
-                tags: ['idealist', 'jobs', 'pending', 'batch']
-              }));
+              }
               
-              console.log('[PULSE:IMAN] Saved ' + jobList.length + ' Idealist jobs to brain (FREE — no AIR call)');
+              const trackMap = { 'executive_director': 'Brandon_Eric', 'gmg_consultant': 'GMG', 'director_of_development': 'BJ', 'development_manager': 'CJ', 'coordinator': 'Vante', 'finance_ops': 'Dwayne' };
+              let written = 0;
+              for (const job of assignments) {
+                try {
+                  const dedupRes = await httpsRequest({
+                    hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+                    path: '/rest/v1/aba_memory?memory_type=eq.awa_job&content=ilike.*' + encodeURIComponent(job.url || '').substring(0, 80) + '*&limit=1',
+                    method: 'GET',
+                    headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY }
+                  });
+                  const existing = JSON.parse(dedupRes.data.toString());
+                  if (existing && existing.length > 0) { console.log('[PULSE:IMAN] DEDUP: ' + job.title); continue; }
+                  
+                  const sheet = trackMap[job.track] || 'Unassigned';
+                  const crypto = require('crypto');
+                  const awaJob = { id: crypto.randomUUID(), organization: 'Idealist Org', job_title: job.title || 'Unknown', salary: '', url: job.url, status: 'NEW', assignees: job.assignees || [], sheet, source: 'idealist', imported_at: new Date().toISOString(), assignment_category: job.track || 'unassigned', assignment_reason: job.reason || 'Haiku PULSE auto-assign', apply_method: 'unknown' };
+                  
+                  await httpsRequest({
+                    hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+                    path: '/rest/v1/aba_memory',
+                    method: 'POST',
+                    headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' }
+                  }, JSON.stringify({ source: 'awa_job_' + awaJob.id, memory_type: 'awa_job', content: JSON.stringify(awaJob), importance: 7, user_id: 'system', is_system: true, tags: ['awa', 'job', 'idealist', sheet.toLowerCase()] }));
+                  
+                  written++;
+                  console.log('[PULSE:IMAN] AWA JOB: ' + awaJob.job_title + ' → ' + sheet);
+                } catch (writeErr) { console.error('[PULSE:IMAN] Write error:', writeErr.message); }
+              }
+              console.log('[PULSE:IMAN] ' + written + '/' + jobList.length + ' jobs written (Option D — $0.002 Haiku)');
               IDEALIST_LAST_BATCH = Date.now();
-              
-            } catch (brainErr) {
-              console.error('[PULSE:IMAN] Brain write failed: ' + brainErr.message);
-            }
+            } catch (err) { console.error('[PULSE:IMAN] Option D error: ' + err.message); }
           }
         } catch (idealistErr) {
           console.error('[PULSE:IMAN] Idealist parse error:', idealistErr.message);
@@ -10705,7 +10729,7 @@ RULES:
                 }, JSON.stringify({
                   model: 'claude-haiku-4-5-20251001',
                   max_tokens: 800,
-                  system: 'Extract job details from HTML. Return ONLY valid JSON: {"title":"","company":"","location":"","salary":"","description":"first 200 chars","employment_type":"","remote":"yes/no/hybrid","deadline":"","requirements":"first 200 chars"}. Empty string if unknown. Be accurate.',
+                  system: 'Extract job details from HTML AND assign to a team track. Return ONLY valid JSON: {"title":"","company":"","location":"","salary":"","description":"first 200 chars","employment_type":"","remote":"yes/no/hybrid","deadline":"","requirements":"first 200 chars","track":"","assignees":[],"assignment_reason":""}. TRACK RULES: executive_director (ED, CDO, VP, Senior Fundraising, PT $50+/hr REMOTE) → assignees ["brandon","eric"]. gmg_consultant (Consultant, Contractor, Fractional) → assignees ["gmg"]. director_of_development (Director of Development, Marketing/Comms Director, Grant Writing, also CDO/VP) → assignees ["bj"]. development_manager (Development Manager, Grants Manager, Foundation Relations, Fundraising Events) → assignees ["cj"]. coordinator (Coordinator, Programs, Community Outreach, Associate) → assignees ["vante"]. finance_ops (Finance, Accounting, Operations, Administrative, Budget) → assignees ["dwayne"]. Empty string if unknown. Be accurate.',
                   messages: [{ role: 'user', content: 'URL: ' + jobUrl + '\n\nHTML:\n' + html }]
                 }));
                 
@@ -10723,46 +10747,95 @@ RULES:
           }
           
           // ═══════════════════════════════════════════════════════════════
-          // ⬡B:911_COST_RULE:idealist_webhook_brain_only:20260318⬡
-          // Same rule as PULSE path. Save to brain, not AIR. $0 cost.
-          // See 911_COST_RULE:idealist_brain_only for full explanation.
+          // ⬡B:911_COST_RULE:idealist_direct_write:20260318⬡ (Option D)
+          //
+          // DO NOT ROUTE THROUGH /api/air/process OR executeAIR.
+          // Haiku already extracted + assigned track above. Write awa_job
+          // directly. $0 additional LLM cost. No pending queue. No forgetting.
+          //
+          // Brandon approved Option D on March 18 2026.
+          // If you think JOBA needs to review these, add a review step
+          // AFTER the write, not instead of it. Jobs must never sit unwritten.
           // ═══════════════════════════════════════════════════════════════
           if (jobs.length > 0) {
-            try {
-              const SUPA_URL = 'https://htlxjkbrstpwwtzsbyvb.supabase.co';
-              const SUPA_KEY = process.env.SUPABASE_SERVICE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0bHhqa2Jyc3Rwd3d0enNieXZiIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MDUzMjgyMSwiZXhwIjoyMDg2MTA4ODIxfQ.G55zXnfanoUxRAoaYz-tD9FDJ53xHH-pRgDrKss_Iqo';
-              
-              await httpsRequest({
-                hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-                path: '/rest/v1/aba_memory',
-                method: 'POST',
-                headers: {
-                  'apikey': SUPA_KEY,
-                  'Authorization': 'Bearer ' + SUPA_KEY,
-                  'Content-Type': 'application/json',
-                  'Prefer': 'return=minimal'
+            const SUPA_URL = 'https://htlxjkbrstpwwtzsbyvb.supabase.co';
+            const SUPA_KEY = process.env.SUPABASE_SERVICE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0bHhqa2Jyc3Rwd3d0enNieXZiIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MDUzMjgyMSwiZXhwIjoyMDg2MTA4ODIxfQ.G55zXnfanoUxRAoaYz-tD9FDJ53xHH-pRgDrKss_Iqo';
+            
+            let written = 0;
+            for (const job of jobs) {
+              try {
+                // Dedup by URL
+                const dedupRes = await httpsRequest({
+                  hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+                  path: '/rest/v1/aba_memory?memory_type=eq.awa_job&content=ilike.*' + encodeURIComponent(job.url || '').substring(0, 80) + '*&limit=1',
+                  method: 'GET',
+                  headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY }
+                });
+                const existing = JSON.parse(dedupRes.data.toString());
+                if (existing && existing.length > 0) {
+                  console.log('[Nylas Webhook] DEDUP: ' + (job.title || 'Unknown') + ' already exists');
+                  continue;
                 }
-              }, JSON.stringify({
-                source: 'idealist_webhook_' + Date.now(),
-                memory_type: 'idealist_jobs_pending',
-                content: JSON.stringify({
-                  jobs: jobs,
-                  email_subject: subject,
-                  discovered_at: new Date().toISOString(),
-                  status: 'pending',
-                  source_path: 'reach_nylas_webhook'
-                }),
-                importance: 7,
-                is_system: true,
-                tags: ['idealist', 'jobs', 'pending', 'webhook']
-              }));
-              
-              console.log('[Nylas Webhook] Saved ' + jobs.length + ' scraped jobs to brain (FREE)');
-              IDEALIST_LAST_BATCH = Date.now();
-              
-            } catch (brainErr) {
-              console.error('[Nylas Webhook] Brain write failed:', brainErr.message);
+                
+                const trackMap = {
+                  'executive_director': { sheet: 'Brandon_Eric', assignees: ['brandon', 'eric'] },
+                  'gmg_consultant': { sheet: 'GMG', assignees: ['gmg'] },
+                  'director_of_development': { sheet: 'BJ', assignees: ['bj'] },
+                  'development_manager': { sheet: 'CJ', assignees: ['cj'] },
+                  'coordinator': { sheet: 'Vante', assignees: ['vante'] },
+                  'finance_ops': { sheet: 'Dwayne', assignees: ['dwayne'] }
+                };
+                const trackInfo = trackMap[job.track] || { sheet: 'Unassigned', assignees: [] };
+                
+                const awaJob = {
+                  id: require('crypto').randomUUID(),
+                  organization: job.company || 'Unknown',
+                  job_title: job.title || 'Unknown',
+                  salary: job.salary || '',
+                  url: job.url,
+                  status: 'NEW',
+                  assignees: job.assignees || trackInfo.assignees,
+                  sheet: trackInfo.sheet,
+                  source: 'idealist',
+                  imported_at: new Date().toISOString(),
+                  assignment_category: job.track || 'unassigned',
+                  assignment_reason: job.assignment_reason || 'Haiku auto-assign at scrape time',
+                  apply_method: 'unknown',
+                  application_requirements: job.requirements || '',
+                  location: job.location || '',
+                  remote: job.remote || '',
+                  employment_type: job.employment_type || ''
+                };
+                
+                await httpsRequest({
+                  hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+                  path: '/rest/v1/aba_memory',
+                  method: 'POST',
+                  headers: {
+                    'apikey': SUPA_KEY,
+                    'Authorization': 'Bearer ' + SUPA_KEY,
+                    'Content-Type': 'application/json',
+                    'Prefer': 'return=minimal'
+                  }
+                }, JSON.stringify({
+                  source: 'awa_job_' + awaJob.id,
+                  memory_type: 'awa_job',
+                  content: JSON.stringify(awaJob),
+                  importance: 7,
+                  user_id: 'system',
+                  is_system: true,
+                  tags: ['awa', 'job', 'idealist', trackInfo.sheet.toLowerCase()]
+                }));
+                
+                written++;
+                console.log('[Nylas Webhook] AWA JOB WRITTEN: ' + awaJob.job_title + ' → ' + trackInfo.sheet);
+              } catch (writeErr) {
+                console.error('[Nylas Webhook] Job write error:', writeErr.message);
+              }
             }
+            
+            console.log('[Nylas Webhook] ' + written + '/' + jobs.length + ' Idealist jobs written to awa_job (Option D — $0)');
+            IDEALIST_LAST_BATCH = Date.now();
             
             // Deadline escalation still triggers directly (already routes to AIR)
             const now = new Date();
