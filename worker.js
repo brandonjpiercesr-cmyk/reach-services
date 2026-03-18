@@ -10426,13 +10426,16 @@ if (path === '/api/sms/send' && method === 'POST') {
         const replyToMessageId = messageData.reply_to_message_id || messageData.in_reply_to || null;
         const threadId = messageData.thread_id || null;
         
-        // Check if this is a reply TO Claudette (ABA's email identity)
-        const isToClaudette = toList.some(t => 
-          (t.email || t || '').toLowerCase().includes('claudette@globalmajoritygroup.com')
-        );
+        // ⬡B:ccwa.iman:FIX:match_aba_and_claudette_email:20260318⬡
+        // Check if this is a reply TO Claudette OR ABA (both are ABA's email identity)
+        const isToClaudette = toList.some(t => {
+          const addr = (t.email || t || '').toLowerCase();
+          return addr.includes('claudette@globalmajoritygroup.com') || addr.includes('aba@globalmajoritygroup.com');
+        });
         
-        // Skip if it's FROM Claudette (our own outbound email)
-        const isFromClaudette = fromEmail.toLowerCase().includes('claudette@globalmajoritygroup.com');
+        // Skip if it's FROM Claudette/ABA (our own outbound email)
+        const isFromClaudette = fromEmail.toLowerCase().includes('claudette@globalmajoritygroup.com') || 
+          fromEmail.toLowerCase().includes('aba@globalmajoritygroup.com');
         
         if (isToClaudette && !isFromClaudette && emailBody) {
           console.log('[IMAN REPLY] Incoming email TO Claudette from:', fromEmail);
@@ -10525,8 +10528,35 @@ RULES:
             }));
             emailHistory.push({ role: 'user', content: airPrompt });
             
-            const claudeResponse = await callModelDeep(airPrompt, 4000);
-            const airResult = { response: claudeResponse };
+            // ⬡B:ccwa.iman:FIX:route_email_through_air_not_gemini:20260318⬡
+            // Route through ABABASE AIR for full brain + agents + tools access
+            let airResult = { response: '' };
+            try {
+              const airRes = await httpsRequest({
+                hostname: 'abacia-services.onrender.com',
+                path: '/api/air/process',
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+              }, JSON.stringify({
+                message: airPrompt,
+                user_id: isVIP ? fromEmail.toLowerCase() : 'unknown',
+                channel: 'email',
+                context: { 
+                  replyTo: fromEmail, 
+                  replySubject: subject,
+                  threadId: threadId,
+                  vip: isVIP,
+                  vipInfo: vipInfo 
+                }
+              }));
+              const airData = JSON.parse(airRes.data.toString());
+              airResult.response = airData.response || airData.output || airData.text || '';
+              console.log('[IMAN REPLY] AIR responded (' + airResult.response.length + ' chars)');
+            } catch (airErr) {
+              console.log('[IMAN REPLY] AIR failed, falling back to callModelDeep:', airErr.message);
+              const claudeResponse = await callModelDeep(airPrompt, 4000);
+              airResult.response = claudeResponse;
+            }
             
             if (airResult && airResult.response) {
               console.log('[IMAN REPLY] AIR generated response, sending via Claudette...');
