@@ -4696,9 +4696,20 @@ async function checkEmails(pulseId) {
             }
           }
           
-          // ⬡B:911_FIX:BATCH_ALL_JOBS:20260314⬡
-          // Route ALL jobs in ONE ABABASE call instead of N separate calls
-          // This cuts token usage from N*60k to 1*60k = 99% reduction
+          // ═══════════════════════════════════════════════════════════════
+          // ⬡B:911_COST_RULE:idealist_brain_only:20260318⬡
+          //
+          // DO NOT ROUTE IDEALIST JOBS THROUGH /api/air/process.
+          // DO NOT "UPGRADE" THIS BACK TO executeAIR OR SONNET.
+          //
+          // Each batch call was $0.60-1.00 through full Claude Sonnet
+          // pipeline. 4 calls/day = $2.40-4.00/day = $72-120/month.
+          // Now saves to brain for FREE. JOBA picks them up on the
+          // next manual run or scheduled batch.
+          //
+          // Brandon approved this March 18, 2026 after tracing $20/day
+          // in charges. If you want real-time processing, talk to Brandon.
+          // ═══════════════════════════════════════════════════════════════
           if (jobUrls.size > 0) {
             const jobList = Array.from(jobUrls).map(url => {
               const slug = url.split('/').pop();
@@ -4707,35 +4718,41 @@ async function checkEmails(pulseId) {
             });
             
             try {
-              const batchMessage = `IMAN IDEALIST BATCH: ${jobList.length} jobs found in email "${subject}". Process each using awa_create_job_from_scrape tool. Source: idealist.\n\nJOBS:\n${jobList.map((j, i) => `${i+1}. Title: ${j.title}\n   URL: ${j.url}`).join('\n\n')}`;
+              // Save to brain — ZERO LLM cost
+              const SUPA_URL = 'https://htlxjkbrstpwwtzsbyvb.supabase.co';
+              const SUPA_KEY = process.env.SUPABASE_SERVICE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0bHhqa2Jyc3Rwd3d0enNieXZiIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MDUzMjgyMSwiZXhwIjoyMDg2MTA4ODIxfQ.G55zXnfanoUxRAoaYz-tD9FDJ53xHH-pRgDrKss_Iqo';
               
-              const ababaseResult = await httpsRequest({
-                hostname: 'abacia-services.onrender.com',
-                path: '/api/air/process',
+              await httpsRequest({
+                hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+                path: '/rest/v1/aba_memory',
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' }
+                headers: {
+                  'apikey': SUPA_KEY,
+                  'Authorization': 'Bearer ' + SUPA_KEY,
+                  'Content-Type': 'application/json',
+                  'Prefer': 'return=minimal'
+                }
               }, JSON.stringify({
-                message: batchMessage,
-                user_id: 'brandon',
-                channel: 'iman_idealist_batch',
-                context: {
-                  action: 'batch_jobs_found',
-                  source: 'idealist',
-                  job_count: jobList.length,
+                source: 'idealist_batch_' + msg.id,
+                memory_type: 'idealist_jobs_pending',
+                content: JSON.stringify({
                   jobs: jobList,
                   email_id: msg.id,
-                  email_subject: subject
-                }
+                  email_subject: subject,
+                  discovered_at: new Date().toISOString(),
+                  status: 'pending',
+                  source_path: 'reach_pulse_polling'
+                }),
+                importance: 7,
+                is_system: true,
+                tags: ['idealist', 'jobs', 'pending', 'batch']
               }));
               
-              const result = JSON.parse(ababaseResult.data.toString());
-              console.log('[PULSE:IMAN] BATCHED ' + jobList.length + ' jobs to ABABASE: ' + (result.error || 'OK'));
-              
-              // Update cooldown - prevents reprocessing for 12 hours
+              console.log('[PULSE:IMAN] Saved ' + jobList.length + ' Idealist jobs to brain (FREE — no AIR call)');
               IDEALIST_LAST_BATCH = Date.now();
               
-            } catch (ababaseErr) {
-              console.error('[PULSE:IMAN] ABABASE batch call failed: ' + ababaseErr.message);
+            } catch (brainErr) {
+              console.error('[PULSE:IMAN] Brain write failed: ' + brainErr.message);
             }
           }
         } catch (idealistErr) {
@@ -10705,37 +10722,46 @@ RULES:
             }
           }
           
-          // ⬡B:911_FIX:WEBHOOK_BATCH:20260314⬡
-          // Route ALL scraped jobs in ONE ABABASE call (not N separate calls)
+          // ═══════════════════════════════════════════════════════════════
+          // ⬡B:911_COST_RULE:idealist_webhook_brain_only:20260318⬡
+          // Same rule as PULSE path. Save to brain, not AIR. $0 cost.
+          // See 911_COST_RULE:idealist_brain_only for full explanation.
+          // ═══════════════════════════════════════════════════════════════
           if (jobs.length > 0) {
             try {
-              const batchMessage = `IMAN IDEALIST WEBHOOK BATCH: ${jobs.length} jobs scraped. Process each using awa_create_job_from_scrape tool. Source: idealist.\n\nJOBS:\n${jobs.map((j, i) => `${i+1}. Title: ${j.title || 'Unknown'}\n   Organization: ${j.company || 'Unknown'}\n   URL: ${j.url}\n   Location: ${j.location || ''}\n   Salary: ${j.salary || ''}\n   Remote: ${j.remote || ''}`).join('\n\n')}`;
+              const SUPA_URL = 'https://htlxjkbrstpwwtzsbyvb.supabase.co';
+              const SUPA_KEY = process.env.SUPABASE_SERVICE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0bHhqa2Jyc3Rwd3d0enNieXZiIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MDUzMjgyMSwiZXhwIjoyMDg2MTA4ODIxfQ.G55zXnfanoUxRAoaYz-tD9FDJ53xHH-pRgDrKss_Iqo';
               
               await httpsRequest({
-                hostname: 'abacia-services.onrender.com',
-                path: '/api/air/process',
+                hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+                path: '/rest/v1/aba_memory',
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' }
-              }, JSON.stringify({
-                message: batchMessage,
-                user_id: 'brandon',
-                channel: 'iman_idealist_webhook_batch',
-                context: {
-                  action: 'batch_jobs_scraped',
-                  source: 'idealist',
-                  job_count: jobs.length,
-                  jobs: jobs,
-                  email_subject: subject
+                headers: {
+                  'apikey': SUPA_KEY,
+                  'Authorization': 'Bearer ' + SUPA_KEY,
+                  'Content-Type': 'application/json',
+                  'Prefer': 'return=minimal'
                 }
+              }, JSON.stringify({
+                source: 'idealist_webhook_' + Date.now(),
+                memory_type: 'idealist_jobs_pending',
+                content: JSON.stringify({
+                  jobs: jobs,
+                  email_subject: subject,
+                  discovered_at: new Date().toISOString(),
+                  status: 'pending',
+                  source_path: 'reach_nylas_webhook'
+                }),
+                importance: 7,
+                is_system: true,
+                tags: ['idealist', 'jobs', 'pending', 'webhook']
               }));
               
-              console.log('[Nylas Webhook] BATCHED ' + jobs.length + ' jobs to ABABASE');
-              
-              // Update cooldown - prevents reprocessing for 12 hours
+              console.log('[Nylas Webhook] Saved ' + jobs.length + ' scraped jobs to brain (FREE)');
               IDEALIST_LAST_BATCH = Date.now();
               
-            } catch (routeErr) {
-              console.error('[Nylas Webhook] ABABASE batch route error:', routeErr.message);
+            } catch (brainErr) {
+              console.error('[Nylas Webhook] Brain write failed:', brainErr.message);
             }
             
             // Deadline escalation still triggers directly (already routes to AIR)
