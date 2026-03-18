@@ -10956,7 +10956,7 @@ RULES:
   
   if (path === '/api/call/dial' && method === 'POST') {
     const body = await parseBody(req);
-    const { to, purpose, message, userId, record } = body;
+    const { to, purpose, message, userId, record, max_duration_seconds } = body;
     const callContent = message || purpose || 'Just checking in.';
     
     console.log('[DIAL v2] Initiating call to:', to, '| Content:', callContent.substring(0, 100));
@@ -11009,8 +11009,10 @@ We Are All ABA.`;
               first_message: firstMessage,
               prompt: {
                 prompt: callContextPrompt
-              }
-            }
+              },
+              ...(max_duration_seconds ? { max_duration_seconds: max_duration_seconds } : {})
+            },
+            ...(max_duration_seconds ? { conversation: { max_duration_seconds: max_duration_seconds } } : {})
           }
         }
       };
