@@ -8861,9 +8861,13 @@ Respond as this agent specifically — stay in character.`;
         tags: ['debug', 'postcall', 'raw_webhook']
       }).catch(e => console.log('[BRAIN] Debug store error:', e.message));
       
-      const conversationId = body.conversation_id || body.id || 'unknown';
-      const duration = body.duration_seconds || body.metadata?.duration || 0;
-      const callerNumber = body.caller_number || body.metadata?.caller || 'unknown';
+      // ⬡B:ccwa.voice:FIX:postcall_body_data_nesting:20260319⬡
+      // ElevenLabs nests everything inside body.data. Handler was reading body directly.
+      // Every field returned undefined → Duration: 0s, Caller: unknown, No transcript.
+      const d = body.data || body;
+      const conversationId = d.conversation_id || body.conversation_id || body.id || 'unknown';
+      const duration = d.metadata?.call_duration_secs || d.duration_seconds || body.duration_seconds || 0;
+      const callerNumber = d.user_id || d.caller_number || body.caller_number || 'unknown';
       
       console.log('[POST-CALL] Call ended:', conversationId);
       console.log('[POST-CALL] Duration:', duration, 'seconds');
@@ -8879,7 +8883,7 @@ Respond as this agent specifically — stay in character.`;
       });
       
       // Step 2: Try to extract transcript from webhook payload
-      let transcript = body.transcript || body.messages || body.conversation || [];
+      let transcript = d.transcript || d.messages || body.transcript || body.messages || [];
       let transcriptText = '';
       
       if (Array.isArray(transcript) && transcript.length > 0) {
