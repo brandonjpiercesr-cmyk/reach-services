@@ -4710,7 +4710,7 @@ async function checkEmails(pulseId) {
           if (jobUrls.size > 0) {
             const jobList = Array.from(jobUrls).map(url => {
               const slug = url.split('/').pop();
-              const titleClean = slug.replace(/^[a-f0-9]{20}-/, '').replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+              const titleClean = slug.replace(/^[a-f0-9]{24,}-/, '').replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
               return { url, title: titleClean };
             });
             
@@ -4729,7 +4729,7 @@ async function checkEmails(pulseId) {
                   }, JSON.stringify({
                     model: 'claude-haiku-4-5-20251001',
                     max_tokens: 1000,
-                    system: 'Assign each job to a team track. Return ONLY a JSON array. TRACK RULES: executive_director (ED, CDO, VP, Senior Fundraising, PT $50+/hr REMOTE) → assignees ["brandon","eric"]. gmg_consultant (Consultant, Contractor, Fractional) → assignees ["gmg"]. director_of_development (Director of Dev, Marketing/Comms Director, Grant Writing) → assignees ["bj"]. development_manager (Dev Manager, Grants Manager, Foundation Relations) → assignees ["cj"]. coordinator (Coordinator, Programs, Community Outreach, Associate) → assignees ["vante"]. finance_ops (Finance, Accounting, Operations, Admin, Budget) → assignees ["dwayne"]. Return: [{"title":"...","track":"...","assignees":[...],"reason":"..."}]',
+                    system: 'Parse each Idealist job URL and assign to a team track. The URL slug contains hex-id + title + org + city. Parse out the REAL job title, organization name, and city. Then assign a track. Return ONLY a JSON array. TRACK RULES: executive_director (ED, CDO, VP, Senior Fundraising, PT $50+/hr REMOTE) → assignees ["brandon","eric"]. gmg_consultant (Consultant, Contractor, Fractional) → assignees ["gmg"]. director_of_development (Director of Dev, Marketing/Comms Director, Grant Writing) → assignees ["bj"]. development_manager (Dev Manager, Grants Manager, Foundation Relations) → assignees ["cj"]. coordinator (Coordinator, Programs, Community Outreach, Associate) → assignees ["vante"]. finance_ops (Finance, Accounting, Operations, Admin, Budget) → assignees ["dwayne"]. IGNORE RULES: dismiss non-remote, hybrid, European jobs. Dismiss: designer, editor, fellow, organizer, Swift Sports titles. Return: [{"title":"Clean Job Title","organization":"Real Org Name","location":"City, State","track":"...","assignees":[...],"reason":"...","dismiss":false}]. If dismiss=true, set assignees to ["IGNORED"] and track to "dismissed".',
                     messages: [{ role: 'user', content: 'Assign tracks:\n' + jobList.map((j,i) => (i+1) + '. ' + j.title + ' — ' + j.url).join('\n') }]
                   }));
                   const trackData = JSON.parse(trackRes.data.toString());
@@ -4762,7 +4762,7 @@ async function checkEmails(pulseId) {
                   
                   const sheet = trackMap[job.track] || 'Unassigned';
                   const crypto = require('crypto');
-                  const awaJob = { id: crypto.randomUUID(), organization: 'Idealist Org', job_title: job.title || 'Unknown', salary: '', url: job.url, status: 'NEW', assignees: job.assignees || [], sheet, source: 'idealist', imported_at: new Date().toISOString(), assignment_category: job.track || 'unassigned', assignment_reason: job.reason || 'Haiku PULSE auto-assign', apply_method: 'unknown' };
+                  const awaJob = { id: crypto.randomUUID(), organization: job.organization || 'Unknown Org', job_title: job.title || 'Unknown', salary: '', url: job.url, location: job.location || '', status: job.dismiss ? 'DISMISSED' : 'NEW', assignees: job.assignees || [], dismissed: job.dismiss || false, sheet, source: 'idealist', imported_at: new Date().toISOString(), assignment_category: job.track || 'unassigned', assignment_reason: job.reason || 'Haiku PULSE auto-assign', apply_method: 'unknown' };
                   
                   await httpsRequest({
                     hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
@@ -4772,7 +4772,7 @@ async function checkEmails(pulseId) {
                   }, JSON.stringify({ source: 'awa_job_' + awaJob.id, memory_type: 'awa_job', content: JSON.stringify(awaJob), importance: 7, user_id: 'system', is_system: true, tags: ['awa', 'job', 'idealist', sheet.toLowerCase()] }));
                   
                   written++;
-                  console.log('[PULSE:IMAN] AWA JOB: ' + awaJob.job_title + ' → ' + sheet);
+                  console.log('[PULSE:IMAN] AWA JOB: ' + awaJob.job_title + ' @ ' + awaJob.organization + ' → ' + sheet);
                 } catch (writeErr) { console.error('[PULSE:IMAN] Write error:', writeErr.message); }
               }
               console.log('[PULSE:IMAN] ' + written + '/' + jobList.length + ' jobs written (Option D — $0.002 Haiku)');
