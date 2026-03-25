@@ -2771,9 +2771,9 @@ async function AIR_escalate(event) {
       action = 'log_only';
     } else {
       // Fallback: look for keywords
-      if (responseText.includes('call brandon') || responseText.includes('phone call') || responseText.includes('call immediately')) {
-        action = 'call_emergency';
-      } else if (responseText.includes('text') || responseText.includes('sms')) {
+      // ⬡B:911:NO_AUTO_CALLS_V2:20260325⬡ SECOND escalation endpoint also disabled
+      // This was the REAL spam source — AIR response contained "call" and reach auto-dialed
+      if (responseText.includes('text') || responseText.includes('sms')) {
         action = 'sms_only';
       } else if (responseText.includes('email')) {
         action = 'email_only';
@@ -2792,10 +2792,9 @@ async function AIR_escalate(event) {
     let executionResult = { action, status: 'executed' };
     
     if (action === 'call_emergency') {
-      console.log('[AIR_escalate] ABABASE says CALL - executing...');
-      const spokenMessage = `Boss, this is ABA. ${content?.substring(0, 200) || 'I have an urgent matter to discuss.'}`;
-      const dialResult = await DIAL_callWithElevenLabs(targetPhone, spokenMessage, source || 'ababase_escalate');
-      executionResult = { action, status: dialResult.success ? 'call_initiated' : 'call_failed', conversation_id: dialResult.conversation_id };
+      // ⬡B:911:NO_AUTO_CALLS_V2:20260325⬡ Calls disabled — log only
+      console.log('[AIR_escalate] call_emergency BLOCKED — outbound calls disabled');
+      executionResult = { action: 'blocked', status: 'calls_disabled', reason: '911 rule: no auto-calls' };
     } else if (action === 'sms_only') {
       console.log('[AIR_escalate] ABABASE says SMS - executing...');
       const smsText = `[ABA] ${content?.substring(0, 140) || 'Check your messages when you can.'}`;
