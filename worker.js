@@ -4729,7 +4729,7 @@ async function checkEmails(pulseId) {
                   }, JSON.stringify({
                     model: 'claude-haiku-4-5-20251001',
                     max_tokens: 1000,
-                    system: 'Parse each Idealist job URL and assign to a team track. The URL slug contains hex-id + title + org + city. Parse out the REAL job title, organization name, and city. Then assign a track. Return ONLY a JSON array. TRACK RULES: executive_director (ED, CDO, VP, Senior Fundraising, PT $50+/hr REMOTE) → assignees ["brandon","eric"]. gmg_consultant (Consultant, Contractor, Fractional) → assignees ["gmg"]. director_of_development (Director of Dev, Marketing/Comms Director, Grant Writing) → assignees ["bj"]. development_manager (Dev Manager, Grants Manager, Foundation Relations) → assignees ["cj"]. coordinator (Coordinator, Programs, Community Outreach, Associate) → assignees ["vante"]. finance_ops (Finance, Accounting, Operations, Admin, Budget) → assignees ["dwayne"]. IGNORE RULES: dismiss non-remote, hybrid, European jobs. Dismiss: designer, editor, fellow, organizer, Swift Sports titles. Return: [{"title":"Clean Job Title","organization":"Real Org Name","location":"City, State","track":"...","assignees":[...],"reason":"...","dismiss":false}]. If dismiss=true, set assignees to ["IGNORED"] and track to "dismissed".',
+                    system: 'Parse each Idealist job URL and assign to a team track. The URL slug contains hex-id + title + org + city. Parse out the REAL job title, organization name, and city. Then assign a track. Return ONLY a JSON array.\n\nTRACK RULES (verified 2026-03-25):\n- executive_track: ED (Executive Director, part or full time), part-time development roles → assignees ["brandon","eric"]\n- pt_dev: Consultant, Contractor, Fractional, any part-time fundraising/development → assignees ["brandon","eric"]\n- bj_senior: CDO, VP, SVP, Head of Fundraising/Development/Philanthropy, Senior Director, Major Gifts Director/Officer, Managing Director, Capital Campaign → assignees ["bj"]\n- bj_dod: Director of Development, Director of Fundraising/Advancement/Philanthropy/Partnerships/Grants/Engagement/Growth, Deputy Director, Fundraising Lead → assignees ["bj"]\n- bj_marcom: Marketing Director/Manager/Coordinator/Specialist, Communications Director/Manager/Coordinator/Specialist, CMO, PR, Social Media Director/Manager, Content Producer, Press Secretary, Media Relations → assignees ["bj"]\n- bj_grantwriting: Grant Writer, Grant Officer, Grants Lead → assignees ["bj"]\n- cj_devmanager: Development Manager, Fundraising Manager, Grants Manager, Annual Fund Manager, Donor Relations Manager, Development Officer, Individual Giving, Prospect Research, Corporate Relations Manager, Senior Manager of Development, Earned Revenue Manager, Member Relations Manager, Strategic Partnerships Manager → assignees ["cj"] (CJ ALONE, never shared)\n- vante_programs: Program Director/Manager/Coordinator/Officer/Associate/Specialist (ALL levels), Community Outreach/Engagement, Youth roles, Volunteer roles, Regional Manager, Team Leader, Organizing, Engagement Coach/Lead, Mobilization → assignees ["vante"]\n- vante_coordinator: Development Associate, Development Coordinator, Fundraising Associate/Coordinator, Advancement Associate/Coordinator, other Associate/Coordinator/Specialist/Assistant level → assignees ["vante"]\n- dwayne_finance: Finance, Accounting, Accountant, Budget, CFO, Controller, Grants Compliance, Payroll, Fiscal, Financial Analyst → assignees ["dwayne"]\n- dwayne_ops: Operations Director/Manager/Coordinator/Officer, Office Manager, Facilities Manager, Administrative, HR, Business Manager, Contracts Manager → assignees ["dwayne"]\n\nIGNORE RULES: dismiss non-remote, hybrid, on-site, European jobs. Dismiss: designer, editor, fellow, organizer, engineer, software, data scientist, clinical, nursing, teacher, attorney, customer service, intern, Swift Sports, supply chain, Salesforce titles.\n\nReturn: [{"title":"Clean Job Title","organization":"Real Org Name","location":"City, State","track":"...","assignees":[...],"reason":"...","dismiss":false}]. If dismiss=true, set assignees to ["IGNORED"] and track to "dismissed".',
                     messages: [{ role: 'user', content: 'Assign tracks:\n' + jobList.map((j,i) => (i+1) + '. ' + j.title + ' — ' + j.url).join('\n') }]
                   }));
                   const trackData = JSON.parse(trackRes.data.toString());
@@ -4747,7 +4747,7 @@ async function checkEmails(pulseId) {
                 }
               }
               
-              const trackMap = { 'executive_director': 'Brandon_Eric', 'gmg_consultant': 'GMG', 'director_of_development': 'BJ', 'development_manager': 'CJ', 'coordinator': 'Vante', 'finance_ops': 'Dwayne' };
+              const trackMap = { 'executive_track': 'Brandon_Eric', 'pt_dev': 'Brandon_Eric', 'bj_senior': 'BJ', 'bj_dod': 'BJ', 'bj_marcom': 'BJ', 'bj_grantwriting': 'BJ', 'cj_devmanager': 'CJ', 'vante_programs': 'VANTE', 'vante_coordinator': 'VANTE', 'dwayne_finance': 'Dwayne', 'dwayne_ops': 'Dwayne', 'executive_director': 'Brandon_Eric', 'gmg_consultant': 'Brandon_Eric', 'director_of_development': 'BJ', 'development_manager': 'CJ', 'coordinator': 'VANTE', 'finance_ops': 'Dwayne' };
               let written = 0;
               for (const job of assignments) {
                 try {
@@ -10782,11 +10782,22 @@ RULES:
                 }
                 
                 const trackMap = {
+                  'executive_track': { sheet: 'Brandon_Eric', assignees: ['brandon', 'eric'] },
+                  'pt_dev': { sheet: 'Brandon_Eric', assignees: ['brandon', 'eric'] },
+                  'bj_senior': { sheet: 'BJ', assignees: ['bj'] },
+                  'bj_dod': { sheet: 'BJ', assignees: ['bj'] },
+                  'bj_marcom': { sheet: 'BJ', assignees: ['bj'] },
+                  'bj_grantwriting': { sheet: 'BJ', assignees: ['bj'] },
+                  'cj_devmanager': { sheet: 'CJ', assignees: ['cj'] },
+                  'vante_programs': { sheet: 'VANTE', assignees: ['vante'] },
+                  'vante_coordinator': { sheet: 'VANTE', assignees: ['vante'] },
+                  'dwayne_finance': { sheet: 'Dwayne', assignees: ['dwayne'] },
+                  'dwayne_ops': { sheet: 'Dwayne', assignees: ['dwayne'] },
                   'executive_director': { sheet: 'Brandon_Eric', assignees: ['brandon', 'eric'] },
-                  'gmg_consultant': { sheet: 'GMG', assignees: ['gmg'] },
+                  'gmg_consultant': { sheet: 'Brandon_Eric', assignees: ['brandon', 'eric'] },
                   'director_of_development': { sheet: 'BJ', assignees: ['bj'] },
                   'development_manager': { sheet: 'CJ', assignees: ['cj'] },
-                  'coordinator': { sheet: 'Vante', assignees: ['vante'] },
+                  'coordinator': { sheet: 'VANTE', assignees: ['vante'] },
                   'finance_ops': { sheet: 'Dwayne', assignees: ['dwayne'] }
                 };
                 const trackInfo = trackMap[job.track] || { sheet: 'Unassigned', assignees: [] };
