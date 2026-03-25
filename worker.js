@@ -11512,7 +11512,13 @@ We Are All ABA.`;
     try {
       // If HAM explicitly asks for a call, JUST CALL. No analysis needed.
       if (force_call === true) {
-        console.log('[ESCALATE] force_call=true - HAM requested call directly');
+        // ⬡B:911:NO_AUTO_CALLS:20260325⬡ force_call disabled — calls are user-initiated only
+        console.log('[ESCALATE] force_call DISABLED — calls are user-initiated only');
+        return jsonResponse(res, 200, {
+          success: false,
+          routing: 'FORCE_CALL*DISABLED',
+          decision: { action: 'blocked', reason: '911: Outbound calls disabled in escalation. User-initiated only.' }
+        });
         const targetPhone = '+13363898116';
         const spokenMessage = message || 'Hey, this is ABA calling as requested.';
         
@@ -11552,9 +11558,10 @@ We Are All ABA.`;
       let reasoning = airResult.response || 'AIR processed';
       
       // AIR tells us what to do
-      if (responseText.includes('call brandon') || responseText.includes('phone call') || responseText.includes('call immediately')) {
-        action = 'call';
-      } else if (responseText.includes('text') || responseText.includes('sms')) {
+      // ⬡B:911:NO_AUTO_CALLS:20260325⬡ Escalation NEVER auto-dials. 
+      // Brandon got 30+ spam calls because AIR kept saying "call" in escalation responses.
+      // Calls are USER-INITIATED or explicit HAM request ONLY.
+      if (responseText.includes('text') || responseText.includes('sms')) {
         action = 'sms';
       } else if (responseText.includes('email')) {
         action = 'email';
