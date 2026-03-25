@@ -11075,8 +11075,31 @@ RULES:
   
   if (path === '/api/call/dial' && method === 'POST') {
     const body = await parseBody(req);
-    const { to, purpose, message, userId, record, max_duration_seconds } = body;
+    const { to, purpose, message, userId, record, max_duration_seconds, source: callSource } = body;
     const callContent = message || purpose || 'Just checking in.';
+    
+    // ⬡B:911:CALL_TRACE:20260325⬡ Log EVERY call attempt with source for debugging
+    const callerIP = req.headers['x-forwarded-for'] || req.connection?.remoteAddress || 'unknown';
+    const referer = req.headers['referer'] || req.headers['origin'] || 'none';
+    console.log('[DIAL v2] *** CALL TRACE ***');
+    console.log('[DIAL v2] To:', to, '| Source:', callSource || 'NOT PROVIDED');
+    console.log('[DIAL v2] CallerIP:', callerIP, '| Referer:', referer);
+    console.log('[DIAL v2] Content:', callContent.substring(0, 100));
+    console.log('[DIAL v2] All body keys:', Object.keys(body).join(', '));
+    
+    // Store trace to brain for debugging
+    storeToBrain({
+      content: JSON.stringify({ to, source: callSource, callerIP, referer, content: callContent.substring(0, 200), bodyKeys: Object.keys(body), timestamp: new Date().toISOString() }),
+      memory_type: 'call_trace',
+      source: 'dial_trace_' + Date.now(),
+      importance: 9
+    }).catch(() => {});
+    
+    // ⬡B:911:BLOCK_ALL_OUTBOUND:20260325⬡ TEMPORARY: Block ALL outbound calls until spam is resolved
+    if (to === '+13363898116') {
+      console.log('[DIAL v2] *** BLOCKED *** Call to Brandon blocked by 911 rule');
+      return jsonResponse(res, 200, { success: false, blocked: true, reason: '911: All outbound calls to Brandon blocked until spam is resolved', trace: 'dial_trace_' + Date.now() });
+    }
     
     console.log('[DIAL v2] Initiating call to:', to, '| Content:', callContent.substring(0, 100));
     
