@@ -636,6 +636,12 @@ async function queryBrainRecent(limit = 5) {
 
 // Make a DAWN briefing call
 async function DAWN_makeCall(targetPhone, targetName) {
+  // ⬡B:911:DAWN_CALLS_DISABLED:20260325⬡
+  // ALL scheduled outbound calls REMOVED. Calls are user-initiated or AIR-escalation ONLY.
+  // Brandon got 30+ spam calls on March 25 2026 from this function + heartbeat + cron.
+  console.log('[DAWN] DISABLED — outbound calls removed. Briefings delivered via email/notification only.');
+  return { success: false, disabled: true, reason: 'Outbound calls removed. User-initiated or AIR-escalation only.' };
+  // DEAD CODE BELOW — kept for reference only
   console.log('[DAWN] Making briefing call to:', targetName);
   
   // Generate the briefing content
@@ -13018,7 +13024,8 @@ httpServer.listen(PORT, '0.0.0.0', () => {
   // ═══════════════════════════════════════════════════════════════════════════
   // ⬡B:cron:REENABLED:gemini:20260309⬡
   // RE-ENABLED - Uses Gemini Flash now
-  console.log('[CRON] DISABLED - Internal cron disabled to save costs');
+  console.log('[CRON] DISABLED - Internal cron disabled. Outbound calls removed 2026-03-25.');
+  return; // ⬡B:911:CRON_DISABLED:20260325⬡ DO NOT REMOVE THIS RETURN
   setInterval(async () => {
     try {
       const dueCalls = await checkScheduledCalls();
@@ -13053,6 +13060,9 @@ httpServer.listen(PORT, '0.0.0.0', () => {
             let callResult;
             
             if (call.call_type === 'dawn_briefing') {
+              // ⬡B:911:DAWN_CALLS_DISABLED:20260325⬡
+              console.log('[CRON] DAWN call SKIPPED — outbound calls disabled');
+              continue;
               callResult = await DAWN_makeCall(call.target_phone, call.target_name);
             } else {
               // Regular scheduled call via ElevenLabs
