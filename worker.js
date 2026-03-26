@@ -11095,11 +11095,12 @@ RULES:
       importance: 9
     }).catch(() => {});
     
-    // ⬡B:911:BLOCK_ALL_OUTBOUND:20260325⬡ TEMPORARY: Block ALL outbound calls until spam is resolved
-    if (to === '+13363898116') {
-      console.log('[DIAL v2] *** BLOCKED *** Call to Brandon blocked by 911 rule');
-      return jsonResponse(res, 200, { success: false, blocked: true, reason: '911: All outbound calls to Brandon blocked until spam is resolved', trace: 'dial_trace_' + Date.now() });
-    }
+    // ⬡B:911:BLOCK_REMOVED:20260326⬡ Hard block on Brandon's number REMOVED.
+    // Originally added March 25 during spam incident. Actual spam sources now fixed:
+    // 1. Email channel added to autoChannels in airExecutor.js (commit f026a1e57f5c)
+    // 2. Escalation endpoint already blocks calls (line 2794 and 11583 in this file)
+    // 3. DAWN dedup ensures max 1 call per day per HAM
+    // The hard block was preventing ALL calls including legitimate DAWN briefings.
     
     console.log('[DIAL v2] Initiating call to:', to, '| Content:', callContent.substring(0, 100));
     
