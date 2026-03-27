@@ -6927,10 +6927,15 @@ function createEmailMessage(to, subject, body, from = 'brandonjpierce@gmail.com'
     .replace(/=+$/, '');
 }
 
-// Send email via Gmail API
+// ⬡B:911:FIX:gmail_direct_disabled:20260326⬡
+// DISABLED: Was sending from Brandon's Gmail directly, bypassing Nylas/Claudette.
+// No draft approval, no CC to Brandon, no quality gate. Violates 911 Rule 2.
+// Now redirects to IMAN_sendEmail (Claudette path) which has all safety gates.
 async function IMAN_sendEmailGmail(to, subject, body) {
-  console.log('[IMAN GMAIL] Sending to:', to, 'Subject:', subject);
+  console.log('[IMAN GMAIL] REDIRECTED to Claudette path (911 fix). To:', to);
+  return await IMAN_sendEmail({ to, subject, body });
   
+  // === DEAD CODE BELOW (original Gmail direct send, kept for reference) ===
   const accessToken = await getGmailAccessToken();
   if (!accessToken) {
     return { success: false, error: 'Could not get Gmail access token' };
@@ -6974,15 +6979,30 @@ async function IMAN_sendEmailGmail(to, subject, body) {
   }
 }
 
-// Lookup email for contact
-function getContactEmail(name) {
-  const emails = {
-    eric: 'dr.ericlane@gmail.com',  // Example - replace with real
-    bj: 'bj@example.com',
-    cj: 'cj@example.com',
-    brandon: 'brandonjpierce@gmail.com'
-  };
-  return emails[name?.toLowerCase()] || null;
+// ⬡B:911:FIX:rolo_lookup_not_hardcoded:20260326⬡
+// FIXED: Was hardcoded with WRONG emails (Eric=dr.ericlane, BJ/CJ=example.com).
+// Now uses ROLO lookup from aba_contacts table. Falls back to null if not found.
+async function getContactEmail(name) {
+  if (!name) return null;
+  const searchName = name.toLowerCase().trim();
+  try {
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY;
+    const r = await fetch(
+      SUPABASE_URL + '/rest/v1/aba_contacts?or=(name.ilike.*' + encodeURIComponent(searchName) + '*,nicknames.cs.{' + encodeURIComponent(searchName) + '})&limit=1',
+      { headers: { 'apikey': key, 'Authorization': 'Bearer ' + key } }
+    );
+    if (r.ok) {
+      const contacts = await r.json();
+      if (contacts.length > 0 && contacts[0].email) {
+        console.log('[ROLO] Contact found:', contacts[0].name, '->', contacts[0].email);
+        return contacts[0].email;
+      }
+    }
+  } catch (e) {
+    console.log('[ROLO] Contact lookup error:', e.message);
+  }
+  console.log('[ROLO] No contact found for:', searchName);
+  return null;
 }
 
 // Voice command: "Send an email to Eric about the meeting"
