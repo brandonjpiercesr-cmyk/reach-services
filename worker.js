@@ -7022,7 +7022,8 @@ async function IMAN_voiceEmailCommand(message, callerIdentity) {
   const recipientName = toMatch[1];
   const topic = aboutMatch ? aboutMatch[1] : 'follow up';
   
-  const recipientEmail = getContactEmail(recipientName);
+  // ⬡B:911:FIX:await_async_rolo_lookup:20260327⬡
+  const recipientEmail = await getContactEmail(recipientName);
   if (!recipientEmail) {
     return { success: false, response: `I don't have an email address for ${recipientName}. What's their email?` };
   }
