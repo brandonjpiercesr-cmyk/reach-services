@@ -13698,7 +13698,7 @@ async function loopRadarScan() {
       if (result) {
         await loopSupaWrite('aba_memory', {
           content: '[COMMAND_CENTER] RADAR*AIR*validated: ' + result.substring(0, 500),
-          memory_type: 'system', categories: ['command_center', 'radar'],
+          memory_type: 'command_center_activity', categories: ['command_center', 'radar'],
           importance: 6, is_system: true,
           source: 'radar_auto_' + new Date().toISOString(),
           tags: ['command_center', 'radar', 'processed']
@@ -13727,7 +13727,7 @@ async function loopMaceScan() {
     if (review) {
       await loopSupaWrite('aba_memory', {
         content: '[COMMAND_CENTER] MACE*AIR*architecture_review: ' + review.substring(0, 500),
-        memory_type: 'system', categories: ['command_center', 'mace'],
+        memory_type: 'command_center_activity', categories: ['command_center', 'mace'],
         importance: 7, is_system: true,
         source: 'mace_auto_' + new Date().toISOString(),
         tags: ['command_center', 'mace', 'architecture']
@@ -13756,7 +13756,7 @@ async function loopScoutScan() {
     if (scan) {
       await loopSupaWrite('aba_memory', {
         content: '[COMMAND_CENTER] SCOUT*AIR*compliance_scan: ' + scan.substring(0, 500),
-        memory_type: 'system', categories: ['command_center', 'scout'],
+        memory_type: 'command_center_activity', categories: ['command_center', 'scout'],
         importance: 7, is_system: true,
         source: 'scout_auto_' + new Date().toISOString(),
         tags: ['command_center', 'scout', 'compliance']
