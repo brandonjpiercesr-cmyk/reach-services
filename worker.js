@@ -10975,7 +10975,50 @@ We Are All ABA.`;
         }
       };
 
-      console.log('[DIAL v2] Calling ElevenLabs with conversation_initiation_client_data (no PATCH needed)...');
+      console.log('[DIAL v2] Calling ElevenLabs with agent_overrides...');
+      
+      // ⬡B:DIAL:FIX:write_pending_instruction_and_preload:20260330⬡
+      // CRITICAL: agent_overrides is IGNORED by Custom LLM mode.
+      // VARA reads her system prompt from FCW cache built by preloadCallContext.
+      // preloadCallContext reads vara_pending_instruction from brain.
+      // Without this write + preload, VARA has NO IDEA what the call is about.
+      // March 30 2026: DAWN briefing had real data but VARA said nothing because
+      // the briefing was in agent_overrides (ignored) not vara_pending_instruction.
+      const varaConvId = 'vara_call_' + Date.now();
+      try {
+        await storeToBrain({
+          source: 'vara_pending_' + varaConvId,
+          memory_type: 'vara_pending_instruction',
+          content: JSON.stringify({
+            instruction: callContent,
+            ham: body.userId || 'brandon',
+            hamName: hamName,
+            requester: callSource || 'dial',
+            timestamp: new Date().toISOString(),
+            conversation_id: varaConvId
+          }),
+          importance: 9,
+          tags: ['vara', 'pending', 'instruction', 'ham_' + (body.userId || 'brandon'), 'unread']
+        });
+        console.log('[DIAL v2] vara_pending_instruction written to brain (' + callContent.length + ' chars)');
+      } catch (pendErr) {
+        console.error('[DIAL v2] Failed to write pending instruction:', pendErr.message);
+      }
+      
+      // Preload FCW cache on abacia-services so VARA has context on first turn
+      // Init-context webhook only fires for INBOUND calls.
+      try {
+        const preloadRes = await httpsRequest({
+          hostname: 'abacia-services.onrender.com',
+          path: '/vara/preload',
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        }, JSON.stringify({ conversation_id: varaConvId, phone: phoneNumber }));
+        console.log('[DIAL v2] FCW preloaded:', preloadRes.status);
+      } catch (preloadErr) {
+        console.log('[DIAL v2] Preload failed (call will use slow path):', preloadErr.message);
+      }
+      
       
       const callResult = await httpsRequest({
         hostname: 'api.elevenlabs.io',
