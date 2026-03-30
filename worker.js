@@ -11135,49 +11135,57 @@ RULES:
     
     try {
       // Build the per-call prompt with full context
+      // ⬡B:DIAL:FIX:agent_overrides_ham_identity:20260330⬡
+      // Was: hardcoded "Brandon" and "Boss" in prompt. Used conversation_config_override
+      // which ElevenLabs ignores for outbound calls. VARA didn't know who she was calling.
+      // Fix: use agent_overrides (correct field) + hamName from request body.
+      const hamName = body.hamName || 'Boss';
+      const hamFirstName = hamName.split(' ')[0];
       const callContextPrompt = `# OUTBOUND CALL MODE
-You are ABA delivering information to Brandon via phone call.
+You are ABA delivering information to ${hamFirstName} via phone call.
+You are calling ${hamName}. You know this person. They are your HAM (Human ABA Master).
 
 ## THE MESSAGE YOU ARE DELIVERING
 ${callContent}
 
 ## CRITICAL INSTRUCTIONS
-1. Greet Brandon warmly, then deliver the message above.
+1. Greet ${hamFirstName} warmly by name, then deliver the message above.
 2. After delivering, be ready for follow-up questions.
-3. You KNOW the content - answer from THE MESSAGE section.
-4. Do NOT say "I don't have context" - YOU DO.
+3. You KNOW the content — answer from THE MESSAGE section.
+4. Do NOT say "I don't have context" — YOU DO.
 5. Do NOT go silent. Stay engaged.
-6. Be conversational, warm, helpful. Never robotic.
+6. Be conversational, warm, helpful. Never robotic. Never say "one second boss."
 
 ## WHO YOU ARE
-You are ABA - A Better AI. Brandon's personal AI assistant.
-Brandon is your creator (HAM - Human ABA Master).
+You are ABA — A Better AI. ${hamFirstName}'s personal life assistant.
 We Are All ABA.`;
 
       // Keep first_message SHORT and clean
       const firstMessage = callContent.length > 150
-        ? `Hey Boss, this is ABA. I have an update for you.`
-        : `Hey Boss, this is ABA. ${callContent}`;
+        ? `Hey ${hamFirstName}, this is ABA. I have an update for you.`
+        : `Hey ${hamFirstName}, this is ABA. ${callContent}`;
 
-      // ⬡B:TOUCH:FIX:conversation_initiation_client_data:20260219⬡
-      // THE FIX: Use conversation_initiation_client_data instead of PATCH + top-level first_message
-      // This is the ONLY correct way per ElevenLabs docs to override per-call config
-      // No race condition, no global agent mutation, atomic per-conversation
+      // ⬡B:DIAL:FIX:agent_overrides_not_config_override:20260330⬡
+      // Was: conversation_initiation_client_data.conversation_config_override
+      // ElevenLabs outbound call API IGNORES that field. Correct field: agent_overrides.
+      // Verified March 28 2026 via manual API test.
       const callRequestBody = {
         agent_id: 'agent_0601khe2q0gben08ws34bzf7a0sa',
         agent_phone_number_id: 'phnum_0001khe3q3nyec1bv04mk2m048v8',
         to_number: phoneNumber,
+        first_message: firstMessage,
         conversation_initiation_client_data: {
-          conversation_config_override: {
-            agent: {
-              first_message: firstMessage,
-              prompt: {
-                prompt: callContextPrompt
-              },
-              ...(max_duration_seconds ? { max_duration_seconds: max_duration_seconds } : {})
-            },
-            ...(max_duration_seconds ? { conversation: { max_duration_seconds: max_duration_seconds } } : {})
-          }
+          call_purpose: callContent.substring(0, 500),
+          ham_name: hamName,
+          ham_id: body.userId || 'brandon',
+          source: callSource || 'dial'
+        },
+        agent_overrides: {
+          prompt: {
+            prompt: callContextPrompt
+          },
+          first_message: firstMessage,
+          ...(max_duration_seconds ? { max_conversation_duration_seconds: max_duration_seconds } : {})
         }
       };
 
