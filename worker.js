@@ -13725,42 +13725,13 @@ async function loopHunchCheck() {
 }
 
 // DAWN: Morning brief at 6:30 AM EST
-async function loopDawnBrief() {
-  const now = new Date();
-  const timeStr = now.toLocaleString('en-US', { timeZone: TIMEZONE, hour: 'numeric', minute: 'numeric', hour12: false });
-  const parts = timeStr.split(':');
-  const hour = parseInt(parts[0]); const minute = parseInt(parts[1]);
-  if (hour !== 6 || minute < 25 || minute > 35) return false;
-
-  const today = now.toISOString().split('T')[0];
-  const existing = await loopSupaRead('aba_memory',
-    'memory_type=eq.system&content=ilike.*dawn_brief*&content=ilike.*' + today + '*&limit=1'
-  );
-  if (existing.length > 0) return false;
-
-  console.log('[AIR*DAWN*LOOP] Generating morning brief...');
-  const recentMemories = await loopSupaRead('aba_memory', 'order=created_at.desc&limit=10');
-  const context = recentMemories.map(function(m) { return m.content; }).join('\n---\n');
-
-  const brief = await loopAirCall(
-    'Today is ' + now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }) + '.\n\nRecent context:\n' + context,
-    'You are VARA (Vocal Authorized Representative of ABA), Brandon Pierce\'s AI — part butler, part real friend. Generate a morning briefing that flows between business updates and personal warmth. Address Brandon as "sir" sometimes but also talk like a friend who has his back. Example: "Good morning, sir. So here is what we got today — your calendar is clear until 11 which is nice, and oh, that Idealist posting you liked? Deadline is today so I already drafted something. Let me know if you want me to send it." Keep it conversational, NOT a list.',
-    'claude-sonnet-4-5-20250929'
-  );
-
-  if (brief) {
-    await loopSupaWrite('aba_memory', {
-      content: 'dawn_brief ' + today + ': ' + brief,
-      memory_type: 'system', categories: ['dawn', 'brief'],
-      importance: 7, is_system: true,
-      source: 'dawn_auto_' + today,
-      tags: ['dawn', 'brief', 'unread']
-    });
-    console.log('[AIR*DAWN*LOOP] Morning brief stored');
-    return true;
-  }
-  return false;
-}
+// ⬡B:CLEANUP:loopDawnBrief_removed:20260401⬡
+// REMOVED: loopDawnBrief() — generated generic briefing from raw brain memories using Gemini.
+// Did NOT use Nylas calendar, email, news, or sports. Just asked an LLM to hallucinate a briefing.
+// DAWN V2 on abacia-services (DAWNService_v2.runForAllHAMs → executeDAWNBriefing) pulls real data.
+// Also deleted brain entry dawn.schedule.active (autonomous_schedule) that fired competing
+// "Generate morning briefing email" with purple gradient through AIR.process() at 6 AM daily.
+async function loopDawnBrief() { return false; }
 
 // GHOST: Overnight processing at 11 PM EST
 async function loopGhostOvernight() {
