@@ -3341,11 +3341,11 @@ Respond in JSON ONLY:
     maceArchitecture = { implementation_plan: [], new_agents_proposed: [], architecture_decisions: [], routing_traces: [], dependencies: [], risk_flags: ['MACE parse failed'], estimated_complexity: 'unknown' };
   }
 
-  // ─── STEP 4: TIM validates everything ───────────────────────────────────────
-  console.log('[THINK TANK] Step 4/6 → TIM validating...');
+  // ─── STEP 4: Validation (NOTE: variable names say "tim" for legacy compatibility but this is NOT Agent TIM. Agent TIM = Temporary Interim Model = verbal filler for live meetings in the COOKING dept) ───
+  console.log('[THINK TANK] Step 4/6 → Validating...');
   let timValidation;
   try {
-    const timRaw = await callModelDeep(`You are TIM (Testing & Integration Manager), an AI agent inside the ABA Think Tank.
+    const timRaw = await callModelDeep(`You are the Think Tank Validator, an AI validation step inside the ABA Think Tank pipeline.
 
 TASK: Validate MACE's plan against LUKE's requirements. Find contradictions, risks, verify feasibility.
 
@@ -3370,10 +3370,10 @@ Respond in JSON ONLY:
 }`, 1500);
 
     timValidation = JSON.parse(timRaw.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim());
-    console.log(`[THINK TANK] TIM: ${timValidation.overall_verdict}, coverage: ${timValidation.coverage_score}%`);
+    console.log(`[THINK TANK] Validation: ${timValidation.overall_verdict}, coverage: ${timValidation.coverage_score}%`);
   } catch (e) {
-    console.log('[THINK TANK] TIM parse error:', e.message);
-    timValidation = { overall_verdict: 'NEEDS_REVISION', coverage_score: 50, missing_requirements: [], contradictions_found: [], orphan_process_violations: [], risk_assessment: [], suggestions: ['TIM validation failed'], blocking_issues: [] };
+    console.log('[THINK TANK] Validation parse error:', e.message);
+    timValidation = { overall_verdict: 'NEEDS_REVISION', coverage_score: 50, missing_requirements: [], contradictions_found: [], orphan_process_violations: [], risk_assessment: [], suggestions: ['Validation step failed'], blocking_issues: [] };
   }
 
   // ─── STEP 5: AUDRA generates documentation ─────────────────────────────────
@@ -3388,7 +3388,7 @@ SESSION: Tank ID ${tankId} | Source: ${source || 'direct'} | Title: ${title || '
 
 LUKE (Intelligence): ${JSON.stringify(lukeExtract, null, 2)}
 MACE (Architecture): ${JSON.stringify(maceArchitecture, null, 2)}
-TIM (Validation): ${JSON.stringify(timValidation, null, 2)}
+Validation: ${JSON.stringify(timValidation, null, 2)}
 
 Respond in JSON ONLY:
 {
