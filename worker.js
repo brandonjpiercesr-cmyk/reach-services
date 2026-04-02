@@ -931,14 +931,48 @@ console.log('[API] 9 routes live');
 console.log('═══════════════════════════════════════════════════════════');
 
 // ⬡B:AIR:REACH.UTIL.HTTPS:CODE:infrastructure.http.requests:AIR→REACH:T10:v1.5.0:20260213:h1t2p⬡
+// ⬡B:air.call:CODE:reach.httpsRequest.air_tracked:20260402⬡
+// AIR gateway for reach-services. Every Anthropic call tracked via logEvent_reach.
 function httpsRequest(options, postData) {
+  const isAnthropicCall = options.hostname === 'api.anthropic.com';
+  const startTime = Date.now();
+  
+  // Extract model from postData for tracking
+  let model = 'unknown';
+  if (isAnthropicCall && postData) {
+    try { model = JSON.parse(postData).model || 'unknown'; } catch(e) {}
+  }
+  
+  if (isAnthropicCall) {
+    try { logEvent_reach({ trigger: 'reach_api_call', action: 'anthropic_call', channel: 'reach', model, detail: 'reach-services → Anthropic ' + model }); } catch(e) {}
+  }
+
   return new Promise((resolve, reject) => {
     const req = https.request(options, (res) => {
       const chunks = [];
       res.on('data', chunk => chunks.push(chunk));
-      res.on('end', () => resolve({ status: res.statusCode, data: Buffer.concat(chunks) }));
+      res.on('end', () => {
+        const result = { status: res.statusCode, data: Buffer.concat(chunks) };
+        
+        // Track cost on Anthropic calls
+        if (isAnthropicCall) {
+          try {
+            const body = JSON.parse(result.data.toString());
+            const usage = body.usage || {};
+            const dur = Date.now() - startTime;
+            logEvent_reach({ trigger: 'reach_api_call', action: 'anthropic_complete', result: result.status === 200 ? 'success' : 'error', channel: 'reach', model, detail: model + ' | ' + dur + 'ms | in:' + (usage.input_tokens || 0) + ' out:' + (usage.output_tokens || 0) });
+          } catch(e) {}
+        }
+        
+        resolve(result);
+      });
     });
-    req.on('error', reject);
+    req.on('error', (err) => {
+      if (isAnthropicCall) {
+        try { logEvent_reach({ trigger: 'reach_api_call', action: 'anthropic_error', result: 'error', channel: 'reach', model, detail: err.message }); } catch(e) {}
+      }
+      reject(err);
+    });
     req.setTimeout(15000, () => { req.destroy(); reject(new Error('Timeout')); });
     if (postData) req.write(postData);
     req.end();
@@ -13530,6 +13564,8 @@ async function loopAirCall(message, systemPrompt, model) {
   // TIER 2: Claude Haiku (cheap fallback)
   if (!ANTHROPIC_KEY) { console.warn('[AIR-LOOP] No keys available'); return null; }
   try {
+    // ⬡B:air.call:CODE:reach.autonomous_loop_tracked:20260402⬡ Tracked through AIR
+    try { logEvent_reach({ trigger: 'reach_api_call', action: 'autonomous_loop_haiku', channel: 'autonomous', model: 'claude-haiku-4-5-20251001', detail: 'Autonomous loop Haiku fallback' }); } catch(e) {}
     const r = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
