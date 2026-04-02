@@ -13621,7 +13621,7 @@ async function loopMaceScan() {
   if (loopCount % 12 !== 0) return 0;
   
   const recentChanges = await loopSupaRead('aba_memory',
-    'memory_type=eq.system&content=ilike.*DEPLOYED*&order=created_at.desc&limit=5'
+    'memory_type=eq.command_center_activity&content=ilike.*DEPLOYED*&order=created_at.desc&limit=5'
   );
   if (recentChanges.length > 0) {
     const context = recentChanges.map(function(r) { return r.content; }).join('\n---\n');
