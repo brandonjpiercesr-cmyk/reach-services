@@ -10390,7 +10390,7 @@ if (path === '/api/sms/send' && method === 'POST') {
             const vipInfo = VIP_SENDERS[fromEmail.toLowerCase()] || null;
             const isVIP = !!vipInfo;
             
-            const airPrompt = `You are Claudette Aims, Executive Assistant at Global Majority Group, powered by ABA (A Better AI).
+            const airPrompt = `You are ABA (A Better AI), the life assistant at Global Majority Group.
 ${isVIP ? `IMPORTANT: This email is from ${vipInfo.name} (${vipInfo.role}), trust level ${vipInfo.trust}. This is a VIP. Be thorough and helpful.` : `The sender is ${fromName} (${fromEmail}). Trust level: ${senderIdentity.trust}.`}
 
 Subject: ${subject}
@@ -10405,7 +10405,7 @@ RULES:
 - If they share work for review → give thoughtful, relevant feedback.
 - NEVER give random unrelated information. Stay on topic.
 - Be warm, professional, and helpful. You are Claudette.
-- Sign off as Claudette Aims, Executive Assistant, Global Majority Group.` +
+- Sign off as ABA | A Better AI, Global Majority Group.` +
               (isVIP ? '\n- This is a VIP sender. Prioritize their request. Be extra thorough.' : '');
             
             // ⬡B:AIR:REACH.IMAN.DIRECT:CODE:email.bypass.generic.router:T10:v2.7.0:20260220⬡
