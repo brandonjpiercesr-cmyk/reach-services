@@ -3308,7 +3308,7 @@ Respond in JSON ONLY (no markdown, no backticks):
   console.log('[THINK TANK] Step 3/6 → MACE structuring architecture...');
   let maceArchitecture;
   try {
-    const maceRaw = await callModelDeep(`You are MACE (Mason Architecture & Construction Engine), an AI agent inside the ABA Think Tank.
+    const maceRaw = await callModelDeep(`You are MACE (Master Architecture and Code Engine), an AI agent inside the ABA Think Tank.
 
 TASK: Take LUKE's extracted intelligence and COLE's brain context, then architect a structured implementation plan.
 
@@ -13579,7 +13579,7 @@ async function loopRadarScan() {
   return tasks.length;
 }
 
-// MACE (Master Architecture Compliance Engine): Reviews architecture decisions
+// MACE (Master Architecture and Code Engine): Reviews architecture decisions
 async function loopMaceScan() {
   // Only run every 12th tick (1 hour)
   if (loopCount % 12 !== 0) return 0;
@@ -13591,7 +13591,7 @@ async function loopMaceScan() {
     const context = recentChanges.map(function(r) { return r.content; }).join('\n---\n');
     const review = await loopAirCall(
       'Review these recent deployments for architecture compliance:\n' + context,
-      'You are MACE (Master Architecture Compliance Engine). Check: (1) Does everything route through AIR? (2) Are ACL tags present? (3) Agent ownership assigned? (4) No orphan services? (5) Hierarchy L6→L1 maintained? Return JSON: { "compliant": true/false, "violations": [], "score": 0-10, "recommendations": [] }',
+      'You are MACE (Master Architecture and Code Engine). Check: (1) Does everything route through AIR? (2) Are ACL tags present? (3) Agent ownership assigned? (4) No orphan services? (5) Hierarchy L6→L1 maintained? Return JSON: { "compliant": true/false, "violations": [], "score": 0-10, "recommendations": [] }',
       'claude-haiku-4-5-20251001'
     );
     if (review) {
