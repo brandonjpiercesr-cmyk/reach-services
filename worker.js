@@ -862,7 +862,7 @@ const NYLAS_API_URI = process.env.NYLAS_API_URI || 'https://api.us.nylas.com';
 const CLAUDETTE_SIGNATURE = `
 <br><br>
 <div style="font-family: Arial, sans-serif; font-size: 14px; color: #333;">
-  <p style="margin: 0; font-weight: bold;">Claudette Aims</p>
+  <p style="margin: 0; font-weight: bold;">ABA | A Better AI</p>
   <p style="margin: 0; color: #666;">Executive Assistant</p>
   <p style="margin: 0; color: #8B5CF6;">Global Majority Group</p>
   <p style="margin: 8px 0 0 0; font-size: 12px; color: #888;">
@@ -5993,7 +5993,7 @@ async function postCallAutomation(session) {
         const emailMatch = emailResults[0].content.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2}/);
         if (emailMatch) {
           const callerEmail = emailMatch[0];
-          const emailHtml = '<div style="font-family:system-ui;max-width:600px;margin:0 auto"><h2 style="color:#333">Hey ' + callerName + '!</h2><p>It was so great talking with you on the phone. Brandon wanted me to follow up and say thanks for checking us out.</p><p>You are part of something special. ABA is being built to be more than just an AI assistant - a true life partner that actually does the work for you.</p><p>When ABACUS drops, you will be the first to know.</p><p>Talk soon!</p><p style="color:#666"><strong>ABA</strong> (A Better AI)<br>Global Majority Group<br><em>claudette@globalmajoritygroup.com</em></p></div>';
+          const emailHtml = '<div style="font-family:system-ui;max-width:600px;margin:0 auto"><h2 style="color:#333">Hey ' + callerName + '!</h2><p>It was so great talking with you on the phone. Brandon wanted me to follow up and say thanks for checking us out.</p><p>You are part of something special. ABA is being built to be more than just an AI assistant - a true life partner that actually does the work for you.</p><p>When ABACUS drops, you will be the first to know.</p><p>Talk soon!</p><p style="color:#666"><strong>ABA</strong> (A Better AI)<br>Global Majority Group<br><em>aba@globalmajoritygroup.com</em></p></div>';
           
           const emailResult = await sendEmailFromCall(callerEmail, callerName, 'Great talking with you! - ABA', emailHtml);
           if (emailResult.success) {
@@ -6028,7 +6028,7 @@ async function postCallAutomation(session) {
     '</div>';
   
   const emailResult = await sendEmailFromCall(
-    'claudette@globalmajoritygroup.com',
+    'aba@globalmajoritygroup.com',
     'Brandon Pierce',
     emailSubject,
     emailBody
@@ -9677,7 +9677,7 @@ if (path === '/api/sms/send' && method === 'POST') {
 
   // ═══════════════════════════════════════════════════════════════════════
   // ⬡B:AIR:REACH.API.EMAIL_SEND:CODE:email.send.nylas:AIR→IMAN→NYLAS→RECIPIENT:T9:v1.8.0:20260214:e1s2n⬡
-  // Send email via Nylas (from claudette@globalmajoritygroup.com)
+  // Send email via Nylas (from aba@globalmajoritygroup.com)
   // ROUTING: AIR→IMAN→REACH→NYLAS→SMTP→RECIPIENT
   // ═══════════════════════════════════════════════════════════════════════
 
@@ -9688,7 +9688,7 @@ if (path === '/api/sms/send' && method === 'POST') {
   if (path === '/api/nylas/auth' && method === 'GET') {
     try {
       const urlObj = new URL(req.url, 'https://' + req.headers.host);
-      const email = urlObj.searchParams.get('email') || 'claudette@globalmajoritygroup.com';
+      const email = urlObj.searchParams.get('email') || 'aba@globalmajoritygroup.com';
       
       const authResult = await httpsRequest({
         hostname: 'api.us.nylas.com',
@@ -9910,7 +9910,7 @@ if (path === '/api/sms/send' && method === 'POST') {
       // Nylas may return grant_id directly (hosted auth) or code (custom auth)
       if (grantIdDirect && success === 'true') {
         // Direct grant - store it immediately
-        const email = urlObj.searchParams.get('email') || 'claudette@globalmajoritygroup.com';
+        const email = urlObj.searchParams.get('email') || 'aba@globalmajoritygroup.com';
         const provider = urlObj.searchParams.get('provider') || 'google';
         console.log('[NYLAS] Direct grant received: ' + grantIdDirect + ' for ' + email);
         
@@ -10004,7 +10004,7 @@ if (path === '/api/sms/send' && method === 'POST') {
 
   // ═══════════════════════════════════════════════════════════════════════
   // ⬡B:AIR:REACH.API.EMAIL_SEND:CODE:email.send.nylas:AIR→IMAN→NYLAS→RECIPIENT:T9:v1.8.0:20260214:e1s2n⬡
-  // Send email through Nylas (from claudette@globalmajoritygroup.com)
+  // Send email through Nylas (from aba@globalmajoritygroup.com)
   // ═══════════════════════════════════════════════════════════════════════
   if (path === '/api/email/send' && method === 'POST') {
     try {
@@ -10034,7 +10034,7 @@ if (path === '/api/sms/send' && method === 'POST') {
         htmlParagraphs +
         '<br><br>' +
         '<div style="font-family: Arial, sans-serif; font-size: 14px; color: #333;">' +
-        '<p style="margin: 0; font-weight: bold;">Claudette Aims</p>' +
+        '<p style="margin: 0; font-weight: bold;">ABA | A Better AI</p>' +
         '<p style="margin: 0; color: #666;">Executive Assistant</p>' +
         '<p style="margin: 0; color: #8B5CF6;">Global Majority Group</p>' +
         '<p style="margin: 8px 0 0 0; font-size: 12px; color: #888;"><em>Powered by ABA — A Better AI</em> 🟣</p>' +
@@ -10079,7 +10079,7 @@ if (path === '/api/sms/send' && method === 'POST') {
   if (path === '/api/nylas/connect' && method === 'GET') {
     try {
       const urlObj = new URL('http://localhost' + req.url);
-      const email = urlObj.searchParams.get('email') || 'claudette@globalmajoritygroup.com';
+      const email = urlObj.searchParams.get('email') || 'aba@globalmajoritygroup.com';
       
       const authResult = await httpsRequest({
         hostname: 'api.us.nylas.com',
@@ -10318,11 +10318,11 @@ if (path === '/api/sms/send' && method === 'POST') {
         // Check if this is a reply TO Claudette OR ABA (both are ABA's email identity)
         const isToClaudette = toList.some(t => {
           const addr = (t.email || t || '').toLowerCase();
-          return addr.includes('claudette@globalmajoritygroup.com') || addr.includes('aba@globalmajoritygroup.com');
+          return addr.includes('aba@globalmajoritygroup.com') || addr.includes('aba@globalmajoritygroup.com');
         });
         
         // Skip if it's FROM Claudette/ABA (our own outbound email)
-        const isFromClaudette = fromEmail.toLowerCase().includes('claudette@globalmajoritygroup.com') || 
+        const isFromClaudette = fromEmail.toLowerCase().includes('aba@globalmajoritygroup.com') || 
           fromEmail.toLowerCase().includes('aba@globalmajoritygroup.com');
         
         if (isToClaudette && !isFromClaudette && emailBody) {
@@ -10459,7 +10459,7 @@ RULES:
                 airResult.response.split(/\n\n+/).map(p => '<p style="margin: 0 0 16px 0;">' + p.replace(/\n/g, '<br>') + '</p>').join('') +
                 '<br><br>' +
                 '<div style="font-family: Arial, sans-serif; font-size: 14px; color: #333;">' +
-                '<p style="margin: 0; font-weight: bold;">Claudette Aims</p>' +
+                '<p style="margin: 0; font-weight: bold;">ABA | A Better AI</p>' +
                 '<p style="margin: 0; color: #666;">Executive Assistant</p>' +
                 '<p style="margin: 0; color: #8B5CF6;">Global Majority Group</p>' +
                 '<p style="margin: 8px 0 0 0; font-size: 12px; color: #888;"><em>Powered by ABA — A Better AI</em> 🟣</p>' +
@@ -10502,7 +10502,7 @@ RULES:
                 }, JSON.stringify({
                   content: JSON.stringify({
                     thread_id: threadId,
-                    from: 'claudette@globalmajoritygroup.com',
+                    from: 'aba@globalmajoritygroup.com',
                     to: fromEmail,
                     subject: replyPayload.subject,
                     body: airResult.response,
