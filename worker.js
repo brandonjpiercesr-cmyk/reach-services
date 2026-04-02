@@ -2511,6 +2511,8 @@ EMAIL PROTOCOL: If you need to send an email during this call, write it in plain
 // ═══════════════════════════════════════════════════════════════════════════════
 async function AIR_escalate(event) {
   const { type, content, source, metadata } = event;
+  // ⬡B:observability.reach_escalate:CODE:reach_worker.logEvent.air_escalate:20260402⬡
+  logEvent_reach({ trigger: 'air_escalate', action: 'escalation_fired', channel: 'escalation', detail: (type || 'unknown') + ': ' + (String(content || '')).substring(0, 200) });
   
   console.log('');
   console.log('═══════════════════════════════════════════════════════════');
@@ -4110,7 +4112,34 @@ Respond with ONLY the code block. No explanation needed.`;
 // SPURT 1: PULSE HEARTBEAT - The 24/7 autonomous loop
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const HEARTBEAT_INTERVAL = 5 * 60 * 1000; // 5 minutes
+const HEARTBEAT_INTERVAL = 5 * 60 * 1000;
+
+// ⬡B:observability.reach_event_logger:CODE:reach_worker.logEvent.inline:20260402⬡
+// Inline event logger for reach-services (no shared lib with abacia-services)
+function logEvent_reach({ trigger, action, result = 'success', agents = [], tools = [], channel = 'unknown', user_id = 'unknown', model = null, detail = null }) {
+  try {
+    const SUPA_URL = process.env.SUPABASE_URL || 'https://htlxjkbrstpwwtzsbyvb.supabase.co';
+    const SUPA_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY;
+    if (!SUPA_KEY) return;
+    const now = new Date();
+    const dateKey = now.toISOString().split('T')[0];
+    const event = { trigger, action, result, agents, tools, channel, user_id, model, detail: detail ? String(detail).substring(0, 500) : null, timestamp: now.toISOString(), source_service: 'reach-services' };
+    httpsRequest({
+      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+      path: '/rest/v1/aba_memory',
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY, 'Prefer': 'return=minimal' }
+    }, JSON.stringify({
+      content: JSON.stringify(event),
+      memory_type: 'aba_event',
+      source: 'event.reach.' + trigger + '.' + dateKey + '.' + Date.now(),
+      importance: 2,
+      is_system: true,
+      tags: ['event', 'reach', trigger, channel]
+    })).catch(e => console.log('[EVENT-REACH] Write failed:', e.message));
+  } catch (e) { console.log('[EVENT-REACH] Error:', e.message); }
+}
+ // 5 minutes
 const COMMAND_CENTER_CLIENTS = new Set();
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -4332,6 +4361,8 @@ function startPulseHeartbeat() {
 async function pulseCheck() {
   const pulseId = `PULSE-${Date.now()}`;
   console.log(`[PULSE] ♥ Heartbeat ${pulseId}`);
+  // ⬡B:observability.reach_pulse:CODE:reach_worker.logEvent.pulse_check:20260402⬡
+  logEvent_reach({ trigger: 'reach_pulse', action: 'pulse_check', channel: 'pulse', detail: pulseId });
   
   try {
     // Check 1: Poll emails for important messages
@@ -12747,6 +12778,8 @@ let lastHeartbeat = null;
 async function REACH_heartbeat() {
   if (heartbeatRunning) return;
   heartbeatRunning = true;
+  // ⬡B:observability.reach_heartbeat:CODE:reach_worker.logEvent.reach_hb:20260402⬡
+  logEvent_reach({ trigger: 'reach_heartbeat', action: 'reach_heartbeat_cycle', channel: 'heartbeat' });
   heartbeatCount++;
   lastHeartbeat = new Date().toISOString();
   
