@@ -11056,14 +11056,14 @@ We Are All ABA.`;
           memory_type: 'vara_pending_instruction',
           content: JSON.stringify({
             instruction: callContent,
-            ham: body.userId || 'brandon',
+            ham: body.userId || 'unknown',
             hamName: hamName,
             requester: callSource || 'dial',
             timestamp: new Date().toISOString(),
             conversation_id: varaConvId
           }),
           importance: 9,
-          tags: ['vara', 'pending', 'instruction', 'ham_' + (body.userId || 'brandon'), 'unread']
+          tags: ['vara', 'pending', 'instruction', 'ham_' + (body.userId || 'unknown'), 'unread']
         });
         console.log('[DIAL v2] vara_pending_instruction written to brain (' + callContent.length + ' chars)');
       } catch (pendErr) {
