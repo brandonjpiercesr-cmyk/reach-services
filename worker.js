@@ -11028,7 +11028,7 @@ We Are All ABA.`;
         conversation_initiation_client_data: {
           call_purpose: callContent.substring(0, 500),
           ham_name: hamName,
-          ham_id: body.userId || 'brandon',
+          ham_id: body.userId || 'unknown',
           source: callSource || 'dial'
         },
         agent_overrides: {
