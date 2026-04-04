@@ -5352,7 +5352,9 @@ async function AIR_DISPATCH(lukeAnalysis, judeResult, callerIdentity) {
   // ⬡B:AIR:REACH.DISPATCH.SHADOW:ROUTE:notes.transcripts.vault:v1.0.0:20260216⬡
   // SHADOW Agent - Meeting notes, transcripts, recordings (L3: Manager, VAULT department)
   // This is the consent-based data protection agent
-  const needsShadow = query.includes('notes') || 
+  // ⬡B:SHADOW:DEPRECATED:old_vault_access_disabled:20260404⬡
+  // DISABLED — SHADOW now lives in abacia-services agentEnforcer.js
+  const needsShadow = false; // was: query.includes('notes') || 
                       query.includes('transcript') || 
                       query.includes('recording') ||
                       (query.includes('meeting') && (query.includes('detail') || query.includes('full') || query.includes('pull'))) ||
@@ -7357,7 +7359,7 @@ async function AIR_text(userMessage, history) {
   
   // ⬡B:GRIT.FIX:DISPATCH_BEFORE_LLM:20260218⬡
   // TRY AGENT DISPATCH FIRST - actually execute calendar/email/etc
-  const dispatchResult = await AIR_DISPATCH(lukeAnalysis, judeResult, { name: 'brandon', trust: 'T10' });
+  const dispatchResult = await AIR_DISPATCH(lukeAnalysis, judeResult, { name: 'unknown', trust: 'T0' });
   if (dispatchResult && dispatchResult.handled) {
     console.log('[AIR-TEXT] Agent ' + dispatchResult.agent + ' handled request');
     return { 
