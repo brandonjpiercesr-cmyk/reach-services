@@ -8845,6 +8845,10 @@ Respond as this agent specifically — stay in character.`;
         tags: ['voice', 'transcript', 'elevenlabs', 'call_complete', transcriptText ? 'has_transcript' : 'no_transcript']
       }).catch(e => console.log('[BRAIN] Store error:', e.message));
       
+      // ⬡B:fix.air_awareness.postcall:20260405⬡ AIR knows when every call ends.
+      // Before this fix, AIR had zero knowledge of call completion or transcripts.
+      try { logEvent_reach({ trigger: 'vara_call', action: 'call_ended_transcript_stored', channel: 'voice', user_id: callerNumber, detail: 'Call ended. Duration: ' + duration + 's. Transcript: ' + (transcriptText ? transcriptText.substring(0, 150) : 'none') }); } catch(e) {}
+      
       return jsonResponse(res, 200, { received: true, conversation_id: conversationId, has_transcript: !!transcriptText });
       
     } catch (e) {
