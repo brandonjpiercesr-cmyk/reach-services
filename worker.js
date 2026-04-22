@@ -812,7 +812,16 @@ const DEEPGRAM_KEY = process.env.DEEPGRAM_API_KEY;
 const GEMINI_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
 
 // ⬡B:AIR:REACH.CONFIG.ANTHROPIC:CONFIG:models.backup.haiku:AIR→REACH→MODEL:T8:v1.5.0:20260213:a1n2t⬡
-const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
+// ⬡B:anthropic_removal.session_6:RENAMED_FALLBACK:20260422⬡
+// ANTHROPIC_KEY is retained as a truthy gate for the 9 `if (ANTHROPIC_KEY)` guard 
+// checks scattered through this file. The httpsRequest shim below transparently 
+// reroutes every api.anthropic.com call to api.x.ai (Grok), using XAI_API_KEY 
+// for actual auth — the shim REPLACES the x-api-key header entirely. So the 
+// ACTUAL value of ANTHROPIC_KEY doesn't matter anymore, only whether it's truthy.
+// Falling back to XAI_API_KEY here lets every existing `if (ANTHROPIC_KEY)` check 
+// pass when an xAI key is configured, without rewriting 9 guard sites.
+const XAI_API_KEY = process.env.XAI_API_KEY;
+const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY || process.env.XAI_API_KEY || '';
 // ═══════════════════════════════════════════════════════════
 // GROQ - PRIMARY LLM FOR BACKGROUND (replaces dead Gemini)
 // ⬡B:reach:GROQ_PRIMARY:20260309⬡
@@ -933,18 +942,98 @@ console.log('══════════════════════�
 // ⬡B:AIR:REACH.UTIL.HTTPS:CODE:infrastructure.http.requests:AIR→REACH:T10:v1.5.0:20260213:h1t2p⬡
 // ⬡B:air.call:CODE:reach.httpsRequest.air_tracked:20260402⬡
 // AIR gateway for reach-services. Every Anthropic call tracked via logEvent_reach.
+//
+// ⬡B:anthropic_removal.session_6.grok_shim:20260422⬡
+// TRANSPARENT ANTHROPIC→GROK SHIM
+// Every api.anthropic.com call is translated to api.x.ai at this entry point. 
+// The 13 call sites in this file were NOT rewritten; they still write Anthropic 
+// request bodies and still read Anthropic response shapes. The shim intercepts 
+// based on options.hostname === 'api.anthropic.com' and does three things:
+//   1) Rewrite the URL    (api.anthropic.com /v1/messages → api.x.ai /v1/chat/completions)
+//   2) Rewrite auth       (x-api-key + anthropic-version → Authorization: Bearer XAI)
+//   3) Translate bodies   (Anthropic {system, messages, max_tokens} → OpenAI {messages[{role:'system'}, ...]})
+//                         and back (OpenAI {choices[0].message.content} → Anthropic {content:[{type,text}]})
+// Model mapping:
+//   claude-haiku-* → grok-4-1-fast-chat
+//   claude-sonnet-*, claude-opus-* → grok-4-1-fast-reasoning
+// Rationale: zero changes at call sites = zero regression surface on voice/phone/SMS paths.
+
+function _anthropicToGrokModel(m) {
+  const s = String(m || '').toLowerCase();
+  if (s.includes('opus') || s.includes('sonnet')) return 'grok-4-1-fast-reasoning';
+  return 'grok-4-1-fast-chat';
+}
+
+function _anthropicBodyToGrokBody(bodyJSON) {
+  let body;
+  try { body = JSON.parse(bodyJSON); } catch { return bodyJSON; }
+  const msgs = [];
+  if (body.system) msgs.push({ role: 'system', content: body.system });
+  for (const m of (body.messages || [])) {
+    let c = m.content;
+    if (Array.isArray(c)) {
+      c = c.map(p => (typeof p === 'string' ? p : (p.text || ''))).join('\n');
+    } else if (typeof c !== 'string') {
+      c = c == null ? '' : String(c);
+    }
+    msgs.push({ role: m.role, content: c });
+  }
+  return JSON.stringify({
+    model: _anthropicToGrokModel(body.model),
+    max_tokens: body.max_tokens || 1024,
+    messages: msgs,
+    temperature: typeof body.temperature === 'number' ? body.temperature : 0.4
+  });
+}
+
+function _grokResponseToAnthropicShape(grokBodyBuffer) {
+  let body;
+  try { body = JSON.parse(grokBodyBuffer.toString()); } catch { return grokBodyBuffer; }
+  // If it looks like an error, pass through as-is (callers will see non-200 status anyway)
+  if (body.error) return grokBodyBuffer;
+  const text = body?.choices?.[0]?.message?.content || '';
+  const wrapped = {
+    id: body.id || ('grok_' + Date.now()),
+    type: 'message',
+    role: 'assistant',
+    model: body.model || 'grok',
+    content: [{ type: 'text', text }],
+    stop_reason: body?.choices?.[0]?.finish_reason === 'length' ? 'max_tokens' : 'end_turn',
+    usage: {
+      input_tokens: body?.usage?.prompt_tokens || 0,
+      output_tokens: body?.usage?.completion_tokens || 0
+    }
+  };
+  return Buffer.from(JSON.stringify(wrapped));
+}
+
 function httpsRequest(options, postData) {
   const isAnthropicCall = options.hostname === 'api.anthropic.com';
   const startTime = Date.now();
-  
-  // Extract model from postData for tracking
+
+  // Extract original model for tracking (before we rewrite)
   let model = 'unknown';
   if (isAnthropicCall && postData) {
     try { model = JSON.parse(postData).model || 'unknown'; } catch(e) {}
   }
-  
+
   if (isAnthropicCall) {
-    try { logEvent_reach({ trigger: 'reach_api_call', action: 'anthropic_call', channel: 'reach', model, detail: 'reach-services → Anthropic ' + model }); } catch(e) {}
+    try { logEvent_reach({ trigger: 'reach_api_call', action: 'grok_via_shim', channel: 'reach', model, detail: 'reach-services → Grok (was Anthropic) ' + model }); } catch(e) {}
+
+    // ⬡B:anthropic_removal.session_6.shim_apply:20260422⬡
+    // Rewrite options → Grok endpoint + Grok auth. Rewrite body → OpenAI schema.
+    if (!XAI_API_KEY) {
+      return Promise.resolve({ status: 503, data: Buffer.from(JSON.stringify({ error: 'XAI_API_KEY not configured' })) });
+    }
+    options = Object.assign({}, options, {
+      hostname: 'api.x.ai',
+      path: '/v1/chat/completions',
+      headers: {
+        'Authorization': 'Bearer ' + XAI_API_KEY,
+        'Content-Type': 'application/json'
+      }
+    });
+    if (postData) postData = _anthropicBodyToGrokBody(postData);
   }
 
   return new Promise((resolve, reject) => {
@@ -952,24 +1041,30 @@ function httpsRequest(options, postData) {
       const chunks = [];
       res.on('data', chunk => chunks.push(chunk));
       res.on('end', () => {
-        const result = { status: res.statusCode, data: Buffer.concat(chunks) };
-        
-        // Track cost on Anthropic calls
+        let data = Buffer.concat(chunks);
+        // ⬡B:anthropic_removal.session_6.shim_response:20260422⬡
+        // Translate Grok response → Anthropic shape so callers see the same shape they always did.
+        if (isAnthropicCall) {
+          data = _grokResponseToAnthropicShape(data);
+        }
+        const result = { status: res.statusCode, data };
+
+        // Track cost on shim calls (now reports Grok tokens under Anthropic banner for continuity)
         if (isAnthropicCall) {
           try {
             const body = JSON.parse(result.data.toString());
             const usage = body.usage || {};
             const dur = Date.now() - startTime;
-            logEvent_reach({ trigger: 'reach_api_call', action: 'anthropic_complete', result: result.status === 200 ? 'success' : 'error', channel: 'reach', model, detail: model + ' | ' + dur + 'ms | in:' + (usage.input_tokens || 0) + ' out:' + (usage.output_tokens || 0) });
+            logEvent_reach({ trigger: 'reach_api_call', action: 'grok_via_shim_complete', result: result.status === 200 ? 'success' : 'error', channel: 'reach', model, detail: model + ' → grok | ' + dur + 'ms | in:' + (usage.input_tokens || 0) + ' out:' + (usage.output_tokens || 0) });
           } catch(e) {}
         }
-        
+
         resolve(result);
       });
     });
     req.on('error', (err) => {
       if (isAnthropicCall) {
-        try { logEvent_reach({ trigger: 'reach_api_call', action: 'anthropic_error', result: 'error', channel: 'reach', model, detail: err.message }); } catch(e) {}
+        try { logEvent_reach({ trigger: 'reach_api_call', action: 'grok_via_shim_error', result: 'error', channel: 'reach', model, detail: err.message }); } catch(e) {}
       }
       reject(err);
     });
@@ -13567,29 +13662,32 @@ async function loopAirCall(message, systemPrompt, model) {
       }
     } catch (e) { console.log('[AIR-LOOP] Gemini failed, trying Haiku:', e.message); }
   }
-  // TIER 2: Claude Haiku (cheap fallback)
-  if (!ANTHROPIC_KEY) { console.warn('[AIR-LOOP] No keys available'); return null; }
+  // TIER 2: Claude Haiku (cheap fallback) — now routes via Grok shim
+  if (!ANTHROPIC_KEY && !XAI_API_KEY) { console.warn('[AIR-LOOP] No keys available'); return null; }
   try {
-    // ⬡B:air.call:CODE:reach.autonomous_loop_tracked:20260402⬡ Tracked through AIR
-    try { logEvent_reach({ trigger: 'reach_api_call', action: 'autonomous_loop_haiku', channel: 'autonomous', model: 'claude-haiku-4-5-20251001', detail: 'Autonomous loop Haiku fallback' }); } catch(e) {}
-    const r = await fetch('https://api.anthropic.com/v1/messages', {
+    // ⬡B:anthropic_removal.session_6.loopfix:20260422⬡
+    // Was: bare fetch('https://api.anthropic.com/...'). Now uses httpsRequest so 
+    // the shim translates this call to Grok like every other site in this file.
+    try { logEvent_reach({ trigger: 'reach_api_call', action: 'autonomous_loop_via_shim', channel: 'autonomous', model: 'claude-haiku-4-5-20251001', detail: 'Autonomous loop — shim reroutes to Grok' }); } catch(e) {}
+    const result = await httpsRequest({
+      hostname: 'api.anthropic.com',
+      path: '/v1/messages',
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': ANTHROPIC_KEY,
+        'x-api-key': ANTHROPIC_KEY || 'shim-placeholder',
         'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 2000,
-        system: systemPrompt,
-        messages: [{ role: 'user', content: message }]
-      })
-    });
-    if (!r.ok) throw new Error('API ' + r.status);
-    const d = await r.json();
+      }
+    }, JSON.stringify({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 2000,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: message }]
+    }));
+    if (result.status !== 200) throw new Error('API ' + result.status);
+    const d = JSON.parse(result.data.toString());
     return (d.content && d.content[0] && d.content[0].text) || '';
-  } catch (e) { console.error('[AIR-LOOP] Haiku also failed:', e.message); return null; }
+  } catch (e) { console.error('[AIR-LOOP] Haiku (via shim) also failed:', e.message); return null; }
 }
 
 // ── AGENT TASKS ─────────────────────────────────────────────────────────────
