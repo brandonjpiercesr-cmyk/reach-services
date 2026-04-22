@@ -954,14 +954,14 @@ console.log('══════════════════════�
 //   3) Translate bodies   (Anthropic {system, messages, max_tokens} → OpenAI {messages[{role:'system'}, ...]})
 //                         and back (OpenAI {choices[0].message.content} → Anthropic {content:[{type,text}]})
 // Model mapping:
-//   claude-haiku-* → grok-4-1-fast-chat
+//   claude-haiku-* → grok-4-1-fast-non-reasoning
 //   claude-sonnet-*, claude-opus-* → grok-4-1-fast-reasoning
 // Rationale: zero changes at call sites = zero regression surface on voice/phone/SMS paths.
 
 function _anthropicToGrokModel(m) {
   const s = String(m || '').toLowerCase();
   if (s.includes('opus') || s.includes('sonnet')) return 'grok-4-1-fast-reasoning';
-  return 'grok-4-1-fast-chat';
+  return 'grok-4-1-fast-non-reasoning';
 }
 
 function _anthropicBodyToGrokBody(bodyJSON) {
