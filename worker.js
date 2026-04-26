@@ -60,6 +60,12 @@
  */
 
 // ⬡B:AIR:REACH.SERVER.IMPORTS:CODE:infrastructure.node.modules:AIR→REACH:T10:v1.5.0:20260213:i1m2p⬡
+// ⬡B:legacy.egress.guard:WIRE:install_first_in_worker:20260426⬡
+// MUST be the first require in worker.js. Wraps Module.prototype.require so any
+// subsequent require('node-fetch') returns the wrapped version. If anything
+// runs require('node-fetch') BEFORE this line, that caller bypasses the guard.
+require('./lib/legacyEgressGuard').install();
+
 const http = require('http');
 const https = require('https');
 const { WebSocketServer, WebSocket } = require('ws');
