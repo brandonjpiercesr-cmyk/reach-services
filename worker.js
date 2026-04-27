@@ -9049,14 +9049,24 @@ Respond as this agent specifically — stay in character.`;
       const timestamp = body.timestamp || new Date().toISOString();
 
       // Store in brain via TASTE
+      // ⬡B:reach.omi.webhook:FIX:uid_passthrough_for_downstream_resolution:20260426⬡
+      // AUDRA TASTE Phase D Issue 6: capture body.uid from OMI webhook so downstream
+      // OMIService.resolveDeviceOwner can do structured uid equality lookup instead of
+      // brittle content-substring matching. Backward compatible — adds tag and content
+      // prefix, removes nothing. Closes the same bug class as the cross-HAM mistag
+      // fixed earlier in MergeService.checkForOMIMatch + TasteBatchProcessor.checkForDuplicates.
+      const omiUid = body.uid || body.user_id || null;
+      const omiUidPrefix = omiUid ? '[OMI_UID:' + omiUid + '] ' : '';
       const storeData = JSON.stringify({
-        content: 'OMI TRANSCRIPT (' + timestamp + '): ' + transcript.substring(0, 2000),
+        content: omiUidPrefix + 'OMI TRANSCRIPT (' + timestamp + '): ' + transcript.substring(0, 2000),
         memory_type: 'omi_transcript',
         categories: ['omi', 'ambient', 'transcript'],
         importance: 5,
         is_system: true,
         source: 'omi_webhook_' + new Date().toISOString(),
-        tags: ['omi', 'taste', 'ambient', 'transcript']
+        tags: omiUid 
+          ? ['omi', 'taste', 'ambient', 'transcript', 'omi_uid:' + omiUid]
+          : ['omi', 'taste', 'ambient', 'transcript']
       });
 
       await httpsRequest({
