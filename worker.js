@@ -94,7 +94,11 @@ const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFz
 // This is where the 22+ agents actually live and run
 // ABA-REACH (voice) → ABACIA-SERVICES (agents) → Response
 // ═══════════════════════════════════════════════════════════════════════════════
-const ABACIA_SERVICES_URL = 'https://abacia-services.onrender.com';
+// Reforged backend. ABABASE_URL env var is set per-environment:
+//   prod aba-reach -> https://ababase.onrender.com
+//   any dev twin (none yet) -> https://incuaba.onrender.com
+// ⬡B:reach.air_url.s24_phase_a_1:CODE:migrate_to_ababase:20260430⬡
+const ABACIA_SERVICES_URL = process.env.ABABASE_URL || 'https://ababase.onrender.com';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // ⬡B:TOUCH:PHASE3:SPURT3.0:timezone.utilities:20260216⬡
@@ -513,7 +517,7 @@ async function checkScheduledCalls() {
 async function getVoicemailMessage(contactName, context = '') {
   try {
     // Call ABABASE AIR to generate personalized voicemail
-    const response = await fetch('https://abacia-services.onrender.com/api/air/process', {
+    const response = await fetch(`${ABACIA_SERVICES_URL}/api/air/process`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1113,7 +1117,7 @@ function httpsRequest(options, postData) {
 // Generate dynamic greeting via AIR (no hardcoded greetings)
 async function generateDynamicGreeting(name, role, context = '') {
   try {
-    const response = await fetch('https://abacia-services.onrender.com/api/air/process', {
+    const response = await fetch(`${ABACIA_SERVICES_URL}/api/air/process`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -2661,7 +2665,7 @@ async function AIR_escalate(event) {
     // ─────────────────────────────────────────────────────────────────────────────
     console.log('[AIR_escalate] Forwarding to abacia-services AIR.process...');
     
-    const airResponse = await fetch('https://abacia-services.onrender.com/api/air/process', {
+    const airResponse = await fetch(`${ABACIA_SERVICES_URL}/api/air/process`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -6289,7 +6293,7 @@ async function getGreetingForCaller(callerIdentity, callHistory, touchpoints) {
   
   // Generate dynamic greeting via AIR
   try {
-    const response = await fetch('https://abacia-services.onrender.com/api/air/process', {
+    const response = await fetch(`${ABACIA_SERVICES_URL}/api/air/process`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -8713,7 +8717,7 @@ Respond as this agent specifically — stay in character.`;
       console.log('[AIR VOICE TOOL] Resolved userId:', resolvedUserId, 'from callerName:', callerName, 'phone:', callerPhone);
       
       try {
-        const abaciaResult = await fetch('https://abacia-services.onrender.com/api/air/process', {
+        const abaciaResult = await fetch(`${ABACIA_SERVICES_URL}/api/air/process`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -11600,7 +11604,7 @@ We Are All ABA.`;
       // ═══════════════════════════════════════════════════════════════════════════════
       console.log('[ESCALATE] Forwarding to abacia-services AIR.process...');
       
-      const airResponse = await fetch('https://abacia-services.onrender.com/api/air/process', {
+      const airResponse = await fetch(`${ABACIA_SERVICES_URL}/api/air/process`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
