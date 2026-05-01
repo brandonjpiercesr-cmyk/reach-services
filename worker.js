@@ -842,7 +842,7 @@ async function getVoiceConfig() {
   return {
     voice_id: 'EYQ7WzWOUhRLHwL7i08O',
     voice_name: 'Princess - Calm, Natural and Conversational',
-    model: 'eleven_v3_conversational',
+    model: 'eleven_flash_v2_5',
     settings: { stability: 0.67, similarity_boost: 0.6, style: 0.0, speed: 0.95, use_speaker_boost: true }
   };
 }
@@ -853,7 +853,7 @@ function getVoiceConfigCached() {
   getVoiceConfig().catch(()=>{});
   return {
     voice_id: 'EYQ7WzWOUhRLHwL7i08O',
-    model: 'eleven_v3_conversational',
+    model: 'eleven_flash_v2_5',
     settings: { stability: 0.67, similarity_boost: 0.6, style: 0.0, speed: 0.95, use_speaker_boost: true }
   };
 }
