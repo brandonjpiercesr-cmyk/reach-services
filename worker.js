@@ -9475,8 +9475,46 @@ if (path === '/api/sms/send' && method === 'POST') {
       
       console.log('[SMS RECEIVE] Parsed - From:', from, '| Body:', smsBody.substring(0, 50));
       
-      // Look up who texted
-      const sender = lookupContact(from) || { name: from, phone: from };
+      // ⬡B:reach.sms_receive.s27_f9_gate:CODE:ham_resolve_before_AIR_process:20260430⬡
+      // F9 GATE per architecture one-pager: resolve sender phone to HAM via reforged
+      // ababase BEFORE AIR_process. Unknown phone gets a polite TwiML decline.
+      // No silent default to {name:from, phone:from} which lets strangers reach AIR.
+      let resolvedHam = null;
+      try {
+        const resolveResp = await fetch(`${ABACIA_SERVICES_URL}/api/ham/resolve`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ hamHint: { phone: from } })
+        });
+        if (resolveResp.status === 200) {
+          resolvedHam = await resolveResp.json();
+          console.log('[SMS RECEIVE] F9 gate ALLOW - HAM:', resolvedHam.displayName, resolvedHam.hamUid);
+        } else if (resolveResp.status === 404 || resolveResp.status === 403) {
+          console.log('[SMS RECEIVE] F9 GATE BLOCK - unknown phone:', from);
+          res.writeHead(200, { 'Content-Type': 'text/xml' });
+          return res.end('<?xml version="1.0" encoding="UTF-8"?>\n<Response><Message>This number is not registered with ABA. If you would like access please contact Brandon Pierce.</Message></Response>');
+        } else {
+          // 5xx or unexpected - fail closed
+          console.log('[SMS RECEIVE] F9 gate UPSTREAM ERROR status:', resolveResp.status);
+          res.writeHead(200, { 'Content-Type': 'text/xml' });
+          return res.end('<?xml version="1.0" encoding="UTF-8"?>\n<Response><Message>ABA is having a moment. Please try again shortly.</Message></Response>');
+        }
+      } catch (e) {
+        console.log('[SMS RECEIVE] F9 gate network error - failing closed:', e.message);
+        res.writeHead(200, { 'Content-Type': 'text/xml' });
+        return res.end('<?xml version="1.0" encoding="UTF-8"?>\n<Response><Message>ABA is having a moment. Please try again shortly.</Message></Response>');
+      }
+
+      // sender now derives from resolved HAM only - never from {name:from, phone:from} fallback
+      const sender = {
+        name: resolvedHam.displayName,
+        phone: from,
+        hamUid: resolvedHam.hamUid,
+        slug: resolvedHam.displaySlug,
+        tier: resolvedHam.tier,
+        found: true,
+        trust: resolvedHam.tier >= 9 ? 'high' : (resolvedHam.tier >= 5 ? 'medium' : 'low')
+      };
       
       // Store to brain
       await storeToBrain({
