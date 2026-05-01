@@ -11378,6 +11378,42 @@ We Are All ABA.`;
     const url = new URL(req.url, `http://${req.headers.host}`);
     const traceId = url.searchParams.get('trace') || 'unknown';
     const record = url.searchParams.get('record') !== 'false';
+
+    // ⬡B:reach.call_twiml.s28_f9_gate:CODE:ham_resolve_at_voice_entry:20260430⬡
+    // F9 GATE per architecture one-pager: Twilio POST to /api/call/twiml includes
+    // From phone in body. HAM-resolve via reforged ababase BEFORE playing consent
+    // prompt. Unknown phone gets a polite TwiML hangup. Same fail-closed pattern
+    // as S27 SMS F9 gate at /api/sms/receive.
+    if (method === 'POST') {
+      try {
+        const twilioBody = await parseBody(req);
+        const fromPhone = (twilioBody && (twilioBody.From || twilioBody.Caller)) || '';
+        if (fromPhone) {
+          const resolveResp = await fetch(`${ABACIA_SERVICES_URL}/api/ham/resolve`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ hamHint: { phone: fromPhone } })
+          });
+          if (resolveResp.status === 200) {
+            const ham = await resolveResp.json();
+            console.log('[CALL TWIML] F9 gate ALLOW - HAM:', ham.displayName, ham.hamUid);
+          } else if (resolveResp.status === 404 || resolveResp.status === 403) {
+            console.log('[CALL TWIML] F9 GATE BLOCK - unknown phone:', fromPhone);
+            res.writeHead(200, { 'Content-Type': 'text/xml' });
+            return res.end('<?xml version="1.0" encoding="UTF-8"?>\n<Response><Play>' + REACH_URL + '/api/voice/tts-stream?text=' + encodeURIComponent('This number is not registered with ABA. If you would like access please contact Brandon Pierce.') + '</Play><Hangup/></Response>');
+          } else {
+            console.log('[CALL TWIML] F9 gate UPSTREAM ERROR status:', resolveResp.status);
+            res.writeHead(200, { 'Content-Type': 'text/xml' });
+            return res.end('<?xml version="1.0" encoding="UTF-8"?>\n<Response><Play>' + REACH_URL + '/api/voice/tts-stream?text=' + encodeURIComponent('ABA is having a moment. Please try again shortly.') + '</Play><Hangup/></Response>');
+          }
+        }
+      } catch (e) {
+        console.log('[CALL TWIML] F9 gate error - failing closed:', e.message);
+        res.writeHead(200, { 'Content-Type': 'text/xml' });
+        return res.end('<?xml version="1.0" encoding="UTF-8"?>\n<Response><Play>' + REACH_URL + '/api/voice/tts-stream?text=' + encodeURIComponent('ABA is having a moment. Please try again shortly.') + '</Play><Hangup/></Response>');
+      }
+    }
+
     
     // Brandon's simplified consent message (reverse psychology - ends with "not recorded")
     const disclaimer = record 
