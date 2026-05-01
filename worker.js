@@ -11386,8 +11386,17 @@ We Are All ABA.`;
     // as S27 SMS F9 gate at /api/sms/receive.
     if (method === 'POST') {
       try {
-        const twilioBody = await parseBody(req);
-        const fromPhone = (twilioBody && (twilioBody.From || twilioBody.Caller)) || '';
+        // parseBody only handles JSON - Twilio voice POST is form-urlencoded.
+        // Read raw body and parse via URLSearchParams, same as /api/sms/receive.
+        const rawBody = await new Promise((resolve, reject) => {
+          let b = '';
+          req.on('data', c => b += c);
+          req.on('end', () => resolve(b));
+          req.on('error', reject);
+        });
+        const fparams = new URLSearchParams(rawBody);
+        const fromPhone = fparams.get('From') || fparams.get('Caller') || '';
+        console.log('[CALL TWIML] F9 entry rawBody len:', rawBody.length, 'from:', fromPhone || '<empty>');
         if (fromPhone) {
           const resolveResp = await fetch(`${ABACIA_SERVICES_URL}/api/ham/resolve`, {
             method: 'POST',
