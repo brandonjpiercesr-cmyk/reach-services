@@ -73,6 +73,12 @@ const { WebSocketServer, WebSocket } = require('ws');
 const { identifyCallerBySpeech } = require('./voice-speech-id');
 
 // ⬡B:AIR:REACH.SERVER.PORT:CONFIG:infrastructure.network.binding:AIR→REACH:T10:v1.5.0:20260213:p0r3t⬡
+// ⬡B:reach.voice_call_ham_map.s30:CODE:in_memory_session_keyed_by_callsid:20260501⬡
+// Voice flow: F9 gate at /api/call/twiml resolves HAM by phone, stashes by Twilio CallSid.
+// Consent + Stream URL propagate callSid. WS handler reads ham. processAndRespond posts
+// userId to reforged AIR. Cleanup on WS close.
+const voiceCallHam = new Map();
+
 const PORT = process.env.PORT || 3000;
 
 /**
@@ -11419,7 +11425,14 @@ We Are All ABA.`;
           });
           if (resolveResp.status === 200) {
             const ham = await resolveResp.json();
-            console.log('[CALL TWIML] F9 gate ALLOW - HAM:', ham.displayName, ham.hamUid);
+            const callSidIn = fparams.get('CallSid') || fparams.get('callSid') || '';
+            if (callSidIn) {
+              // ⬡B:reach.call_twiml.s30_stash_ham_by_callsid:CODE:propagate_to_ws:20260501⬡
+              voiceCallHam.set(callSidIn, { hamUid: ham.hamUid, displaySlug: ham.displaySlug, displayName: ham.displayName, phone: fromPhone });
+              console.log('[CALL TWIML] F9 gate ALLOW - HAM:', ham.displayName, ham.hamUid, '| CallSid:', callSidIn);
+            } else {
+              console.log('[CALL TWIML] F9 gate ALLOW - HAM:', ham.displayName, ham.hamUid, '| no CallSid in body');
+            }
           } else if (resolveResp.status === 404 || resolveResp.status === 403) {
             console.log('[CALL TWIML] F9 GATE BLOCK - unknown phone:', fromPhone);
             res.writeHead(200, { 'Content-Type': 'text/xml' });
@@ -11480,12 +11493,15 @@ We Are All ABA.`;
       // Consent received (or timed out = implicit consent) - Start interactive 2-way conversation
       console.log('[CONSENT] GRANTED - Starting interactive conversation | Trace:', traceId);
       
-      // Start the 2-way conversation with transcription + response
+      // ⬡B:reach.call_consent.s30_propagate_callsid:CODE:add_callsid_to_stream_url:20260501⬡
+      // Pass Twilio CallSid into the Stream WS URL so the WS handler can look up the
+      // HAM that the F9 gate stashed in voiceCallHam during /api/call/twiml.
+      const callSidConsent = body.CallSid || body.callSid || '';
       const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Play>${REACH_URL}/api/voice/tts-stream?text=${encodeURIComponent('Perfect. How can I help you today?')}</Play>
   <Connect>
-    <Stream url="wss://${req.headers.host}/api/call/conversation?trace=${traceId}" track="both_tracks"/>
+    <Stream url="wss://${req.headers.host}/api/call/conversation?trace=${traceId}&amp;callSid=${callSidConsent}" track="both_tracks"/>
   </Connect>
   <Pause length="3600"/>
 </Response>`;
@@ -13453,8 +13469,11 @@ const conversationWss = new WebSocketServer({ server: httpServer, path: '/api/ca
 conversationWss.on('connection', (ws, req) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const traceId = url.searchParams.get('trace') || `CONV-${Date.now()}`;
+  // ⬡B:reach.call_conversation.s30_lookup_ham_by_callsid:CODE:from_voiceCallHam_map:20260501⬡
+  const callSidFromUrl = url.searchParams.get('callSid') || '';
+  const callHam = callSidFromUrl ? (voiceCallHam.get(callSidFromUrl) || null) : null;
   
-  console.log('[CONVERSATION] Interactive 2-way call started | Trace:', traceId);
+  console.log('[CONVERSATION] Interactive 2-way call started | Trace:', traceId, '| CallSid:', callSidFromUrl, '| HAM:', callHam ? (callHam.displayName + ' ' + callHam.hamUid) : 'unknown');
   
   let streamSid = null;
   let callSid = null;
@@ -13527,16 +13546,22 @@ conversationWss.on('connection', (ws, req) => {
       let response = '';
       
       try {
-        // Try ABACIA-SERVICES AIR first
+        // ⬡B:reach.call_conversation.s30_route_through_reforged:CODE:fix_field_name_userId_url:20260501⬡
+        // Per S29 audit: field rename query->message, pass userId from F9-gated HAM,
+        // use ABACIA_SERVICES_URL env var instead of hardcoded host. Reforged AIR builds
+        // the correct FCW for this HAM (F2+F3+F4+F8) on every voice turn.
+        const airUrl = new URL(`${ABACIA_SERVICES_URL}/api/air/process`);
         const airResult = await httpsRequest({
-          hostname: 'abacia-services.onrender.com',
-          path: '/api/air/process',
+          hostname: airUrl.hostname,
+          path: airUrl.pathname,
           method: 'POST',
           headers: { 'Content-Type': 'application/json' }
         }, JSON.stringify({
-          query: userText,
-          context: { source: 'phone_call', trace: traceId },
-          source: 'aba-reach-phone'
+          message: userText,
+          userId: (callHam && callHam.displaySlug) ? callHam.displaySlug : 'unknown',
+          channel: 'voice_phone',
+          conversationId: callSidFromUrl || traceId,
+          hamHint: (callHam && callHam.phone) ? { phone: callHam.phone } : null
         }));
         
         if (airResult.status === 200) {
@@ -13697,8 +13722,10 @@ Respond naturally:`;
   });
   
   ws.on('close', () => {
-    console.log('[CONVERSATION] WebSocket closed | Trace:', traceId);
+    console.log('[CONVERSATION] WebSocket closed | Trace:', traceId, '| CallSid:', callSidFromUrl);
     if (deepgramWs) deepgramWs.close();
+    // ⬡B:reach.call_conversation.s30_cleanup_voice_ham_map:CODE:on_ws_close:20260501⬡
+    if (callSidFromUrl) voiceCallHam.delete(callSidFromUrl);
   });
   
   ws.on('error', (e) => console.error('[CONVERSATION] WebSocket error:', e.message));
