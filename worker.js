@@ -10578,6 +10578,41 @@ if (path === '/api/sms/send' && method === 'POST') {
         if (isToClaudette && !isFromClaudette && emailBody) {
           console.log('[IMAN REPLY] Incoming email TO Claudette from:', fromEmail);
           
+          // ⬡B:reach.nylas_webhook.s41_email_to_reforged:CODE:stage_to_ababase_air_inbox:20260501⬡
+          // S41 R5 fix: every inbound email gets staged into the reforged
+          // ham_<UID>.air_inbox via ababase /api/iman/reach_inbound_email.
+          // This is ADDITIVE — does not replace the legacy aba_memory write
+          // below or the AIR routing. F9 HAM resolution happens inside the
+          // ababase service. Failure here logs and continues — the rest of
+          // the legacy path still runs so the user is never blocked.
+          try {
+            const reforgedResp = await fetch(`${ABACIA_SERVICES_URL}/api/iman/reach_inbound_email`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                from: fromList,
+                to: toList,
+                subject: subject,
+                body: emailBody,
+                snippet: messageData.snippet || '',
+                thread_id: threadId,
+                message_id: messageData.id || messageData.message_id || null,
+                reply_to_message_id: replyToMessageId,
+                grant_id: messageData.grant_id || event.grant_id || null,
+                received_at: new Date().toISOString(),
+                raw_event: { type: eventType }
+              })
+            });
+            const reforgedJson = await reforgedResp.json().catch(() => ({}));
+            if (reforgedJson && reforgedJson.ok) {
+              console.log('[IMAN REPLY:REFORGED] Staged to ham_' + (reforgedJson.hamUid || '?').toLowerCase() + '.air_inbox row ' + (reforgedJson.inbox_id || '?'));
+            } else {
+              console.log('[IMAN REPLY:REFORGED] Stage failed (non-blocking):', reforgedJson && reforgedJson.error, reforgedJson && reforgedJson.detail);
+            }
+          } catch (reforgedErr) {
+            console.log('[IMAN REPLY:REFORGED] Network error (non-blocking):', reforgedErr.message);
+          }
+          
           // Look up sender in brain to get HAM identity
           let senderIdentity = { name: fromName, email: fromEmail, trust: 'T5' }; // Default low trust
           try {
