@@ -814,12 +814,49 @@ const TWILIO_PHONE = process.env.TWILIO_PHONE_NUMBER;
 
 // ⬡B:AIR:REACH.CONFIG.ELEVENLABS:CONFIG:voice.tts.personality:AIR→REACH→VARA:T8:v1.5.0:20260213:e1l2v⬡
 const ELEVENLABS_KEY = process.env.ELEVENLABS_API_KEY; // ⬡B:ENV:ELEVENLABS⬡
-// ⬡B:VARA:VOICE_ID:CONFIG:voice.identity:VARA→ELEVENLABS:T10:v2.0.1:20260214:vid⬡
-// OFFICIAL ABA VOICE ID: AIFDUhRnM6s61433WMNu (Kiara)
-// Updated: February 14, 2026
-// DO NOT CHANGE without global update: ElevenLabs, 1A Shell, Brain, all services
-const ELEVENLABS_VOICE = 'AIFDUhRnM6s61433WMNu'; // Kiara voice - ⬡B:VOICE_ID:CONFIG:20260317⬡
-const ELEVENLABS_MODEL = 'eleven_flash_v2_5';
+// ⬡B:reach.worker.s34_f5_voice_config:CODE:brain_loaded_voice_one_voice_for_all_aba:20260501⬡
+// Voice config loaded from brain row source=voice_config.default.
+// To change ABA voice everywhere, update that row. No code change. No deploy.
+// 60-second in-memory cache. Falls back to Princess only if brain unreachable.
+const VOICE_SUPABASE_URL = process.env.SUPABASE_URL || 'https://htlxjkbrstpwwtzsbyvb.supabase.co';
+const VOICE_SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0bHhqa2Jyc3Rwd3d0enNieXZiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA1MzI4MjEsImV4cCI6MjA4NjEwODgyMX0.MOgNYkezWpgxTO3ZHd0omZ0WLJOOR-tL7hONXWG9eBw';
+let _voiceConfigCache = null;
+let _voiceConfigCachedAt = 0;
+const VOICE_CONFIG_TTL_MS = 60 * 1000;
+async function getVoiceConfig() {
+  const now = Date.now();
+  if (_voiceConfigCache && (now - _voiceConfigCachedAt) < VOICE_CONFIG_TTL_MS) return _voiceConfigCache;
+  try {
+    const url = VOICE_SUPABASE_URL + '/rest/v1/aba_memory?source=eq.voice_config.default&select=content&limit=1';
+    const r = await fetch(url, { headers: { apikey: VOICE_SUPABASE_ANON_KEY, Authorization: 'Bearer ' + VOICE_SUPABASE_ANON_KEY } });
+    if (r.ok) {
+      const rows = await r.json();
+      if (rows && rows.length && rows[0].content) {
+        const cfg = JSON.parse(rows[0].content);
+        _voiceConfigCache = cfg;
+        _voiceConfigCachedAt = now;
+        return cfg;
+      }
+    }
+  } catch (_) { /* graceful fallback */ }
+  return {
+    voice_id: 'EYQ7WzWOUhRLHwL7i08O',
+    voice_name: 'Princess - Calm, Natural and Conversational',
+    model: 'eleven_flash_v2_5',
+    settings: { stability: 0.67, similarity_boost: 0.6, style: 0.0, speed: 0.95, use_speaker_boost: true }
+  };
+}
+// Synchronous getter for legacy callsites that can't await. Cached value or null.
+function getVoiceConfigCached() {
+  if (_voiceConfigCache) return _voiceConfigCache;
+  // Trigger async load for next call. Don't block. Return Princess defaults.
+  getVoiceConfig().catch(()=>{});
+  return {
+    voice_id: 'EYQ7WzWOUhRLHwL7i08O',
+    model: 'eleven_flash_v2_5',
+    settings: { stability: 0.67, similarity_boost: 0.6, style: 0.0, speed: 0.95, use_speaker_boost: true }
+  };
+}
 
 // ⬡B:AIR:REACH.CONFIG.DEEPGRAM:CONFIG:voice.stt.transcription:AIR→REACH→TASTE:T8:v1.5.0:20260213:d1g2m⬡
 const DEEPGRAM_KEY = process.env.DEEPGRAM_API_KEY;
@@ -950,7 +987,7 @@ console.log('[ABA REACH v2.10.1] FULL HIERARCHY + SIGILS + API ROUTES');
 console.log('[HIERARCHY] L6:AIR > L5:REACH > L4:VOICE,SMS,EMAIL,OMI > L3:VARA,CARA,IMAN,TASTE');
 console.log('[AIR] Hardcoded agents: LUKE, COLE, JUDE, PACK');
 console.log('[AIR] PRIMARY: Groq Llama | BACKUP: Claude Haiku (Gemini DEAD)');
-console.log('[VARA] Voice: ' + ELEVENLABS_VOICE);
+// Voice now loaded from brain - see getVoiceConfig() above
 console.log('[SIGILS] ACL 10X format on every block');
 console.log('[API] 9 routes live');
 console.log('═══════════════════════════════════════════════════════════');
@@ -5811,7 +5848,7 @@ async function VARA_speak(session, text) {
   try {
     const result = await httpsRequest({
       hostname: 'api.elevenlabs.io',
-      path: '/v1/text-to-speech/' + ELEVENLABS_VOICE + '/stream?output_format=ulaw_8000',
+      path: '/v1/text-to-speech/' + getVoiceConfigCached().voice_id + '/stream?output_format=ulaw_8000',
       method: 'POST',
       headers: {
         'xi-api-key': ELEVENLABS_KEY,
@@ -5820,8 +5857,8 @@ async function VARA_speak(session, text) {
       }
     }, JSON.stringify({
       text: text,
-      model_id: ELEVENLABS_MODEL,
-      voice_settings: { stability: 0.5, similarity_boost: 0.75 }
+      model_id: getVoiceConfigCached().model,
+      voice_settings: getVoiceConfigCached().settings
     }));
     
     if (result.status === 200 && result.data.length > 0) {
@@ -7821,7 +7858,7 @@ const httpServer = http.createServer(async (req, res) => {
       air: 'ABA Intellectual Role - CENTRAL ORCHESTRATOR',
       models: { primary: 'Gemini Flash 2.0', backup: 'Claude Haiku', speed_fallback: 'Groq' },
       agents: { hardcoded: ['LUKE', 'COLE', 'JUDE', 'PACK'], voice: 'VARA', intelligence: 'DEEPGRAM' },
-      voice: 'ElevenLabs ' + ELEVENLABS_VOICE,
+      voice: 'ElevenLabs (config)',
       phone: TWILIO_PHONE,
       capabilities: [
         'outbound_calls', 'group_calls', 'scheduled_calls', 'voicemail_drops', 
@@ -8360,7 +8397,7 @@ Respond as this agent specifically — stay in character.`;
       if (!text) return jsonResponse(res, 400, { error: 'text required' });
       if (!ELEVENLABS_KEY) return jsonResponse(res, 503, { error: 'ElevenLabs not configured' });
 
-      const voiceId = voice_id || ELEVENLABS_VOICE;
+      const voiceId = voice_id || getVoiceConfigCached().voice_id;
       const result = await httpsRequest({
         hostname: 'api.elevenlabs.io',
         path: '/v1/text-to-speech/' + voiceId,
@@ -8372,8 +8409,8 @@ Respond as this agent specifically — stay in character.`;
         }
       }, JSON.stringify({
         text,
-        model_id: ELEVENLABS_MODEL,
-        voice_settings: { stability: 0.5, similarity_boost: 0.75 }
+        model_id: getVoiceConfigCached().model,
+        voice_settings: getVoiceConfigCached().settings
       }));
 
       res.writeHead(200, { 'Content-Type': 'audio/mpeg' });
@@ -8399,7 +8436,7 @@ Respond as this agent specifically — stay in character.`;
         return res.end();
       }
 
-      const voiceId = ELEVENLABS_VOICE || 'AIFDUhRnM6s61433WMNu';
+      const voiceId = (await getVoiceConfig()).voice_id;
       const result = await httpsRequest({
         hostname: 'api.elevenlabs.io',
         path: '/v1/text-to-speech/' + voiceId,
@@ -8411,7 +8448,7 @@ Respond as this agent specifically — stay in character.`;
         }
       }, JSON.stringify({
         text,
-        model_id: ELEVENLABS_MODEL || 'eleven_flash_v2_5',
+        model_id: (await getVoiceConfig()).model,
         voice_settings: { stability: 0.5, similarity_boost: 0.75 }
       }));
 
@@ -13636,7 +13673,7 @@ Respond naturally:`;
       // Get audio from ElevenLabs
       const ttsResult = await httpsRequest({
         hostname: 'api.elevenlabs.io',
-        path: '/v1/text-to-speech/' + ELEVENLABS_VOICE + '/stream?output_format=ulaw_8000',
+        path: '/v1/text-to-speech/' + getVoiceConfigCached().voice_id + '/stream?output_format=ulaw_8000',
         method: 'POST',
         headers: {
           'xi-api-key': ELEVENLABS_KEY,
