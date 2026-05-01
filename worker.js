@@ -9526,21 +9526,35 @@ if (path === '/api/sms/send' && method === 'POST') {
         source: 'sms_receive_' + messageSid
       });
       
-      // Route through AIR to generate response
-      let responseText = "Got your message! I'll let Brandon know.";
-      
+      // ⬡B:reach.sms_receive.s30_route_through_reforged:CODE:replace_local_AIR_process:20260501⬡
+      // R8 + F2 + F8: route SMS through reforged ababase /api/air/process.
+      // Mirrors the canonical pattern abacia-services SendBlue uses (SendblueService L516).
+      // executeAIR on abacia-services handles HAM First-Touch, FCW build, agent FIND
+      // traversal, agent STAMP, per-HAM ABA-CIA per F3/F4/F8. The local AIR_process at
+      // L5588 is bypassed - it had broken model fallbacks (history.map error)
+      // returning a hardcoded fallback string.
+      let responseText = "I got your message. Give me a moment.";
       try {
-        const airResult = await AIR_process(smsBody, {
-          source: 'sms',
-          caller: sender,
-          phone: from
+        const airResp = await fetch(`${ABACIA_SERVICES_URL}/api/air/process`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: smsBody,
+            userId: sender.slug,
+            channel: 'sms',
+            conversationId: messageSid,
+            hamHint: { phone: from }
+          })
         });
-        
-        if (airResult && airResult.response) {
-          responseText = airResult.response;
+        if (airResp.status === 200) {
+          const airResult = await airResp.json();
+          if (airResult && airResult.response) responseText = airResult.response;
+          else if (airResult && airResult.text) responseText = airResult.text;
+        } else {
+          console.log('[SMS RECEIVE] reforged AIR non-200:', airResp.status);
         }
       } catch (e) {
-        console.log('[SMS RECEIVE] AIR error:', e.message);
+        console.log('[SMS RECEIVE] reforged AIR network error:', e.message);
       }
       
       // Respond with TwiML
