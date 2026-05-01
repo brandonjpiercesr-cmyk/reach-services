@@ -182,7 +182,7 @@ const MASTER_CONTACTS = {
   brandon: { 
     phone: '+13363898116', 
     name: 'Brandon', 
-    fullName: 'Brandon Pierce',
+    fullName: 'T10 founder',  // resolved at runtime via HAM context
     timezone: 'America/New_York',
     trust: 'T10',
     role: 'HAM'
@@ -1187,14 +1187,14 @@ async function generateDynamicGreeting(name, role, context = '') {
 }
 
 const CONTACT_REGISTRY = {
-  // Brandon Pierce - THE CREATOR
+  // T10 founder - resolved via HAM at runtime
   // NOTE: Greeting generated dynamically by generateDynamicGreeting()
   '+13363898116': {
     name: 'Brandon',
     role: 'owner',
     trust: 'T10',
     access: 'full',
-    promptAddon: 'You are speaking with Brandon Pierce, your creator. FULL access to everything. Be direct, warm, efficient. He values his time.'
+    promptAddon: 'You are speaking with the founder of ABA. FULL access to everything. Be direct, warm, efficient. They value their time.'
   },
   // Dr. Eric Lane Sr. - Senior Advisor
   '+13236007676': {
@@ -2587,8 +2587,7 @@ function PACK_assemble(analysis, coleResult, judeResult, history, callerIdentity
 
 function buildSystemPrompt(analysis, coleResult, judeResult, callerIdentity, demoState) {
   // ⬡B:AIR:REACH.VOICE.PROMPT:CODE:intelligence.prompt.caller_aware:AIR→PACK→MODEL:T9:v1.6.0:20260213:p1c2a⬡
-  let prompt = `You are VARA (Vocal Authorized Representative of ABA), an AI assistant created by Brandon Pierce.
-You are warm, butler-like AND a real friend. You flow naturally between professional and personal.
+  let prompt = `You are ABA, a warm, butler-like personal assistant. You are also a real friend. You flow naturally between professional and personal.
 When giving business updates, you are sharp and clear. When things are personal, you are warm and real.
 You mix both naturally — like a trusted friend who also happens to run your entire life.
 Examples of your tone:
@@ -2611,7 +2610,7 @@ EMAIL PROTOCOL: If you need to send an email during this call, write it in plain
   prompt += '\nSPEAKER AWARENESS: You have diarization enabled. The system filters out bystander speech automatically. If you detect the caller is distracted or talking to someone else, say something like "Take your time, I will be right here when you are ready."';
   
   if (callerIdentity) {
-    prompt += '\n\nCALLER IDENTITY: ' + callerIdentity.name + ' (Trust: ' + callerIdentity.trust + ', Access: ' + callerIdentity.access + ')';
+    prompt += '\n\nWho you are speaking with: ' + callerIdentity.name + '.';
     prompt += '\n' + callerIdentity.promptAddon;
   }
 
@@ -2623,11 +2622,11 @@ EMAIL PROTOCOL: If you need to send an email during this call, write it in plain
 - NEVER respond to background conversations as if they're talking to you.`;
 
   if (coleResult.context) {
-    prompt += '\n\nRELEVANT CONTEXT FROM MEMORY:\n' + coleResult.context;
+    prompt += '\n\n' + coleResult.context;
   }
   
   if (judeResult.capabilities) {
-    prompt += '\n\nAVAILABLE CAPABILITIES:\n' + judeResult.capabilities;
+    prompt += '\n\n' + judeResult.capabilities;
   }
   
   if (analysis.intent === 'greeting') {
@@ -2911,7 +2910,7 @@ async function JUDE_decideEscalation(lukeAnalysis, coleContext, event = {}) {
   // No hardcoded routing - each person's ABA calls THEM
   const registry = {
     owner: { 
-      name: 'Brandon Pierce Sr.', 
+      name: 'founder',  // resolved via HAM at runtime
       phone: '+13363898116', 
       priority: 1,
       categories: ['all'] // Owner gets ALL escalations from their ABA
@@ -3568,7 +3567,7 @@ Respond in JSON ONLY:
 
 TASK: Generate structured meeting minutes from this Think Tank session.
 
-SESSION: Tank ID ${tankId} | Source: ${source || 'direct'} | Title: ${title || 'Cook Session'} | Date: ${new Date().toISOString()} | Participants: ${participants || 'Brandon Pierce Sr. + ABA Think Tank'}
+SESSION: Tank ID ${tankId} | Source: ${source || 'direct'} | Title: ${title || 'Cook Session'} | Date: ${new Date().toISOString()} | Participants: ${participants || 'ABA Think Tank'}
 
 LUKE (Intelligence): ${JSON.stringify(lukeExtract, null, 2)}
 MACE (Architecture): ${JSON.stringify(maceArchitecture, null, 2)}
@@ -3763,7 +3762,7 @@ async function CACA_executeChain(chainDef) {
               }, JSON.stringify({
                 subject: step.subject || `CACA Chain Result: ${chainId}`,
                 body: step.body || lastOutput,
-                to: [{ email: step.to || 'brandonjpierce2@gmail.com', name: 'Brandon Pierce' }]
+                to: [{ email: step.to || 'brandonjpierce2@gmail.com', name: 'Founder' }]
               }));
               stepResult = 'Email sent';
             } else {
@@ -4248,7 +4247,7 @@ Respond with ONLY the code block. No explanation needed.`;
           `Full code in brain: erica.code.${ericaId}\n` +
           (pushResult?.success ? 'Auto-deployed. GRIT tested. No action needed unless tests failed.' : 'Review and approve for deployment.') +
           `\n\n— ERICA (Executive Roadmap Intelligence & Continuous Automation)`,
-        to: [{ email: 'brandonjpierce2@gmail.com', name: 'Brandon Pierce' }]
+        to: [{ email: 'brandonjpierce2@gmail.com', name: 'Founder' }]
       }));
       console.log('[ERICA] Report emailed to Brandon for review');
     }
@@ -4447,7 +4446,7 @@ async function generateProgressReport(pulseId) {
       }, JSON.stringify({
         subject: report.subject,
         body: report.body,
-        to: [{ email: BRANDON_EMAIL, name: 'Brandon Pierce' }]
+        to: [{ email: BRANDON_EMAIL, name: 'Founder' }]
       }));
       console.log(`[PROGRESS] Report emailed to Brandon. Next check-in: ${checkInTime} EST`);
     } else {
@@ -6213,7 +6212,7 @@ async function postCallAutomation(session) {
   
   const emailResult = await sendEmailFromCall(
     'aba@globalmajoritygroup.com',
-    'Brandon Pierce',
+    // legacy founder hardcode removed - HAM-resolved at runtime
     emailSubject,
     emailBody
   );
@@ -9023,7 +9022,7 @@ Respond as this agent specifically — stay in character.`;
       id: OMI_APP_ID,
       name: 'ABA Intelligence Layer',
       description: 'ABA (A Better AI) processes ambient conversations through TASTE (Transcript Analysis and Semantic Tagging Engine) and stores insights in the ABA Brain.',
-      author: 'Brandon Pierce / Global Majority Group',
+      author: 'Global Majority Group',
       version: '1.9.0',
       capabilities: ['transcript_processing', 'memory_integration', 'real_time_analysis'],
       webhook_url: REACH_URL + '/api/omi/webhook',
@@ -9354,7 +9353,7 @@ Respond as this agent specifically — stay in character.`;
                 `ACTION ITEMS:\n${(tankResult.minutes?.action_items_final || []).map(a => '• ' + a.task + ' (' + a.priority + ')').join('\n') || 'None'}\n\n` +
                 `NEXT STEPS:\n${(tankResult.minutes?.next_steps || []).join('\n• ') || 'None'}\n\n` +
                 `Stored to brain. Full details in Think Tank history.\n\n— ABA (Autonomous Cook Session via OMI → Think Tank)`,
-              to: [{ email: 'brandonjpierce2@gmail.com', name: 'Brandon Pierce' }]
+              to: [{ email: 'brandonjpierce2@gmail.com', name: 'Founder' }]
             }));
             console.log('[COOK SESSION] Summary emailed to Brandon');
           }
@@ -9536,7 +9535,7 @@ if (path === '/api/sms/send' && method === 'POST') {
           console.log('[SMS RECEIVE] F9 GATE BLOCK - unknown phone:', from);
           res.writeHead(200, { 'Content-Type': 'text/xml' });
           // ⬡B:reach.sms_receive.s32_r12_decline_no_hardcoded_name:CODE:role_based_decline:20260501⬡
-            return res.end('<?xml version="1.0" encoding="UTF-8"?>\n<Response><Message>This number is not registered with ABA. If you have been onboarded but think this is an error, please follow up with the HAM who invited you.</Message></Response>');
+            return res.end('<?xml version="1.0" encoding="UTF-8"?>\n<Response><Message>This number is not registered with ABA. If you have been onboarded but think this is an error, please follow up with whoever onboarded you.</Message></Response>');
         } else {
           // 5xx or unexpected - fail closed
           console.log('[SMS RECEIVE] F9 gate UPSTREAM ERROR status:', resolveResp.status);
@@ -10634,8 +10633,9 @@ if (path === '/api/sms/send' && method === 'POST') {
             const VIP_SENDERS = {
               'bryanjpiercejr@gmail.com': { name: 'BJ Pierce', trust: 'T8', role: 'Brother, Marketing Lead, Legacy Prep Academy Director' },
               'eric@globalmajoritygroup.com': { name: 'Eric Lane', trust: 'T8', role: 'Co-Founder GMG, Strategy Lead' },
-              'brandonjpierce2@gmail.com': { name: 'Brandon Pierce', trust: 'T10', role: 'Founder, HAM' },
-              'brandonjpiercesr@gmail.com': { name: 'Brandon Pierce', trust: 'T10', role: 'Founder, HAM' },
+              // founder identities resolved via HAM at runtime - placeholders removed
+              // 'brandonjpierce2@gmail.com': { name: 'Founder', trust: 'T10', role: 'Founder, HAM' },
+              // 'brandonjpiercesr@gmail.com': { name: 'Founder', trust: 'T10', role: 'Founder, HAM' },
             };
             
             const vipInfo = VIP_SENDERS[fromEmail.toLowerCase()] || null;
@@ -11475,7 +11475,7 @@ We Are All ABA.`;
             console.log('[CALL TWIML] F9 GATE BLOCK - unknown phone:', fromPhone);
             res.writeHead(200, { 'Content-Type': 'text/xml' });
             return res.end('<?xml version="1.0" encoding="UTF-8"?>\n<Response><Play>' + REACH_URL + '/api/voice/tts-stream?text=' + // ⬡B:reach.call_twiml.s32_r12_decline_no_hardcoded_name:CODE:role_based_decline:20260501⬡
-            encodeURIComponent('This number is not registered with ABA. If you have been onboarded but think this is an error, please follow up with the HAM who invited you.') + '</Play><Hangup/></Response>');
+            encodeURIComponent('This number is not registered with ABA. If you have been onboarded but think this is an error, please follow up with whoever onboarded you.') + '</Play><Hangup/></Response>');
           } else {
             console.log('[CALL TWIML] F9 gate UPSTREAM ERROR status:', resolveResp.status);
             res.writeHead(200, { 'Content-Type': 'text/xml' });
@@ -11673,7 +11673,7 @@ We Are All ABA.`;
   // ⬡B:AIR:ESCALATION.REGISTRY:DATA:team.contacts.priority:AIR:T10:v1.0.0:20260214:r1e2g⬡
   const ESCALATION_REGISTRY = {
     brandon: {
-      name: 'Brandon Pierce Sr.',
+      name: 'founder',
       phone: '+13363898116',
       role: 'founder',
       priority: 1, // Highest - for critical decisions
@@ -13636,7 +13636,7 @@ conversationWss.on('connection', (ws, req) => {
   
   // Generate local response using Gemini (fallback)
   async function generateLocalResponse(userText, traceId) {
-    const prompt = `You are VARA (Vocal Authorized Representative of ABA), a warm, butler-like AI assistant created by Brandon Pierce. 
+    const prompt = `You are ABA, a warm, butler-like personal assistant. 
 You are on a phone call. Keep responses concise (1-2 sentences max) and conversational.
 User said: "${userText}"
 Respond naturally:`;
