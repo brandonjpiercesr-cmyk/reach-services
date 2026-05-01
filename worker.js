@@ -9498,7 +9498,8 @@ if (path === '/api/sms/send' && method === 'POST') {
         } else if (resolveResp.status === 404 || resolveResp.status === 403) {
           console.log('[SMS RECEIVE] F9 GATE BLOCK - unknown phone:', from);
           res.writeHead(200, { 'Content-Type': 'text/xml' });
-          return res.end('<?xml version="1.0" encoding="UTF-8"?>\n<Response><Message>This number is not registered with ABA. If you would like access please contact Brandon Pierce.</Message></Response>');
+          // ⬡B:reach.sms_receive.s32_r12_decline_no_hardcoded_name:CODE:role_based_decline:20260501⬡
+            return res.end('<?xml version="1.0" encoding="UTF-8"?>\n<Response><Message>This number is not registered with ABA. If you have been onboarded but think this is an error, please follow up with the HAM who invited you.</Message></Response>');
         } else {
           // 5xx or unexpected - fail closed
           console.log('[SMS RECEIVE] F9 gate UPSTREAM ERROR status:', resolveResp.status);
@@ -11436,7 +11437,8 @@ We Are All ABA.`;
           } else if (resolveResp.status === 404 || resolveResp.status === 403) {
             console.log('[CALL TWIML] F9 GATE BLOCK - unknown phone:', fromPhone);
             res.writeHead(200, { 'Content-Type': 'text/xml' });
-            return res.end('<?xml version="1.0" encoding="UTF-8"?>\n<Response><Play>' + REACH_URL + '/api/voice/tts-stream?text=' + encodeURIComponent('This number is not registered with ABA. If you would like access please contact Brandon Pierce.') + '</Play><Hangup/></Response>');
+            return res.end('<?xml version="1.0" encoding="UTF-8"?>\n<Response><Play>' + REACH_URL + '/api/voice/tts-stream?text=' + // ⬡B:reach.call_twiml.s32_r12_decline_no_hardcoded_name:CODE:role_based_decline:20260501⬡
+            encodeURIComponent('This number is not registered with ABA. If you have been onboarded but think this is an error, please follow up with the HAM who invited you.') + '</Play><Hangup/></Response>');
           } else {
             console.log('[CALL TWIML] F9 gate UPSTREAM ERROR status:', resolveResp.status);
             res.writeHead(200, { 'Content-Type': 'text/xml' });
