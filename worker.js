@@ -7857,9 +7857,14 @@ const httpServer = http.createServer(async (req, res) => {
       const body = await parseBody(req);
       console.log('[OMI-PROXY] Webhook received, forwarding to ababase:', JSON.stringify(body).substring(0, 100));
 
-      // Extract query string from original URL (OMI appends ?uid=...)
+      // ⬡B:reach.omi_proxy.uid_from_body:FIX:billion_users_no_query_param:20260523⬡
+      // OMI sends uid in the request body, not the URL. For billions of users,
+      // the webhook URL has no ?uid= — we extract from body and pass to ababase.
       const qs = req.url && req.url.includes('?') ? req.url.split('?').slice(1).join('?') : '';
-      const targetUrl = ABACIA_SERVICES_URL + '/api/omi/webhook' + (qs ? '?' + qs : '');
+      const bodyUid = body && body.uid ? String(body.uid) : null;
+      const uidParam = bodyUid ? 'uid=' + encodeURIComponent(bodyUid) : '';
+      const fullQs = [qs, uidParam].filter(Boolean).join('&');
+      const targetUrl = ABACIA_SERVICES_URL + '/api/omi/webhook' + (fullQs ? '?' + fullQs : '');
 
       // Respond immediately — OMI requires sub-5s
       jsonResponse(res, 200, { ok: true, received: true, routed: 'ababase' });
