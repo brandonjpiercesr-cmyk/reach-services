@@ -12681,12 +12681,12 @@ console.log('[AIR-LOOP] Agents: IMAN, HUNTER, HUNCH, DAWN, GHOST, PULSE, RADAR, 
 console.log('[AIR-LOOP] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
 // First tick after 30 seconds (let server finish starting)
-setTimeout(runAutonomousLoop, 30000);
-// Then every 5 minutes
+// ⬡B:autonomous:DISABLED:cost_fix_20260602⬡ DISABLED — loop writes to retired brain, bled $20 to Groq
+// setTimeout(runAutonomousLoop, 30000);  // DISABLED — see cost_fix_20260602
 // ⬡B:autonomous:REENABLED:gemini:20260309⬡
   // RE-ENABLED WITH GEMINI FLASH (FREE)
-  setInterval(runAutonomousLoop, LOOP_INTERVAL);
-  console.log('[AUTONOMOUS] DISABLED - Loop disabled to save costs');
+  // setInterval(runAutonomousLoop, LOOP_INTERVAL);  // DISABLED — re-enable only when SUPABASE_URL = ABA Server prod (dnzwyufdzafcwnjaqbxs) AND Brandon approves
+  console.log('[AUTONOMOUS] DISABLED — cost fix 20260602. Was bleeding $20/3days calling LLMs every 5min to legacy retired brain.');
 
 
 
