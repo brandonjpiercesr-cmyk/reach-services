@@ -10944,6 +10944,16 @@ We Are All ABA.`;
 
   // ⬡B:AIR:REACH.API.NOTFOUND:CODE:infrastructure.error.404:USER→REACH→ERROR:T10:v1.5.0:20260213:n1f2d⬡ CATCH-ALL
   // ═══════════════════════════════════════════════════════════════════════
+  
+  // ⬡B:AIR:REACH.SCHEDULE:WIRE:scheduling.routes.handler:20260606⬡
+  // ROUTING: msria.org/schedule/{uid} → REACH → ham_{uid}.abacia → Nylas
+  try {
+    const schedHandled = await handleScheduleRoute(req, res, path, method);
+    if (schedHandled) return;
+  } catch (schedErr) {
+    console.error('[SCHED] Route error:', schedErr.message);
+  }
+
   jsonResponse(res, 404, { 
     error: 'Route not found: ' + method + ' ' + path,
     available: ['/api/escalate', '/api/escalate/twiml', '/api/escalate/confirm', '/api/call/dial', '/api/call/twiml', '/api/call/status', '/api/call/record', '/api/air/trigger/email', '/api/air/trigger/omi', '/api/air/trigger/calendar', '/api/air/trigger/job', '/api/air/trigger/system', '/api/air/think-tank', '/api/air/caca', '/api/air/erica', '/api/air/grit', '/api/github/push', '/api/sage/search', '/api/sage/index', '/api/iman/draft', '/api/iman/send', '/api/iman/drafts', '/api/devices/register', '/api/devices', '/api/pulse/status', '/api/pulse/trigger', '/api/router', '/api/models/claude', '/api/voice/deepgram-token', '/api/voice/tts', '/api/voice/tts-stream', '/api/omi/manifest', '/api/omi/webhook', '/api/sms/send', '/api/brain/search', '/api/brain/store', '/ws:command-center'],
