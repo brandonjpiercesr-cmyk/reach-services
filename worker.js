@@ -65,6 +65,7 @@
 // subsequent require('node-fetch') returns the wrapped version. If anything
 // runs require('node-fetch') BEFORE this line, that caller bypasses the guard.
 require('./lib/legacyEgressGuard').install();
+const { handleScheduleRoute } = require('./routes/schedule-routes');
 
 const http = require('http');
 const https = require('https');
@@ -974,7 +975,9 @@ const ALLOWED_ORIGINS = [
   'https://ccwa-dev.vercel.app',
   'http://localhost:3000',
   'http://localhost:3001',
-  'http://localhost:5173'
+  'http://localhost:5173',
+  'https://msria.org',
+  'https://www.msria.org'
 ];
 
 // ⬡B:AIR:REACH.CONFIG.OMI:CONFIG:senses.ambient.hearing:AIR→REACH→TASTE:T7:v1.5.0:20260213:o1m2i⬡
