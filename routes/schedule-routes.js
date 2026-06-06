@@ -294,6 +294,34 @@ async function notifyHam(uid, subject, body) {
 
 // ─── route handlers ───────────────────────────────────────────────────────────
 
+
+// Read ham.settings bead from ham_{uid}.abacia
+// Key locked by global: source=eq.ham.settings, scoped by Accept-Profile
+// Fallback: pink-smoke defaults if bead absent
+async function getHamSettings(uid) {
+  const PINK_SMOKE_DEFAULT = {
+    background: 'pink-smoke',
+    backgroundMode: 'fixed',
+    backgroundPool: ['pink-smoke'],
+    kenBurns: true,
+    kenBurnsDuration: 20,
+    theme: 'glass-navy-copper',
+  };
+  try {
+    const r = await abaFetch(
+      '/rest/v1/abacia?source=eq.ham.settings&select=content&limit=1',
+      'GET', null, hamSchema(uid)
+    );
+    if (r.status === 200 && r.body && r.body.length > 0) {
+      const parsed = JSON.parse(r.body[0].content);
+      return { ...PINK_SMOKE_DEFAULT, ...parsed };
+    }
+  } catch (e) {
+    console.warn('[SCHED] ham.settings read failed, using defaults:', e.message);
+  }
+  return PINK_SMOKE_DEFAULT;
+}
+
 async function handleAvailability(req, res, uid) {
   console.log(`[SCHED] Availability request: uid=${uid}`);
   try {
@@ -319,7 +347,8 @@ async function handleAvailability(req, res, uid) {
     const slots = computeFreeSlots(events, -4); // Eastern default; future: pull from ABACIA
     console.log(`[SCHED] Computed ${slots.length} free slots`);
 
-    reply(res, 200, { uid, slots, count: slots.length, daysAhead: DAYS_AHEAD });
+    const settings = await getHamSettings(uid);
+    reply(res, 200, { uid, slots, count: slots.length, daysAhead: DAYS_AHEAD, settings });
   } catch (e) {
     console.error('[SCHED] Availability error:', e.message);
     reply(res, 500, { error: 'Failed to fetch availability', detail: e.message });
