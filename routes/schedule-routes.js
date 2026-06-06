@@ -385,7 +385,8 @@ async function handleAvailability(req, res, uid) {
     }
 
     console.log(`[SCHED] ${slots.length} free slots for uid=${uid}`);
-    reply(res, 200, { uid, slots, count: slots.length, daysAhead: DAYS_AHEAD, settings });
+    const tokens = await getDesignTokens(uid);
+    reply(res, 200, { uid, slots, count: slots.length, daysAhead: DAYS_AHEAD, settings, tokens });
   } catch (e) {
     console.error('[SCHED] Availability error:', e.message);
     reply(res, 500, { error: 'Failed to compute availability', detail: e.message });
@@ -465,13 +466,95 @@ async function handleBook(req, res, uid) {
 // ─── export ───────────────────────────────────────────────────────────────────
 
 async function handleScheduleRoute(req, res, pathname, method) {
-  const m = pathname.match(/^\/api\/schedule\/([A-Z0-9]+)\/(availability|book)$/i);
+  const m = pathname.match(/^\/api\/schedule\/([A-Z0-9]+)\/(availability|book|bookings|confirm)$/i);
   if (!m) return false;
   const uid    = m[1].toUpperCase();
   const action = m[2].toLowerCase();
-  if (action === 'availability' && method === 'GET') { await handleAvailability(req, res, uid); return true; }
-  if (action === 'book'         && method === 'POST') { await handleBook(req, res, uid); return true; }
+  if (action === 'availability' && method === 'GET')  { await handleAvailability(req, res, uid); return true; }
+  if (action === 'book'         && method === 'POST')  { await handleBook(req, res, uid); return true; }
+  if (action === 'bookings'     && method === 'GET')   { await handleBookings(req, res, uid); return true; }
+  if (action === 'confirm'      && method === 'POST')  { await handleConfirm(req, res, uid); return true; }
   return false;
 }
 
 module.exports = { handleScheduleRoute };
+
+// ─── /bookings — returns pending and confirmed bookings for HAM ───────────────
+async function handleBookings(req, res, uid) {
+  console.log(`[SCHED] Bookings list: uid=${uid}`);
+  try {
+    const r = await abaGet(hamSchema(uid),
+      `/rest/v1/abacia?tags=cs.%7Bschedule%7D&tags=cs.%7Bbooking%7D&source=like.schedule.*&select=source,content,tags&limit=50&order=created_at.desc`);
+    if (r.status !== 200) return reply(res, 500, { error: 'Could not read bookings' });
+    const bookings = (r.body || []).map(row => {
+      try {
+        const c = JSON.parse(row.content);
+        return { source: row.source, ...c, tags: row.tags };
+      } catch { return null; }
+    }).filter(Boolean).filter(b => b.status === 'pending' || b.status === 'confirmed');
+    reply(res, 200, { bookings });
+  } catch (e) {
+    console.error('[SCHED] Bookings error:', e.message);
+    reply(res, 500, { error: 'Failed', detail: e.message });
+  }
+}
+
+// ─── /confirm — HAM confirms or declines a pending booking ────────────────────
+async function handleConfirm(req, res, uid) {
+  console.log(`[SCHED] Confirm: uid=${uid}`);
+  try {
+    const body   = await parseBody(req);
+    const { source, action } = body; // action: 'confirm' | 'decline'
+    if (!source || !['confirm','decline'].includes(action)) {
+      return reply(res, 400, { error: 'Required: source, action (confirm|decline)' });
+    }
+
+    // Read the pending bead
+    const r = await abaGet(hamSchema(uid),
+      `/rest/v1/abacia?source=eq.${encodeURIComponent(source)}&select=content&limit=1`);
+    if (r.status !== 200 || !r.body || !r.body.length) {
+      return reply(res, 404, { error: 'Booking not found' });
+    }
+    const booking = JSON.parse(r.body[0].content);
+    const grant   = await getCalendarGrant(uid);
+
+    if (action === 'confirm' && grant) {
+      // Create the Nylas calendar event
+      await nylasReq(
+        `/v3/grants/${grant.grantId}/events?calendar_id=${encodeURIComponent(grant.calendarId)}`,
+        'POST',
+        {
+          title: `1:1 — ${booking.bookerName}`,
+          when: { start_time: booking.slotStart, end_time: booking.slotEnd },
+          participants: [{ email: booking.bookerEmail, name: booking.bookerName }],
+          description: 'Confirmed via msria.org/schedule manage panel.',
+        }
+      );
+    }
+
+    // Supersede the bead with updated status
+    const newSource = source.replace('pending', action === 'confirm' ? 'confirmed' : 'declined');
+    await writeBead(uid, newSource,
+      { ...booking, status: action === 'confirm' ? 'confirmed' : 'declined', resolvedAt: new Date().toISOString() },
+      ['schedule', action === 'confirm' ? 'confirmed_booking' : 'declined_booking'], 8);
+
+    reply(res, 200, { ok: true, action, source: newSource });
+  } catch (e) {
+    console.error('[SCHED] Confirm error:', e.message);
+    reply(res, 500, { error: 'Failed', detail: e.message });
+  }
+}
+
+// ─── read global.aesthetics.design_tokens bead ───────────────────────────────
+async function getDesignTokens(uid) {
+  try {
+    const r = await abaGet(hamSchema(uid),
+      '/rest/v1/abacia?source=eq.global.aesthetics.design_tokens&select=content&limit=1');
+    if (r.status === 200 && r.body && r.body.length > 0) {
+      return JSON.parse(r.body[0].content);
+    }
+  } catch (e) {
+    console.warn('[SCHED] design tokens read failed:', e.message);
+  }
+  return null;
+}
