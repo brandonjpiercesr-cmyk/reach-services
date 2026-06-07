@@ -19,12 +19,17 @@ const ABA_SERVER_URL = process.env.ABA_SERVER_URL || 'https://dnzwyufdzafcwnjaqb
 const ABA_SERVER_SRK = process.env.ABA_SERVER_SERVICE_ROLE_KEY;
 const NYLAS_KEY      = process.env.NYLAS_API_KEY;
 const NYLAS_HOST     = 'api.us.nylas.com';
-const CLAUDETTE      = '41a3ace1-1c1e-47f3-b017-e5fd71ea1f3a';
+// CLAUDETTE grant — read from env. Never hardcoded here.
 
-const SLOT_MIN   = 30;
-const BIZ_START  = 9;   // 9 AM local
-const BIZ_END    = 19;  // 7 PM local
-const DAYS_AHEAD = 14;
+// All scheduling preferences are read per-HAM from the ham.prefs bead.
+// No hardcoded values. Defaults below are fallback-only when the bead is absent.
+const PREFS_DEFAULT = {
+  timezone:     'America/New_York',
+  bizHours:     { start: 9, end: 19 },
+  slotDuration: 30,
+  daysAhead:    14,
+  weekendsOff:  true,
+};
 const MEM        = '\u2B21';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -196,6 +201,21 @@ async function getHamSettings(uid) {
   return DEFAULTS;
 }
 
+// Read ham.prefs from ABACIA — all scheduling preferences live here, not in code
+async function getHamPrefs(uid) {
+  try {
+    const r = await abaGet(hamSchema(uid),
+      '/rest/v1/abacia?source=eq.ham.prefs&select=content&limit=1');
+    if (r.status === 200 && r.body && r.body.length > 0) {
+      return { ...PREFS_DEFAULT, ...JSON.parse(r.body[0].content) };
+    }
+  } catch (e) {
+    console.warn('[SCHED] ham.prefs read failed for', uid, ':', e.message);
+  }
+  return PREFS_DEFAULT;
+}
+
+
 // Read calendar grant from ham_{uid}.abacia — source=nylas.grant.calendar
 // NO hardcoded fallback. Returns null if not found → caller returns 503.
 // This is the HAM bleed fix: if no grant bead exists for this HAM, we stop.
@@ -206,9 +226,10 @@ async function getCalendarGrant(uid) {
     if (r.status === 200 && r.body && r.body.length > 0) {
       const parsed = JSON.parse(r.body[0].content);
       return {
-        grantId:    parsed.grant_id,
-        calendarId: parsed.calendar_id || parsed.email,
-        email:      parsed.email,
+        grantId:          parsed.grant_id,
+        calendarId:       parsed.calendar_id || parsed.email,
+        email:            parsed.email,
+        notificationGrant: parsed.notification_grant || process.env.NYLAS_CLAUDETTE_GRANT || null,
       };
     }
   } catch (e) {
@@ -297,51 +318,60 @@ async function isExpectedBooker(uid, bookerEmail, bookerName) {
 
 // ─── slot computation from RADAR events ───────────────────────────────────────
 
-function computeFreeSlots(busyEvents, tzOffsetHours = -4) {
-  const now   = new Date();
-  const slots = [];
+// DST-safe slot computation — uses Intl.DateTimeFormat to convert wall-clock biz hours to UTC
+// No hardcoded timezone offset. Reads prefs for bizHours, slotDuration, daysAhead, weekendsOff.
+function wallToUTC(localDateStr, wallHour, tz) {
+  const probe = new Date(`${localDateStr}T${String(wallHour).padStart(2,'0')}:00:00Z`);
+  const inTZ  = new Intl.DateTimeFormat('en-GB', {
+    timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false
+  }).format(probe);
+  const [h]  = inTZ.split(':').map(Number);
+  const drift = h - wallHour;
+  return new Date(probe.getTime() - drift * 3600000);
+}
 
-  // Convert RADAR events to {start, end} Date objects
-  const busy = busyEvents.map(ev => ({
-    start: new Date(ev.start_time),
-    end:   new Date(ev.end_time),
+function computeFreeSlots(busyEvents, prefs = PREFS_DEFAULT) {
+  const tz     = prefs.timezone || 'America/New_York';
+  const slotMs = (prefs.slotDuration || 30) * 60 * 1000;
+  const now    = new Date();
+  const slots  = [];
+  const busy   = busyEvents.map(ev => ({
+    start: new Date(ev.start_time || (ev.start * 1000)),
+    end:   new Date(ev.end_time   || (ev.end   * 1000)),
   }));
 
-  for (let d = 0; d < DAYS_AHEAD; d++) {
-    // Biz window in local time — offset UTC by HAM timezone
-    const dayStart = new Date(now);
-    dayStart.setUTCDate(dayStart.getUTCDate() + d);
-    dayStart.setUTCHours(BIZ_START - tzOffsetHours, 0, 0, 0);
+  for (let d = 0; d < (prefs.daysAhead || 14); d++) {
+    const ref   = new Date();
+    ref.setUTCDate(ref.getUTCDate() + d);
+    const localDate = new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit'
+    }).format(ref);
 
-    const dayEnd = new Date(dayStart);
-    dayEnd.setUTCHours(BIZ_END - tzOffsetHours, 0, 0, 0);
+    const weekday = new Intl.DateTimeFormat('en-US', { weekday: 'short', timeZone: tz }).format(ref);
+    if (prefs.weekendsOff && (weekday === 'Sat' || weekday === 'Sun')) continue;
 
-    if (dayEnd < now) continue;
+    const bizStart = wallToUTC(localDate, prefs.bizHours?.start ?? 9,  tz);
+    const bizEnd   = wallToUTC(localDate, prefs.bizHours?.end   ?? 19, tz);
+    if (bizEnd < now) continue;
 
-    // Skip weekends (Saturday=6, Sunday=0)
-    const localDay = new Date(dayStart.getTime() + tzOffsetHours * 3600000).getUTCDay();
-    if (localDay === 0 || localDay === 6) continue;
+    let cursor = bizStart < now
+      ? new Date(Math.ceil(now.getTime() / slotMs) * slotMs)
+      : new Date(bizStart);
 
-    let cursor = dayStart < now ? new Date(Math.ceil(now.getTime() / (SLOT_MIN * 60000)) * (SLOT_MIN * 60000)) : new Date(dayStart);
-
-    while (cursor < dayEnd) {
-      const slotEnd = new Date(cursor.getTime() + SLOT_MIN * 60 * 1000);
-      if (slotEnd > dayEnd) break;
-
-      const occupied = busy.some(ev => ev.start < slotEnd && ev.end > cursor);
-      if (!occupied) {
-        slots.push({
-          start:    Math.floor(cursor.getTime() / 1000),
-          end:      Math.floor(slotEnd.getTime() / 1000),
-        });
-      }
+    while (cursor.getTime() + slotMs <= bizEnd.getTime()) {
+      const slotEnd = new Date(cursor.getTime() + slotMs);
+      const blocked = busy.some(ev => ev.start < slotEnd && ev.end > cursor);
+      if (!blocked) slots.push({
+        start: Math.floor(cursor.getTime() / 1000),
+        end:   Math.floor(slotEnd.getTime() / 1000),
+      });
       cursor = slotEnd;
     }
   }
   return slots;
 }
 
-// Write a bead to ham_{uid}.abacia
+
 async function writeBead(uid, source, content, tags, importance = 7) {
   const stamp = `${MEM}B:${source}:RESULT:schedule:20260606${MEM}`;
   return abaPost(hamSchema(uid), '/rest/v1/abacia', {
@@ -435,8 +465,9 @@ async function handleBook(req, res, uid) {
         { bookerName, bookerEmail, slotStart, slotEnd, eventId, status: 'confirmed' },
         ['schedule', 'confirmed_booking', 'expected'], 8);
 
-      if (hamEmail) {
-        await imanNotify(CLAUDETTE, hamEmail,
+      const notifGrant1 = grant.notificationGrant || process.env.NYLAS_CLAUDETTE_GRANT;
+      if (hamEmail && notifGrant1) {
+        await imanNotify(notifGrant1, hamEmail,
           `1:1 Booked — ${bookerName}`,
           `<p>Hey!</p><p><strong>${bookerName}</strong> booked a 1:1 for <strong>${startDT} EST</strong>. Auto-confirmed, calendar event created.</p><p>Thanks,<br>ABA</p>`);
       }
@@ -450,8 +481,9 @@ async function handleBook(req, res, uid) {
         { bookerName, bookerEmail, slotStart, slotEnd, status: 'pending', requestedAt: new Date().toISOString() },
         ['schedule', 'pending_booking', 'cold'], 7);
 
-      if (hamEmail) {
-        await imanNotify(CLAUDETTE, hamEmail,
+      const notifGrant2 = grant.notificationGrant || process.env.NYLAS_CLAUDETTE_GRANT;
+      if (hamEmail && notifGrant2) {
+        await imanNotify(notifGrant2, hamEmail,
           `1:1 Request — ${bookerName} (needs your OK)`,
           `<p>Hey!</p><p><strong>${bookerName}</strong> (${bookerEmail}) wants a 1:1 for <strong>${startDT} EST</strong>. Not on your expected list. Reply approve or decline.</p><p>Pending ID: ${pendingId}</p><p>Thanks,<br>ABA</p>`);
       }
