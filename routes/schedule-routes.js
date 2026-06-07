@@ -259,7 +259,7 @@ async function getRadarEvents(uid) {
   try {
     // RADAR beads use source pattern RADAR.{UID}.event.*
     const r = await abaGet(hamSchema(uid),
-      `/rest/v1/abacia?source=like.RADAR.${uid.toUpperCase()}.event.*&select=content&limit=${limit}`);
+      `/rest/v1/abacia?source=like.RADAR.${uid.toUpperCase()}.event.%25&select=content&limit=${limit}`);
     if (r.status === 200 && Array.isArray(r.body)) {
       return r.body.map(row => {
         try { return JSON.parse(row.content); }
