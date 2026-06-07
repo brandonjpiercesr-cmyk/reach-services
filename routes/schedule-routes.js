@@ -498,22 +498,44 @@ async function handleBook(req, res, uid) {
 // ─── export ───────────────────────────────────────────────────────────────────
 
 async function handleScheduleRoute(req, res, pathname, method) {
-  const m = pathname.match(/^\/api\/schedule\/([A-Z0-9]+)\/(availability|book|bookings|confirm)$/i);
+  const m = pathname.match(/^\/api\/schedule\/([A-Z0-9]+)\/(availability|book|bookings|confirm|manager-auth)$/i);
   if (!m) return false;
   const uid    = m[1].toUpperCase();
   const action = m[2].toLowerCase();
-  if (action === 'availability' && method === 'GET')  { await handleAvailability(req, res, uid); return true; }
-  if (action === 'book'         && method === 'POST')  { await handleBook(req, res, uid); return true; }
-  if (action === 'bookings'     && method === 'GET')   { await handleBookings(req, res, uid); return true; }
-  if (action === 'confirm'      && method === 'POST')  { await handleConfirm(req, res, uid); return true; }
+  if (action === 'availability'  && method === 'GET')  { await handleAvailability(req, res, uid); return true; }
+  if (action === 'book'          && method === 'POST')  { await handleBook(req, res, uid); return true; }
+  if (action === 'bookings'      && method === 'GET')   { await handleBookings(req, res, uid); return true; }
+  if (action === 'confirm'       && method === 'POST')  { await handleConfirm(req, res, uid); return true; }
+  if (action === 'manager-auth'  && method === 'POST')  { await handleManagerAuth(req, res, uid); return true; }
   return false;
 }
 
 module.exports = { handleScheduleRoute };
 
+
+// Validate a manager token against ham.prefs.managerToken in ABACIA.
+// The token lives in the brain, never in code or env vars.
+async function validateManagerToken(uid, token) {
+  if (!token) return false;
+  try {
+    const r = await abaGet(hamSchema(uid),
+      '/rest/v1/abacia?source=eq.ham.prefs&select=content&limit=1');
+    if (r.status === 200 && r.body && r.body.length > 0) {
+      const prefs = JSON.parse(r.body[0].content);
+      return prefs.managerToken && prefs.managerToken === token;
+    }
+  } catch (e) {
+    console.warn('[SCHED] manager token validation error:', e.message);
+  }
+  return false;
+}
+
 // ─── /bookings — returns pending and confirmed bookings for HAM ───────────────
 async function handleBookings(req, res, uid) {
   console.log(`[SCHED] Bookings list: uid=${uid}`);
+  const token = req.headers['x-mgr-token'];
+  const authed = await validateManagerToken(uid, token);
+  if (!authed) return reply(res, 401, { error: 'Manager token required' });
   try {
     const r = await abaGet(hamSchema(uid),
       `/rest/v1/abacia?tags=cs.%7Bschedule%7D&tags=cs.%7Bbooking%7D&source=like.schedule.*&select=source,content,tags&limit=50&order=created_at.desc`);
@@ -536,7 +558,9 @@ async function handleConfirm(req, res, uid) {
   console.log(`[SCHED] Confirm: uid=${uid}`);
   try {
     const body   = await parseBody(req);
-    const { source, action } = body; // action: 'confirm' | 'decline'
+    const { source, action, token } = body;
+    const authed = await validateManagerToken(uid, token);
+    if (!authed) return reply(res, 401, { error: 'Manager token required' }); // action: 'confirm' | 'decline'
     if (!source || !['confirm','decline'].includes(action)) {
       return reply(res, 400, { error: 'Required: source, action (confirm|decline)' });
     }
@@ -574,6 +598,22 @@ async function handleConfirm(req, res, uid) {
   } catch (e) {
     console.error('[SCHED] Confirm error:', e.message);
     reply(res, 500, { error: 'Failed', detail: e.message });
+  }
+}
+
+
+// ─── /manager-auth — validates manager token against ham.prefs bead ─────────
+async function handleManagerAuth(req, res, uid) {
+  try {
+    const body  = await parseBody(req);
+    const valid = await validateManagerToken(uid, body.token);
+    if (valid) {
+      reply(res, 200, { ok: true });
+    } else {
+      reply(res, 401, { ok: false, error: 'Invalid manager token' });
+    }
+  } catch (e) {
+    reply(res, 500, { error: e.message });
   }
 }
 
