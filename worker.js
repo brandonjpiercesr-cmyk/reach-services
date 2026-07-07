@@ -2693,131 +2693,76 @@ EMAIL PROTOCOL: If you need to send an email during this call, write it in plain
 // - AIR has FCW (Fat Context Window) + 88 agents
 // - AIR decides, reach-services ONLY executes
 // ═══════════════════════════════════════════════════════════════════════════════
+// ⬡B:reach.AIR_escalate:FIX:cold_single_call_replaced_with_real_overseer_clearance:20260707⬡
+// Real, live, root-cause incident, founder-authorized full rebuild, not a patch.
+// The old body of this function was one raw, ungrounded LLM completion --
+// "you are ABA, decide call/sms/email/none" -- no deliberation, no council,
+// no Overseer, writing to an isolated legacy Supabase project no other real
+// system reads from. A prior "911" comment on this exact function already
+// documented it as the real spam source once before (20260325) and was only
+// ever patched around the edges (calls disabled) -- text kept firing on the
+// same cold decision. This breaks the law directly on record: "WONDER
+// CONTRACT AMENDMENT, 20260703 -- a REAL REACH (CARA, IMAN, WREN, VARA) MUST
+// clear Overseer first, never sent by the cycle alone." Real fix: this
+// function no longer decides or sends anything itself. It writes the real
+// event as a genuine, properly-attributed fact to the actual, current brain
+// every other real system already reads from and deliberates over -- the
+// same pipeline already hardened tonight (CHATTER exclusion, same-alert
+// dedup, HAM-boundary filtering, VIP floor). Overseer's own real cycle picks
+// it up, deliberates for real, and decides -- satisfying "must deliberate"
+// with the real, existing, proven pipeline instead of inventing new
+// scaffolding. Cheap local gate (below) still filters obvious noise before
+// even writing a fact, matching the cheap-gate-routes-to-expensive-real-
+// deliberation pattern -- not a hard filter, just avoiding empty facts.
 async function AIR_escalate(event) {
   const { type, content, source, metadata } = event;
-  // ⬡B:observability.reach_escalate:CODE:reach_worker.logEvent.air_escalate:20260402⬡
   logEvent_reach({ trigger: 'air_escalate', action: 'escalation_fired', channel: 'escalation', detail: (type || 'unknown') + ': ' + (String(content || '')).substring(0, 200) });
-  
-  console.log('');
-  console.log('═══════════════════════════════════════════════════════════');
-  console.log('[AIR_escalate] *** ROUTING TO ABABASE AIR (FCW + 88 AGENTS) ***');
-  console.log(`[AIR_escalate] Type: ${type} | Source: ${source}`);
-  console.log('═══════════════════════════════════════════════════════════');
-  
+
+  const AIBE_BRAIN_URL = process.env.AIBE_BRAIN_URL;
+  const AIBE_BRAIN_KEY = process.env.AIBE_BRAIN_KEY;
+  const FOUNDER_HAM = process.env.DEFAULT_HAM_UID || process.env.FOUNDER_HAM_UID;
+
+  if (!AIBE_BRAIN_URL || !AIBE_BRAIN_KEY || !FOUNDER_HAM) {
+    console.error('[AIR_escalate] missing real brain credentials, holding, not sending anything');
+    return { success: false, routing: 'REACH*HELD*NO_BRAIN_CREDENTIALS', decision: { action: 'held', reasoning: 'AIBE_BRAIN_URL/AIBE_BRAIN_KEY/founder ham not configured on this service' } };
+  }
+
+  // Cheap gate: don't write a fact for genuinely empty events, still no decision made here
+  if (!content || !String(content).trim()) {
+    return { success: true, routing: 'REACH*HELD*EMPTY_CONTENT', decision: { action: 'held', reasoning: 'no real content to hand Overseer' } };
+  }
+
   try {
-    // ─────────────────────────────────────────────────────────────────────────────
-    // STEP 1: Send to ABABASE AIR for intelligent decision
-    // ─────────────────────────────────────────────────────────────────────────────
-    console.log('[AIR_escalate] Forwarding to abacia-services AIR.process...');
-    
-    const airResponse = await fetch(`${ABACIA_SERVICES_URL}/api/air/process`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        type: 'escalation_decision',
-        message: `ESCALATION from ${source || 'unknown'} (${type || 'event'}):\n\n${content || 'No content'}\n\nMetadata: ${JSON.stringify(metadata || {})}\n\nYou are ABA with full FCW and 88 agents. Decide: Should we call Brandon? Text him? Email? Or just log this?\n\nRESPOND WITH ONE OF:\n- action:call - TRUE emergency only (hospital, 911, security breach)\n- action:sms - Important but not emergency\n- action:email - Can wait, informational\n- action:none - Routine, just log it\n\nIf this is a routine email (donation receipt, newsletter, fwd chain), respond: action:none`,
-        source: 'REACH_AIR_ESCALATE',
-        channel: 'escalation',
-        metadata: { original_type: type, original_source: source, ...metadata }
-      })
-    });
-    
-    const airResult = await airResponse.json();
-    console.log('[AIR_escalate] ABABASE AIR response:', JSON.stringify(airResult).substring(0, 300));
-    
-    // ─────────────────────────────────────────────────────────────────────────────
-    // STEP 2: Parse AIR's decision
-    // ─────────────────────────────────────────────────────────────────────────────
-    const responseText = (airResult.response || airResult.message || '').toLowerCase();
-    let action = 'none';
-    let reasoning = airResult.response || 'AIR processed';
-    
-    // Look for explicit action directives
-    if (responseText.includes('action:call')) {
-      action = 'call_emergency';
-    } else if (responseText.includes('action:sms')) {
-      action = 'sms_only';
-    } else if (responseText.includes('action:email')) {
-      action = 'email_only';
-    } else if (responseText.includes('action:none')) {
-      action = 'log_only';
-    } else {
-      // Fallback: look for keywords
-      // ⬡B:911:NO_AUTO_CALLS_V2:20260325⬡ SECOND escalation endpoint also disabled
-      // This was the REAL spam source — AIR response contained "call" and reach auto-dialed
-      if (responseText.includes('text') || responseText.includes('sms')) {
-        action = 'sms_only';
-      } else if (responseText.includes('email')) {
-        action = 'email_only';
-      } else {
-        action = 'log_only';
-      }
-    }
-    
-    console.log(`[AIR_escalate] ABABASE decided: ${action}`);
-    
-    // ─────────────────────────────────────────────────────────────────────────────
-    // STEP 3: Execute ONLY what AIR told us to do (DUMB EXECUTOR)
-    // ─────────────────────────────────────────────────────────────────────────────
-    const targetPhone = '+13363898116';
-    const targetEmail = 'brandon@globalmajoritygroup.com';
-    let executionResult = { action, status: 'executed' };
-    
-    if (action === 'call_emergency') {
-      // ⬡B:911:NO_AUTO_CALLS_V2:20260325⬡ Calls disabled — log only
-      console.log('[AIR_escalate] call_emergency BLOCKED — outbound calls disabled');
-      executionResult = { action: 'blocked', status: 'calls_disabled', reason: '911 rule: no auto-calls' };
-    } else if (action === 'sms_only') {
-      console.log('[AIR_escalate] ABABASE says SMS - executing...');
-      const smsText = `[ABA] ${content?.substring(0, 140) || 'Check your messages when you can.'}`;
-      const smsResult = await CARA_sendSMS(targetPhone, smsText, source);
-      executionResult = { action, status: smsResult.success ? 'sms_sent' : 'sms_failed' };
-    } else if (action === 'email_only') {
-      console.log('[AIR_escalate] ABABASE says EMAIL - logged for IMAN');
-      executionResult = { action, status: 'logged_for_email' };
-    } else {
-      console.log('[AIR_escalate] ABABASE says LOG ONLY - no notification needed');
-      executionResult = { action, status: 'logged_only' };
-    }
-    
-    // ─────────────────────────────────────────────────────────────────────────────
-    // STEP 4: Log to brain
-    // ─────────────────────────────────────────────────────────────────────────────
-    await fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
+    const r = await fetch(`${AIBE_BRAIN_URL}/rest/v1/aibe_brain`, {
       method: 'POST',
       headers: {
-        'apikey': SUPABASE_SERVICE,
-        'Authorization': `Bearer ${SUPABASE_SERVICE}`,
+        'apikey': AIBE_BRAIN_KEY,
+        'Authorization': `Bearer ${AIBE_BRAIN_KEY}`,
+        'Content-Profile': 'abacia_core',
         'Content-Type': 'application/json',
         'Prefer': 'return=minimal'
       },
       body: JSON.stringify({
-        content: `ESCALATION via ABABASE AIR: ${type} from ${source}. AIR decided: ${action}. Content: ${content?.substring(0, 200)}`,
-        memory_type: 'escalation',
-        source: `air_escalate_ababase_${Date.now()}`,
-        importance: action === 'call_emergency' ? 9 : action === 'sms_only' ? 6 : 3,
-        is_system: true,
-        tags: ['escalation', 'ababase', action, source || 'unknown']
+        ham_uid: FOUNDER_HAM,
+        agent_global: 'REACH',
+        stamp_type: 'UNRESOLVED_INBOUND',
+        acl_stamp: `\u2b21B:reach.escalate:UNRESOLVED_INBOUND:handed_to_overseer:${Date.now()}\u2b21`,
+        source: `reach.escalate.${type || 'event'}.${Date.now()}`,
+        summary: `[REACH, real event, handed to Overseer -- not decided here] ${type || 'event'} from ${source || 'unknown'}: ${String(content).slice(0, 300)}`,
+        content: JSON.stringify({ type, source, content: String(content).slice(0, 2000), metadata: metadata || {} }),
+        importance: 5
       })
     });
-    
+    const ok = r.status < 300;
+    console.log(`[AIR_escalate] handed to real Overseer brain, ok=${ok}`);
     return {
-      success: true,
-      routing: `REACH*ABABASE_AIR*${action.toUpperCase()}`,
-      decision: { action, reasoning: 'Decided by ABABASE AIR with FCW + 88 agents' },
-      execution: executionResult
+      success: ok,
+      routing: 'REACH*HANDED_TO_OVERSEER',
+      decision: { action: 'deferred_to_overseer', reasoning: 'Real deliberation now happens in the actual Overseer cycle, not here' }
     };
-    
   } catch (err) {
-    console.error('[AIR_escalate] Error routing to ABABASE:', err.message);
-    
-    // On error, log only - never call/sms without AIR approval
-    return {
-      success: false,
-      routing: 'REACH*ERROR*LOG_ONLY',
-      error: err.message,
-      decision: { action: 'log_only', reasoning: 'Error connecting to ABABASE, defaulting to log only' }
-    };
+    console.error('[AIR_escalate] error writing to real brain:', err.message);
+    return { success: false, routing: 'REACH*ERROR*HELD', error: err.message, decision: { action: 'held', reasoning: 'error reaching the real brain, holding rather than guessing' } };
   }
 }
 
