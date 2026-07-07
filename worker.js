@@ -10177,119 +10177,75 @@ We Are All ABA.`;
     console.log(`[ESCALATE] Source: ${source || 'manual'} | Force Call: ${force_call || false}`);
     console.log('═══════════════════════════════════════════════════════════');
     
+    // ⬡B:reach.api_escalate:FIX:second_cold_decision_copy_replaced:20260707⬡
+    // Real, honest discovery: this route had its OWN independent copy of the
+    // exact same disease already fixed in AIR_escalate() -- confirmed by a
+    // comment on this very block: "Brandon got 30+ spam calls because AIR
+    // kept saying 'call' in escalation responses." That incident was already
+    // real and documented, and this route still ran the same cold, single
+    // LLM call afterward, only patching which specific action word could
+    // trigger a call. Also carried a genuine bug -- SUPABASE_SERVICE is
+    // referenced bare here but never declared anywhere in this file, so any
+    // real call to this route threw before it could even log. Same real fix
+    // as AIR_escalate: no local decision, no direct send. Hand the real
+    // event to the actual current Overseer brain as a properly-attributed
+    // fact and let the already-hardened deliberation pipeline decide.
+    // force_call's explicit 911 block stays exactly as it was -- it was
+    // already correct -- and the dead code that used to sit unreachable
+    // after its return is removed rather than left as a false trail.
     try {
-      // If HAM explicitly asks for a call, JUST CALL. No analysis needed.
       if (force_call === true) {
-        // ⬡B:911:NO_AUTO_CALLS:20260325⬡ force_call disabled — calls are user-initiated only
         console.log('[ESCALATE] force_call DISABLED — calls are user-initiated only');
         return jsonResponse(res, 200, {
           success: false,
           routing: 'FORCE_CALL*DISABLED',
           decision: { action: 'blocked', reason: '911: Outbound calls disabled in escalation. User-initiated only.' }
         });
-        const targetPhone = '+13363898116';
-        const spokenMessage = message || 'Hey, this is ABA calling as requested.';
-        
-        const dialResult = await DIAL_callWithElevenLabs(targetPhone, spokenMessage, source || 'escalate');
-        
-        return jsonResponse(res, 200, {
-          success: dialResult.success,
-          routing: 'FORCE_CALL*ELEVENLABS',
-          decision: { action: 'call_now', reason: 'HAM requested directly' },
-          execution: { conversation_id: dialResult.conversation_id, status: dialResult.success ? 'initiated' : 'failed' }
-        });
       }
-      
-      // ═══════════════════════════════════════════════════════════════════════════════
-      // ROUTE TO ABABASE - Let AIR decide with FCW + 88 agents
-      // ═══════════════════════════════════════════════════════════════════════════════
-      console.log('[ESCALATE] Forwarding to abacia-services AIR.process...');
-      
-      const airResponse = await fetch(`${ABACIA_SERVICES_URL}/api/air/process`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'escalation_decision',
-          message: `ESCALATION REQUEST from ${source || 'unknown'}:\n\n${message || context || 'No content'}\n\nDecide: Should we call Brandon? Text him? Email? Or just log this? Consider urgency and context. If this is routine/informational, respond with action:none. Only recommend call for TRUE emergencies.`,
-          source: 'REACH_ESCALATE',
-          channel: 'escalation',
-          metadata: { original_urgency: urgency, target, source, type }
-        })
-      });
-      
-      const airResult = await airResponse.json();
-      console.log('[ESCALATE] AIR response:', JSON.stringify(airResult).substring(0, 300));
-      
-      // Parse AIR's decision
-      const responseText = (airResult.response || airResult.message || '').toLowerCase();
-      let action = 'none';
-      let reasoning = airResult.response || 'AIR processed';
-      
-      // AIR tells us what to do
-      // ⬡B:911:NO_AUTO_CALLS:20260325⬡ Escalation NEVER auto-dials. 
-      // Brandon got 30+ spam calls because AIR kept saying "call" in escalation responses.
-      // Calls are USER-INITIATED or explicit HAM request ONLY.
-      if (responseText.includes('text') || responseText.includes('sms')) {
-        action = 'sms';
-      } else if (responseText.includes('email')) {
-        action = 'email';
-      } else {
-        action = 'none'; // Log only, no outreach
+
+      const AIBE_BRAIN_URL = process.env.AIBE_BRAIN_URL;
+      const AIBE_BRAIN_KEY = process.env.AIBE_BRAIN_KEY;
+      const FOUNDER_HAM = process.env.DEFAULT_HAM_UID || process.env.FOUNDER_HAM_UID;
+      const realContent = message || context || '';
+
+      if (!AIBE_BRAIN_URL || !AIBE_BRAIN_KEY || !FOUNDER_HAM) {
+        console.error('[ESCALATE] missing real brain credentials, holding');
+        return jsonResponse(res, 200, { success: false, routing: 'REACH*HELD*NO_BRAIN_CREDENTIALS', decision: { action: 'held', reasoning: 'brain credentials not configured on this service' } });
       }
-      
-      console.log(`[ESCALATE] AIR decided: action=${action}`);
-      
-      // EXECUTE what AIR decided
-      let execution = { action, timestamp: new Date().toISOString() };
-      
-      if (action === 'call') {
-        const dialResult = await DIAL_callWithElevenLabs('+13363898116', message || 'ABA here with an update.', source);
-        execution.conversation_id = dialResult.conversation_id;
-        execution.status = dialResult.success ? 'call_initiated' : 'failed';
-      } else if (action === 'sms') {
-        // Send SMS via Twilio
-        const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-        const smsResult = await twilioClient.messages.create({
-          body: (message || 'ABA update').substring(0, 160),
-          from: process.env.TWILIO_PHONE_NUMBER || '+13362037510',
-          to: '+13363898116'
-        });
-        execution.sms_sid = smsResult.sid;
-        execution.status = 'sms_sent';
-      } else {
-        execution.status = 'logged_only';
+      if (!String(realContent).trim()) {
+        return jsonResponse(res, 200, { success: true, routing: 'REACH*HELD*EMPTY_CONTENT', decision: { action: 'held', reasoning: 'no real content to hand Overseer' } });
       }
-      
-      // Log to brain
-      await fetch(`${SUPABASE_URL}/rest/v1/aba_memory`, {
+
+      const r = await fetch(`${AIBE_BRAIN_URL}/rest/v1/aibe_brain`, {
         method: 'POST',
         headers: {
-          'apikey': SUPABASE_SERVICE,
-          'Authorization': `Bearer ${SUPABASE_SERVICE}`,
+          'apikey': AIBE_BRAIN_KEY,
+          'Authorization': `Bearer ${AIBE_BRAIN_KEY}`,
+          'Content-Profile': 'abacia_core',
           'Content-Type': 'application/json',
           'Prefer': 'return=minimal'
         },
         body: JSON.stringify({
-          content: `ESCALATION via AIR: action=${action}, source=${source}, message=${(message||'').substring(0,200)}`,
-          memory_type: 'escalation',
-          source: `air_escalation_${Date.now()}`,
-          importance: action === 'call' ? 8 : action === 'sms' ? 6 : 4,
-          is_system: true,
-          tags: ['escalation', 'air_routed', action, source || 'unknown']
+          ham_uid: FOUNDER_HAM,
+          agent_global: 'REACH',
+          stamp_type: 'UNRESOLVED_INBOUND',
+          acl_stamp: `⬡B:reach.api_escalate:UNRESOLVED_INBOUND:handed_to_overseer:${Date.now()}⬡`,
+          source: `reach.api_escalate.${type || 'event'}.${Date.now()}`,
+          summary: `[REACH, real event, handed to Overseer -- not decided here] ${type || 'event'} from ${source || 'unknown'}: ${String(realContent).slice(0, 300)}`,
+          content: JSON.stringify({ type, source, target, urgency, content: String(realContent).slice(0, 2000) }),
+          importance: 5
         })
       });
-      
+
       return jsonResponse(res, 200, {
-        success: true,
-        routing: 'REACH*ABABASE_AIR*EXECUTE',
-        air_used: true,
-        decision: { action, reasoning: reasoning.substring(0, 200) },
-        execution
+        success: r.status < 300,
+        routing: 'REACH*HANDED_TO_OVERSEER',
+        decision: { action: 'deferred_to_overseer', reasoning: 'Real deliberation now happens in the actual Overseer cycle, not here' }
       });
-      
+
     } catch (e) {
       console.error('[ESCALATE] Error:', e.message);
-      return jsonResponse(res, 500, { success: false, error: e.message });
+      return jsonResponse(res, 500, { success: false, error: e.message, decision: { action: 'held', reasoning: 'error reaching the real brain, holding rather than guessing' } });
     }
   }
 
