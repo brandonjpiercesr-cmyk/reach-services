@@ -65,6 +65,8 @@
 // subsequent require('node-fetch') returns the wrapped version. If anything
 // runs require('node-fetch') BEFORE this line, that caller bypasses the guard.
 require('./lib/legacyEgressGuard').install();
+// ⬡B:reach.postcall:WIRE:decision_organ_required_at_boot:20260726⬡
+const postCallReach = require('./lib/postcall.reach.decision.js');
 const { handleScheduleRoute } = require('./routes/schedule-routes');
 
 const http = require('http');
@@ -6063,24 +6065,40 @@ async function pullCallHistory(phoneNumber) {
 // After call: store lead, send follow-up SMS (30s delay), notify Brandon via SMS + store lead
 // ═══════════════════════════════════════════════════════════════════════════
 
+// ⬡B:reach.postcall:GUARD:no_cold_outbound_after_a_call:20260726⬡
+// SUPERSEDES the cold post-call automation. What changed and why:
+//
+//   BEFORE: a two-turn call fired four outbound messages, and every word of all four
+//           was built here by string concatenation. Cold code decided to reach two real
+//           humans and cold code wrote what they read.
+//   NOW:    this function DETECTS the facts of a finished call, stores the lead record
+//           (a record is not a reach), and hands the facts plus the transcript to the
+//           decision organ. It sends only the exact bytes the mind returns, only on a
+//           channel the mind was told exists. No mind reachable means no outbound, and
+//           the refusal is stamped so the silence is as auditable as the send.
+//
+// The owner's phone and email are read from env only. Founder law 20260722: a hardcoded
+// person is a real human leaked into every stranger's deploy, and a `|| 'literal'`
+// default is still a leak. No owner channel configured simply means that channel is not
+// available to the mind.
 async function postCallAutomation(session) {
   const callerName = session.touchpoints?.callerName || 'Friend';
   const callerNumber = session.callerNumber || 'unknown';
-  const turnCount = session.history.length;
-  
-  console.log('[POST-CALL] Starting automation for ' + callerName + ' (' + callerNumber + ')');
-  
-  // 1. Store as lead in brain
+  const turnCount = Array.isArray(session.history) ? session.history.length : 0;
+
+  console.log('[POST-CALL] Reading the facts of a finished call from ' + callerNumber);
+
+  // 1. Store the lead. This is a record in his own brain, not a message to a person.
   const leadData = {
-    content: `NEW LEAD: ${callerName} | Phone: ${callerNumber} | Date: ${new Date().toISOString().split('T')[0]} | Turns: ${turnCount} | Source: Phone demo call | Trust: ${session.callerIdentity?.trust || 'T2'} | Follow-up status: pending`,
+    content: `NEW LEAD: ${callerName} | Phone: ${callerNumber} | Date: ${new Date().toISOString().split('T')[0]} | Turns: ${turnCount} | Source: Phone call | Trust: ${session.callerIdentity?.trust || 'T2'} | Follow-up status: undecided`,
     memory_type: 'business',
-    categories: ['lead', 'demo_call', 'follow_up'],
+    categories: ['lead', 'call', 'follow_up'],
     importance: 8,
     is_system: true,
     source: 'reach_lead_' + session.callSid,
-    tags: ['lead', 'demo', callerNumber.replace('+',''), callerName.toLowerCase(), 'follow_up_pending']
+    tags: ['lead', 'call', callerNumber.replace('+',''), callerName.toLowerCase(), 'follow_up_undecided']
   };
-  
+
   try {
     await httpsRequest({
       hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
@@ -6097,117 +6115,148 @@ async function postCallAutomation(session) {
   } catch (e) {
     console.log('[POST-CALL] Lead store error: ' + e.message);
   }
-  
-  // 2. Send follow-up SMS + EMAIL to caller (30 second delay)
-  setTimeout(async () => {
-    const followUpMsg = 'Hey ' + callerName + '! This is ABA. It was so great talking with you. Brandon wanted me to follow up and say thanks for checking us out. You are part of something special. When ABACUS drops, you will be first to know. Talk soon! - ABA';
-    
-    // Try SMS
-    const smsResult = await sendSMSFromCall(callerNumber, followUpMsg);
-    if (smsResult.success) {
-      console.log('[POST-CALL] Follow-up SMS sent to ' + callerNumber);
-    } else {
-      console.log('[POST-CALL] Follow-up SMS failed: ' + smsResult.reason);
-    }
-    
-    // Also try email if we have one from brain
-    try {
-      const emailSearch = await httpsRequest({
-        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-        path: '/rest/v1/aba_memory?content=ilike.*' + encodeURIComponent(callerNumber.replace('+','')) + '*email*&select=content&limit=1',
-        method: 'GET',
-        headers: { 'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_KEY, 'Authorization': 'Bearer ' + (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_KEY) }
-      });
-      const emailResults = JSON.parse(emailSearch.data.toString());
-      // Extract email if found
-      if (emailResults.length > 0) {
-        const emailMatch = emailResults[0].content.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2}/);
-        if (emailMatch) {
-          const callerEmail = emailMatch[0];
-          const emailHtml = '<div style="font-family:system-ui;max-width:600px;margin:0 auto"><h2 style="color:#333">Hey ' + callerName + '!</h2><p>It was so great talking with you on the phone. Brandon wanted me to follow up and say thanks for checking us out.</p><p>You are part of something special. ABA is being built to be more than just an AI assistant - a true life partner that actually does the work for you.</p><p>When ABACUS drops, you will be the first to know.</p><p>Talk soon!</p><p style="color:#666"><strong>ABA</strong> (A Better AI)<br>Global Majority Group<br><em>aba@globalmajoritygroup.com</em></p></div>';
-          
-          const emailResult = await sendEmailFromCall(callerEmail, callerName, 'Great talking with you! - ABA', emailHtml);
-          if (emailResult.success) {
-            console.log('[POST-CALL] Follow-up email sent to ' + callerEmail);
-          }
-        }
-      }
-    } catch (e) {
-      console.log('[POST-CALL] Email lookup error: ' + e.message);
-    }
-  }, 30000);
-  
-  const topicsDiscussed = session.history
-    .filter(h => h.role === 'user')
-    .map(h => (h.content || '').substring(0, 60))
-    .join(' | ');
 
-  // 3. Send follow-up EMAIL report to Brandon
-  const emailSubject = 'ABA Call Report: ' + callerName + ' called ' + new Date().toLocaleDateString();
-  const emailBody = '<div style="font-family:system-ui;max-width:600px;margin:0 auto;padding:20px">' +
-    '<h2 style="color:#6366f1">ABA Call Report</h2>' +
-    '<p><strong>Caller:</strong> ' + callerName + '</p>' +
-    '<p><strong>Phone:</strong> ' + callerNumber + '</p>' +
-    '<p><strong>Date:</strong> ' + new Date().toLocaleString() + '</p>' +
-    '<p><strong>Duration:</strong> ' + turnCount + ' conversation turns</p>' +
-    '<p><strong>Trust Level:</strong> ' + (session.callerIdentity?.trust || 'T2') + '</p>' +
-    '<hr style="border:1px solid #e5e7eb">' +
-    '<h3>Conversation Summary</h3>' +
-    '<p>' + topicsDiscussed.replace(/\|/g, '<br>') + '</p>' +
-    '<hr style="border:1px solid #e5e7eb">' +
-    '<p style="color:#9ca3af;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v2.10.1</p>' +
-    '</div>';
-  
-  const emailResult = await sendEmailFromCall(
-    'aba@globalmajoritygroup.com',
-    // legacy founder hardcode removed - HAM-resolved at runtime
-    emailSubject,
-    emailBody
-  );
-  if (emailResult.success) {
-    console.log('[POST-CALL] Email report sent to Brandon');
-  } else {
-    console.log('[POST-CALL] Email failed: ' + emailResult.reason);
+  // 2. Detect what is actually available. Availability is a fact; using it is not.
+  const ownerPhone = process.env.OWNER_PHONE || process.env.FOUNDER_PHONE || '';
+  const ownerEmail = process.env.OWNER_EMAIL || process.env.FOUNDER_EMAIL || '';
+  const callerEmail = await lookupCallerEmail(callerNumber);
+  const callerTextAvailable = /^\+?\d{7,}$/.test(String(callerNumber).replace(/[\s().-]/g, ''));
+
+  const facts = {
+    callerName: callerName,
+    callerKnown: !!session.callerIdentity,
+    callerRelationship: session.callerIdentity?.role || 'unknown',
+    turnCount: turnCount,
+    endedNormally: true,
+    callerTextAvailable: callerTextAvailable,
+    callerEmailAvailable: !!callerEmail,
+    ownerTextAvailable: !!ownerPhone,
+    history: session.history
+  };
+
+  // 3. ONE decision point. The mind owns whether, which channel, and the words.
+  const ruling = await postCallReach.decidePostCallReach(facts, deliberatePostCall);
+
+  if (!ruling.ok) {
+    console.log('[POST-CALL] No ruling (' + ruling.reason + '). Nothing sent.');
+    await stampPostCallSilence(session, ruling.reason, facts);
+    return;
   }
-  
-  // 4. Notify Brandon via SMS
-  const brandonNotify = 'ABA CALL REPORT: ' + callerName + ' just called from ' + callerNumber + '. ' + turnCount + ' turns. They asked about: ' + topicsDiscussed.substring(0, 200);
-  
-  // SMS to Brandon
-  const notifyResult = await sendSMSFromCall('+13363898116', brandonNotify);
-  
-  // ALSO email Brandon
-  const brandonEmailHtml = '<div style="font-family:system-ui;max-width:600px;margin:0 auto"><h2>ABA Call Report</h2><p><strong>Caller:</strong> ' + callerName + '</p><p><strong>Phone:</strong> ' + callerNumber + '</p><p><strong>Duration:</strong> ' + turnCount + ' turns</p><p><strong>Topics:</strong> ' + topicsDiscussed.substring(0, 300) + '</p><p style="color:#888;font-size:12px">Sent by IMAN (Intelligent Mail Agent Nexus) via ABA REACH v2.10.1</p></div>';
-  const brandonEmail = await sendEmailFromCall('brandonjpiercesr@gmail.com', 'Brandon', 'ABA Call Report: ' + callerName + ' called', brandonEmailHtml);
-  if (brandonEmail.success) console.log('[POST-CALL] Brandon email report sent');
-  if (notifyResult.success) {
-    console.log('[POST-CALL] Brandon notified via SMS');
-  } else {
-    console.log('[POST-CALL] Brandon SMS failed, storing in brain instead');
-    // Fallback: store notification in brain so Brandon sees it in 1A
-    try {
-      await httpsRequest({
-        hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
-        path: '/rest/v1/aba_memory',
-        method: 'POST',
-        headers: {
-          'apikey': SUPABASE_KEY,
-          'Authorization': 'Bearer ' + SUPABASE_KEY,
-          'Content-Type': 'application/json',
-          'Prefer': 'return=minimal'
-        }
-      }, JSON.stringify({
-        content: brandonNotify,
-        memory_type: 'notification',
-        categories: ['call_report', 'brandon_alert'],
-        importance: 9,
-        is_system: true,
-        source: 'reach_notify_' + session.callSid,
-        tags: ['notification', 'call_report', 'brandon', 'unread']
-      }));
-      console.log('[POST-CALL] Notification stored in brain (SMS fallback)');
-    } catch (e) {}
+  if (!ruling.reach) {
+    console.log('[POST-CALL] Ruling: stay quiet. ' + ruling.reason);
+    await stampPostCallSilence(session, 'mind_chose_silence:' + ruling.reason, facts);
+    return;
   }
+
+  // 4. File the answer. Exact bytes only; this code writes none of them.
+  if (ruling.callerText) {
+    const smsResult = await sendSMSFromCall(callerNumber, ruling.callerText);
+    console.log('[POST-CALL] Caller SMS ' + (smsResult.success ? 'sent' : 'failed: ' + smsResult.reason));
+  }
+  if (ruling.callerEmailSubject && ruling.callerEmailBody && callerEmail) {
+    const emailResult = await sendEmailFromCall(callerEmail, callerName,
+      ruling.callerEmailSubject, htmlFromPlainText(ruling.callerEmailBody));
+    console.log('[POST-CALL] Caller email ' + (emailResult.success ? 'sent' : 'failed: ' + emailResult.reason));
+  }
+  if (ruling.ownerNotice && ownerPhone) {
+    const notifyResult = await sendSMSFromCall(ownerPhone, ruling.ownerNotice);
+    if (notifyResult.success) {
+      console.log('[POST-CALL] Owner notified via SMS');
+    } else {
+      console.log('[POST-CALL] Owner SMS failed, storing the same exact bytes in the brain');
+      try {
+        await httpsRequest({
+          hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+          path: '/rest/v1/aba_memory',
+          method: 'POST',
+          headers: {
+            'apikey': SUPABASE_KEY,
+            'Authorization': 'Bearer ' + SUPABASE_KEY,
+            'Content-Type': 'application/json',
+            'Prefer': 'return=minimal'
+          }
+        }, JSON.stringify({
+          content: ruling.ownerNotice,
+          memory_type: 'notification',
+          categories: ['call_report', 'owner_alert'],
+          importance: 9,
+          is_system: true,
+          source: 'reach_notify_' + session.callSid,
+          tags: ['notification', 'call_report', 'unread']
+        }));
+        console.log('[POST-CALL] Notification stored in brain (SMS fallback)');
+      } catch (e) {}
+    }
+  }
+  if (ruling.ownerNotice && ownerEmail) {
+    await sendEmailFromCall(ownerEmail, 'Owner', 'Call report: ' + callerName,
+      htmlFromPlainText(ruling.ownerNotice));
+  }
+}
+
+// The mind's door for post-call rulings. One provider entry, already the one this
+// service uses for background judgment. Returning null is an unavailable mind, which
+// the organ turns into silence rather than a cold default.
+async function deliberatePostCall(systemPrompt, userMessage) {
+  if (!process.env.GROQ_API_KEY) return null;
+  return callGroqPrimary(systemPrompt, userMessage, 900);
+}
+
+// A silence is a decision and gets a receipt, so "why did she stay quiet" is answerable.
+async function stampPostCallSilence(session, reason, facts) {
+  try {
+    await httpsRequest({
+      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+      path: '/rest/v1/aba_memory',
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': 'Bearer ' + SUPABASE_KEY,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal'
+      }
+    }, JSON.stringify({
+      content: 'POST-CALL SILENCE: no outbound after call ' + (session.callSid || 'unknown') +
+        '. Reason: ' + reason + '. Turns: ' + (facts && facts.turnCount),
+      memory_type: 'notification',
+      categories: ['call_report', 'post_call_silence'],
+      importance: 4,
+      is_system: true,
+      source: 'reach_postcall_silence_' + (session.callSid || Date.now()),
+      tags: ['post_call', 'silence', 'no_outbound']
+    }));
+  } catch (e) {}
+}
+
+// A detector: is there an email on record for this number? It reads, it never decides.
+async function lookupCallerEmail(callerNumber) {
+  try {
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_KEY;
+    const search = await httpsRequest({
+      hostname: 'htlxjkbrstpwwtzsbyvb.supabase.co',
+      path: '/rest/v1/aba_memory?content=ilike.*' + encodeURIComponent(String(callerNumber).replace('+','')) + '*email*&select=content&limit=1',
+      method: 'GET',
+      headers: { 'apikey': key, 'Authorization': 'Bearer ' + key }
+    });
+    const results = JSON.parse(search.data.toString());
+    if (!results.length) return null;
+    const match = results[0].content.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+    return match ? match[0] : null;
+  } catch (e) {
+    console.log('[POST-CALL] Email lookup error: ' + e.message);
+    return null;
+  }
+}
+
+// Presentation only. It escapes and wraps the mind's own words; it adds no sentence.
+function htmlFromPlainText(text) {
+  const escaped = String(text)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const paragraphs = escaped.split(/\n{2,}/).map(function (block) {
+    return '<p>' + block.replace(/\n/g, '<br>') + '</p>';
+  }).join('');
+  return '<div style="font-family:system-ui;max-width:600px;margin:0 auto;padding:20px">' +
+    paragraphs + '</div>';
 }
 
 
@@ -7229,27 +7278,34 @@ async function processUtterance(session, text) {
 }
 
 // ⬡B:AIR:REACH.VOICE.DEMO_SMS:CODE:voice.demo.sms_trigger:AIR→CARA→TWILIO→USER:T9:v1.6.0:20260213:d1s2m⬡
-async function trySendDemoSMS(session) {
-  const callerName = session.touchpoints.callerName || 'friend';
-  const smsMessage = "Hey " + callerName + "! This is ABA. Brandon wanted me to reach out and say thanks for checking us out. You are now part of something special. Welcome to the future of AI. - ABA (A Better AI)";
-  
-  // Try SMS to caller
-  const smsResult = await sendSMSFromCall(session.callerNumber, smsMessage);
-  
+// ⬡B:reach.demo_text:GUARD:the_bytes_are_the_minds_not_this_files:20260726⬡
+// SUPERSEDES a hardcoded sentence and a hardcoded owner phone number. This function no
+// longer writes a word and no longer knows who the owner is: it receives the exact bytes
+// the consent ruling authored and one env-resolved owner number for the failure notice.
+// Founder law 20260722: identity is env-only, never a literal, not even as a fallback.
+async function trySendDemoSMS(session, exactMessage) {
+  const message = String(exactMessage || '').trim();
+  if (!message) {
+    console.log('[DEMO-SMS] No authored bytes. Nothing sent.');
+    return false;
+  }
+
+  const smsResult = await sendSMSFromCall(session.callerNumber, message);
   if (smsResult.success) {
     console.log('[DEMO-SMS] Sent to caller: ' + session.callerNumber);
     session.touchpoints.SMS_SENT = true;
-  } else {
-    console.log('[DEMO-SMS] SMS failed (' + smsResult.reason + '), sending to Brandon as backup');
-    // Trial Twilio can only text verified numbers - send to Brandon instead
-    const backupResult = await sendSMSFromCall('+13363898116', 'ABA DEMO ALERT: ' + callerName + ' just called from ' + session.callerNumber + '. SMS to them failed (trial account). They had a great demo call!');
-    if (backupResult.success) {
-      session.touchpoints.SMS_SENT = true;
-      console.log('[DEMO-SMS] Sent backup to Brandon');
-    }
+    return true;
   }
-  
-  return session.touchpoints.SMS_SENT;
+
+  // The send failed. That is a fact about this service, so the owner hears the fact,
+  // not a substitute message pretending the caller was reached.
+  console.log('[DEMO-SMS] SMS failed (' + smsResult.reason + ')');
+  const ownerPhone = process.env.OWNER_PHONE || process.env.FOUNDER_PHONE || '';
+  if (ownerPhone) {
+    await sendSMSFromCall(ownerPhone, 'REACH: a text to ' + session.callerNumber +
+      ' could not be delivered (' + smsResult.reason + ').');
+  }
+  return false;
 }
 
 // ⬡B:AIR:REACH.VOICE.DEMO_ADVANCE:CODE:voice.demo.touchpoint_check:AIR→VARA→USER:T9:v1.6.0:20260213:d1a2v⬡
@@ -7315,35 +7371,37 @@ async function advanceDemoTouchpoints(session, userSaid, abaResponse) {
   }
   
   // If they responded to SMS offer (yes, no, or anything)
+  // ⬡B:reach.demo_text:GUARD:consent_is_judged_not_keyword_matched:20260726⬡
+  // SUPERSEDES a substring test. A list of agreement words was standing in for whether
+  // a human agreed to receive a message, and the branch it fed sent the text even when
+  // the answer was no. Consent is a judgment about what a person meant, so the mind reads the
+  // exact reply and rules. No ruling, or a ruling of no, means nothing is sent, and the
+  // caller is told the truth about that rather than a line covering for a send.
   if (state.SMS_OFFER && !state.SMS_SENT && !state.smsTriggered) {
     state.smsTriggered = true;
-    const saidYes = lower.includes('yes') || lower.includes('sure') || lower.includes('yeah') || lower.includes('ok') || lower.includes('go ahead') || lower.includes('do it') || lower.includes('send');
-    const saidNo = lower.includes('no') || lower.includes('nah') || lower.includes('not');
-    
     setTimeout(async () => {
-      if (!session.isPlaying) {
-        const sent = await trySendDemoSMS(session);
-        if (saidYes || !saidNo) {
-          if (sent) {
-            await VARA_speak(session, "Done! Check your phone. I just sent you a message. Pretty cool, right?");
-          } else {
-            await VARA_speak(session, "I tried to send it, but Brandon's Twilio account is still on trial mode, so I sent Brandon a notification about your call instead. When the full version launches, texting will work seamlessly.");
-          }
-        } else {
-          // They said no - send it anyway!
-          if (sent) {
-            await VARA_speak(session, "Well, Brandon told me to send it anyway, so check your phone! He wanted to show off a little bit.");
-          } else {
-            await VARA_speak(session, "Well, Brandon told me to send it anyway. His Twilio is still on trial so I pinged him directly instead, but trust me, when this goes live, I will be texting you before you even know you need it.");
-          }
-        }
-        console.log('[DEMO] TOUCHPOINT HIT: SMS_SENT');
-        session.history.push({ role: 'assistant', content: '[ABA sent SMS demo]' });
+      if (session.isPlaying) return;
+      const consent = await postCallReach.decideTextConsent(
+        userSaid, session.history, deliberatePostCall);
+      if (!consent.ok || !consent.consented) {
+        console.log('[DEMO] TEXT CONSENT WITHHELD: ' + consent.reason);
+        await VARA_speak(session, "No problem, I will leave your phone alone. Anything else you want to get into?");
+        session.history.push({ role: 'assistant', content: '[ABA did not send a text: no consent]' });
+        return;
       }
+      const sent = await trySendDemoSMS(session, consent.text);
+      if (sent) {
+        await VARA_speak(session, "Done. Check your phone, I just sent it over.");
+      } else {
+        await VARA_speak(session, "I tried to send it and the message did not go through on my end. I am not going to pretend it did. I will get that sorted.");
+      }
+      state.SMS_SENT = true;
+      console.log('[DEMO] TOUCHPOINT HIT: SMS_SENT');
+      session.history.push({ role: 'assistant', content: '[ABA sent SMS after consent]' });
     }, 1000);
     return;
   }
-  
+
   // RETURNING CALLER steering
   if (state.type === 'returning') {
     if (!state.RECAP && state.turnCount >= 1) {
@@ -11464,7 +11522,11 @@ wss.on('connection', (ws) => {
         await storeCallSummary(session);
         
         // v1.8.0 - Post-call automation: follow-up SMS + Brandon notification
-        if (session.touchpoints?.type !== 'owner' && session.history.length >= 2) {
+        // ⬡B:reach.postcall:GUARD:turn_count_is_a_fact_not_a_trigger:20260726⬡
+        // A turn counter never decides to reach a human. The call ending is the
+        // detection; postCallAutomation hands the facts to the mind, which owns
+        // whether anything is sent at all.
+        if (session.touchpoints?.type !== 'owner') {
           postCallAutomation(session);
         }
         
