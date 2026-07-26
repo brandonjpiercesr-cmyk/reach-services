@@ -7853,6 +7853,54 @@ const httpServer = http.createServer(async (req, res) => {
   }
 
   // ═══════════════════════════════════════════════════════════════════════
+  // ⬡B:reach.omi_read_proxy:FIX:auth_and_manifest_restored_as_proxy:20260726⬡
+  // The 20260523 proxy refactor deleted the /api/omi/auth and /api/omi/manifest
+  // HANDLERS along with the OMI processing it was right to move out. It moved the
+  // webhook and dropped the other two on the floor. validate-critical-routes has
+  // been failing on main ever since, saying exactly what its own deleted comment
+  // said: without these, the OMI app disappears and the webhooks die with it.
+  //
+  // Restored the way the webhook was restored, not the way it was before: REACH
+  // holds no OMI logic. It forwards and returns what ababase says. The manifest
+  // and the auth answer belong to ababase and stay there, one source.
+  //
+  // If ababase does not answer, this returns ok:false. It never invents
+  // authenticated:true, because a hollow yes here tells OMI a link is live when
+  // no mind is behind it, which is the same lie as a faked connection.
+  // ═══════════════════════════════════════════════════════════════════════
+  if ((path === '/api/omi/auth' || path === '/api/omi/manifest' || path === '/api/omi/manifest.json') && method === 'GET') {
+    const upstreamPath = path === '/api/omi/auth' ? '/api/omi/auth' : '/api/omi/manifest';
+    const qs = req.url && req.url.includes('?') ? req.url.split('?').slice(1).join('?') : '';
+    const targetUrl = ABACIA_SERVICES_URL + upstreamPath + (qs ? '?' + qs : '');
+    try {
+      const ctrl = new AbortController();
+      const bail = setTimeout(() => ctrl.abort(), 4000);
+      const up = await fetch(targetUrl, {
+        method: 'GET',
+        headers: { 'Accept': 'application/json', 'x-omi-forwarded-by': 'reach-proxy' },
+        signal: ctrl.signal
+      });
+      clearTimeout(bail);
+      const text = await up.text();
+      console.log('[OMI-PROXY] ' + upstreamPath + ' status=' + up.status + ' url=' + targetUrl);
+      res.writeHead(up.status, {
+        'Content-Type': up.headers.get('content-type') || 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      });
+      return res.end(text);
+    } catch (e) {
+      console.error('[OMI-PROXY] ' + upstreamPath + ' failed:', e.message);
+      return jsonResponse(res, 502, {
+        ok: false,
+        reason: 'omi_upstream_unreachable',
+        route: upstreamPath,
+        upstream: targetUrl,
+        detail: e.message
+      });
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
   // ⬡B:reach.omi_webhook_proxy:CODE:transparent_proxy_to_ababase:20260523⬡
   // REACH = ears/mouth only (F9 doctrine). OMI admin panel stays unchanged.
   // Webhooks arrive here, get proxied immediately to ababase for HAM resolution,
@@ -10915,7 +10963,7 @@ We Are All ABA.`;
 
   jsonResponse(res, 404, { 
     error: 'Route not found: ' + method + ' ' + path,
-    available: ['/api/escalate', '/api/escalate/twiml', '/api/escalate/confirm', '/api/call/dial', '/api/call/twiml', '/api/call/status', '/api/call/record', '/api/air/trigger/email', '/api/air/trigger/omi', '/api/air/trigger/calendar', '/api/air/trigger/job', '/api/air/trigger/system', '/api/air/think-tank', '/api/air/caca', '/api/air/erica', '/api/air/grit', '/api/github/push', '/api/sage/search', '/api/sage/index', '/api/iman/draft', '/api/iman/send', '/api/iman/drafts', '/api/devices/register', '/api/devices', '/api/pulse/status', '/api/pulse/trigger', '/api/router', '/api/models/claude', '/api/voice/deepgram-token', '/api/voice/tts', '/api/voice/tts-stream', '/api/omi/manifest', '/api/omi/webhook', '/api/sms/send', '/api/brain/search', '/api/brain/store', '/ws:command-center'],
+    available: ['/api/escalate', '/api/escalate/twiml', '/api/escalate/confirm', '/api/call/dial', '/api/call/twiml', '/api/call/status', '/api/call/record', '/api/air/trigger/email', '/api/air/trigger/omi', '/api/air/trigger/calendar', '/api/air/trigger/job', '/api/air/trigger/system', '/api/air/think-tank', '/api/air/caca', '/api/air/erica', '/api/air/grit', '/api/github/push', '/api/sage/search', '/api/sage/index', '/api/iman/draft', '/api/iman/send', '/api/iman/drafts', '/api/devices/register', '/api/devices', '/api/pulse/status', '/api/pulse/trigger', '/api/router', '/api/models/claude', '/api/voice/deepgram-token', '/api/voice/tts', '/api/voice/tts-stream', '/api/omi/auth', '/api/omi/manifest', '/api/omi/webhook', '/api/sms/send', '/api/brain/search', '/api/brain/store', '/ws:command-center'],
     hint: 'We are all ABA'
   });
 });
