@@ -7980,6 +7980,25 @@ const httpServer = http.createServer(async (req, res) => {
 
 if (path === '/api/sms/send' && method === 'POST') {
     try {
+      // ⬡B:reach.api.sms_send:911:an_anonymous_twilio_door_is_cold_code_reaching_a_human:20260727⬡
+      // GRANDDADDY 911: only A'NU speaks to a human, through her cycle, via a reach wonder.
+      // Cold code never decides to reach a human. This door took { to, message } from ANY
+      // request body and sent a real text from the estate's Twilio number, to any number on
+      // earth, for anyone who knew the URL. No token, no session, no council, no cycle, no
+      // kill switch. It is the exact class PR #6 exists to close, one file over from where it
+      // closed the last one, and the repo's one egress guard wraps global.fetch while this
+      // path uses the raw https helper, so containment could not see it at all.
+      // Closed default-shut: without REACH_INTERNAL_KEY set it refuses every caller, so the
+      // hole is closed today. The lawful outbound text path is anew's reach wonder, where a
+      // send is bound to a nine row council receipt. A shared key is the floor, not the law:
+      // it stops an anonymous stranger, it does not make cold code a legal decider, and this
+      // door must stay retired in favor of the cycle rather than grow back into a shortcut.
+      const REACH_INTERNAL_KEY = process.env.REACH_INTERNAL_KEY || '';
+      const presented = String(req.headers['x-reach-internal-key'] || '');
+      if (!REACH_INTERNAL_KEY || presented !== REACH_INTERNAL_KEY) {
+        return jsonResponse(res, 401, { ok: false, reason: 'sms_send_authorization_required',
+          note: 'anonymous outbound text is refused. The lawful path is A’NU’s reach cycle, not this raw door.' });
+      }
       const body = await parseBody(req);
       const { to, message } = body;
       if (!to || !message) return jsonResponse(res, 400, { error: 'to and message required' });
